@@ -36,6 +36,13 @@ def patch_weaviate_manager():
                 # Se não especificado, assume True para aplicar ETL universalmente
                 enable_etl = True
             
+            # Importa Filter antes (necessário para recuperação)
+            try:
+                from weaviate.classes.query import Filter
+            except ImportError:
+                # Fallback para v3 - usa estrutura de filtro v3
+                Filter = None
+            
             # Chama método original (retorna doc_uuid)
             doc_uuid = None
             try:
@@ -44,18 +51,19 @@ def patch_weaviate_manager():
                 # Se falhar, tenta recuperar doc_uuid pela busca do documento
                 # (alguns chunks podem ter sido inseridos mesmo com erro)
                 msg.warn(f"Import teve erro, mas tentando executar ETL: {str(import_error)}")
-                try:
-                    # Tenta buscar documento pelo nome para recuperar doc_uuid
-                    document_collection = client.collections.get(self.document_collection_name)
-                    results = await document_collection.query.fetch_objects(
-                        filters=Filter.by_property("title").equal(document.title),
-                        limit=1
-                    )
-                    if results.objects:
-                        doc_uuid = str(results.objects[0].uuid)
-                        msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
-                except Exception as recovery_error:
-                    msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
+                if Filter is not None:
+                    try:
+                        # Tenta buscar documento pelo nome para recuperar doc_uuid
+                        document_collection = client.collections.get(self.document_collection_name)
+                        results = await document_collection.query.fetch_objects(
+                            filters=Filter.by_property("title").equal(document.title),
+                            limit=1
+                        )
+                        if results.objects:
+                            doc_uuid = str(results.objects[0].uuid)
+                            msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
+                    except Exception as recovery_error:
+                        msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
                 # Re-raise para não mascarar o erro original
                 raise import_error
             
@@ -63,11 +71,6 @@ def patch_weaviate_manager():
             if enable_etl and doc_uuid:
                 try:
                     import asyncio
-                    try:
-                        from weaviate.classes.query import Filter
-                    except ImportError:
-                        # Fallback para v3
-                        Filter = None
                     
                     embedder_collection_name = self.embedding_table.get(embedder)
                     if embedder_collection_name:
