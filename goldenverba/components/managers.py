@@ -281,10 +281,11 @@ class WeaviateManager:
                 elif port_int == 80:
                     use_https = False
                 elif ".railway.app" in actual_host.lower() and port_int == 8080:
-                    # Railway porta 8080: tenta HTTP primeiro (padrão Railway)
-                    # Se falhar, código vai tentar HTTPS como fallback
-                    use_https = False
-                    msg.info("Railway porta 8080 detectado - tentando HTTP primeiro")
+                    # Railway porta 8080 é interna - acesso externo é via HTTPS porta 443
+                    # Railway mostra porta 8080 na config, mas expõe via HTTPS na porta padrão
+                    use_https = True
+                    port_int = 443  # Railway expõe serviços via HTTPS na porta 443
+                    msg.info("Railway porta 8080 detectado - usando HTTPS porta 443 (porta 8080 é interna)")
                 elif ".railway.app" in actual_host.lower():
                     # Railway outras portas: assume HTTPS se não especificado
                     use_https = True
