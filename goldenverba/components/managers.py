@@ -302,9 +302,6 @@ class WeaviateManager:
 
         msg.info(f"URL Weaviate: {url} (port: {port_int}, HTTPS: {use_https})")
         
-        # Para Railway porta 8080, tenta HTTP primeiro, depois HTTPS como fallback
-        is_railway_8080 = ".railway.app" in actual_host.lower() and port_int == 8080
-        
         # Para HTTPS externo, usa conexão direta com URL completa
         if use_https:
             msg.info("Usando conexao HTTPS externa")
