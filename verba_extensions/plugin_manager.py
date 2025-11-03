@@ -23,14 +23,38 @@ class PluginManager:
     def load_plugin(self, plugin_path: str):
         """Carrega um plugin do sistema"""
         try:
-            # Adiciona o diretório do plugin ao path
-            plugin_dir = Path(plugin_path).parent
-            if str(plugin_dir) not in sys.path:
-                sys.path.insert(0, str(plugin_dir))
+            plugin_path_obj = Path(plugin_path)
+            plugin_dir = plugin_path_obj.parent
+            module_name = plugin_path_obj.stem
             
-            # Importa o plugin
-            module_name = Path(plugin_path).stem
-            plugin_module = importlib.import_module(module_name)
+            # Adiciona o diretório pai (verba_extensions/plugins) ao path
+            plugins_dir = plugin_dir
+            if str(plugins_dir) not in sys.path:
+                sys.path.insert(0, str(plugins_dir))
+            
+            # Para importar como módulo, precisa do caminho relativo a partir de verba_extensions
+            # Ex: verba_extensions/plugins/a2_reader.py -> verba_extensions.plugins.a2_reader
+            try:
+                # Tenta importar usando caminho completo
+                import_path = plugin_path_obj
+                # Se está em verba_extensions/plugins, usa import relativo
+                if 'verba_extensions' in str(plugin_path_obj):
+                    parts = plugin_path_obj.parts
+                    idx = parts.index('verba_extensions')
+                    relative_parts = parts[idx:]
+                    module_full_name = '.'.join(relative_parts).replace('.py', '')
+                    plugin_module = importlib.import_module(module_full_name)
+                else:
+                    # Fallback: import direto do nome
+                    plugin_module = importlib.import_module(module_name)
+            except ImportError:
+                # Último recurso: importa direto do arquivo
+                spec = importlib.util.spec_from_file_location(module_name, plugin_path)
+                if spec and spec.loader:
+                    plugin_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(plugin_module)
+                else:
+                    raise
             
             # Registra o plugin
             if hasattr(plugin_module, 'register'):
@@ -47,6 +71,8 @@ class PluginManager:
                 return False
         except Exception as e:
             msg.fail(f"Erro ao carregar plugin {plugin_path}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def load_plugins_from_dir(self, plugins_dir: str = "verba_extensions/plugins"):

@@ -41,6 +41,19 @@ from goldenverba.server.types import (
 
 load_dotenv()
 
+# Carrega extensões ANTES de criar managers
+# Isso garante que plugins apareçam na lista de componentes
+try:
+    import verba_extensions.startup
+    from verba_extensions.startup import initialize_extensions
+    plugin_manager, version_checker = initialize_extensions()
+    if plugin_manager:
+        msg.good(f"Extensoes carregadas: {len(plugin_manager.list_plugins())} plugins")
+except ImportError:
+    msg.info("Extensoes nao disponiveis (continuando sem extensoes)")
+except Exception as e:
+    msg.warn(f"Erro ao carregar extensoes: {str(e)} (continuando sem extensoes)")
+
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION")
 tag = os.environ.get("VERBA_GOOGLE_TAG", "")
