@@ -1,6 +1,6 @@
+# Dockerfile para desenvolvimento (com volumes mount)
 FROM python:3.11-slim
 
-# Instala dependências do sistema
 RUN apt-get update && apt-get install -y \
     build-essential \
     wget \
@@ -9,24 +9,19 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /Verba
 
-# Copia arquivos necessários
-COPY . /Verba
+# Instala apenas dependências (código vem via volume)
+COPY requirements-extensions.txt setup.py ./
 
-# Instala dependências do Verba base
+# Instala Verba base
 RUN pip install --no-cache-dir '.'
 
 # Instala dependências das extensões
 RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 
-# Baixa modelos do spaCy (para ETL A2, se necessário)
-# Comentado por padrão - descomente se for usar ETL
-# RUN python -m spacy download pt_core_news_sm en_core_web_sm || true
-
-# Baixa dados do NLTK (para chunker)
+# Baixa dados do NLTK
 RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 
-# Expõe porta
 EXPOSE 8000
 
-# Comando de inicialização
 CMD ["verba", "start", "--port", "8000", "--host", "0.0.0.0"]
+
