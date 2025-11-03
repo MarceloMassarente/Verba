@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from goldenverba.components.interfaces import Generator
 from goldenverba.components.types import InputConfig
-from goldenverba.components.util import get_environment
+from goldenverba.components.util import get_environment, get_token
 from typing import List
 from wasabi import msg
 import aiohttp
@@ -23,7 +23,7 @@ class AnthropicGenerator(Generator):
         self.context_window = 10000
         self.url = "https://api.anthropic.com/v1/messages"
 
-        api_key = get_environment({}, "API Key", "ANTHROPIC_API_KEY", None)
+        api_key = get_token("ANTHROPIC_API_KEY")
         models = self.get_models(api_key)
         default_model = os.getenv("ANTHROPIC_MODEL", models[0] if models else "claude-3-5-sonnet-20240620")
 
@@ -34,7 +34,7 @@ class AnthropicGenerator(Generator):
             values=models,
         )
 
-        if os.getenv("ANTHROPIC_API_KEY") is None:
+        if get_token("ANTHROPIC_API_KEY") is None:
             self.config["API Key"] = InputConfig(
                 type="password",
                 value="",
