@@ -215,6 +215,7 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 | `goldenverba/server/api.py` | ~72-85 | **Modificação** | CORS middleware para Railway |
 | `goldenverba/components/managers.py` | ~105 | **Adição** | SentenceTransformersEmbedder na lista |
 | `goldenverba/components/managers.py` | ~240-450 | **Modificação Completa** | Método `connect_to_custom()` |
+| `goldenverba/components/generation/OpenAIGenerator.py` | ~127-146 | **Modificação** | Método `get_models()` - Filtro melhorado para incluir todos modelos de chat |
 
 ---
 

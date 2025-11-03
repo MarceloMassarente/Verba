@@ -125,22 +125,74 @@ class OpenAIGenerator(Generator):
         return messages
 
     def get_models(self, token: str, url: str) -> List[str]:
-        """Fetch available embedding models from OpenAI API."""
+        """Fetch available chat models from OpenAI API."""
         default_models = ["gpt-4o", "gpt-3.5-turbo"]
         try:
             if token is None:
+                msg.info("No OpenAI API key provided, using default models")
                 return default_models
 
             import requests
 
             headers = {"Authorization": f"Bearer {token}"}
-            response = requests.get(f"{url}/models", headers=headers)
+            response = requests.get(f"{url}/models", headers=headers, timeout=10)
             response.raise_for_status()
-            return [
-                model["id"]
-                for model in response.json()["data"]
-                if not "embedding" in model["id"]
-            ]
+            
+            all_models = response.json()["data"]
+            
+            # Filtrar modelos que suportam chat completions
+            # Excluir: embeddings, whisper (audio), dall-e (imagem), tts (text-to-speech)
+            chat_models = []
+            excluded_types = ["embedding", "whisper", "dall-e", "tts", "moderation", "text-search"]
+            
+            for model in all_models:
+                model_id = model.get("id", "").lower()
+                
+                # Verificar se modelo tem permissão para chat/completions
+                permissions = model.get("permission", [])
+                supports_chat = any(
+                    perm.get("allow_create_engine", False) or 
+                    perm.get("allow_sampling", False)
+                    for perm in permissions if isinstance(perm, dict)
+                )
+                
+                # Incluir se:
+                # 1. É modelo conhecido de chat (gpt-*, o1-*, etc) OU
+                # 2. Tem permissão de chat E não é de tipo excluído
+                is_known_chat = (
+                    model_id.startswith("gpt-") or 
+                    model_id.startswith("o1-") or
+                    model_id.startswith("chatgpt-") or
+                    "chat" in model_id
+                )
+                
+                is_excluded_type = any(excluded in model_id for excluded in excluded_types)
+                
+                if (is_known_chat or (supports_chat and not is_excluded_type)):
+                    chat_models.append(model["id"])
+            
+            # Ordenar: modelos mais recentes primeiro
+            def sort_key(model_id):
+                if model_id.startswith("gpt-4o"):
+                    return (0, model_id)
+                elif model_id.startswith("o1"):
+                    return (1, model_id)
+                elif model_id.startswith("gpt-4"):
+                    return (2, model_id)
+                elif model_id.startswith("gpt-3.5"):
+                    return (3, model_id)
+                else:
+                    return (4, model_id)
+            
+            chat_models.sort(key=sort_key)
+            
+            if chat_models:
+                msg.good(f"Fetched {len(chat_models)} OpenAI chat models from API")
+                return chat_models
+            else:
+                msg.warn("No chat models found, using default models")
+                return default_models
+                
         except Exception as e:
-            msg.info(f"Failed to fetch OpenAI models: {str(e)}")
+            msg.warn(f"Failed to fetch OpenAI models: {str(e)}")
             return default_models
