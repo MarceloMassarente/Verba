@@ -1,0 +1,16 @@
+# Dependências para extensões do Verba
+# Para Readers A2 (URL fetching)
+httpx>=0.27.0
+trafilatura>=1.12.0
+
+# Para ETL A2 (opcional - só se usar ETL)
+spacy>=3.7.0
+
+# Para chunker do ingestor (se precisar usar diretamente)
+nltk>=3.9.0
+
+# Já incluídas no Verba base:
+# - weaviate-client
+# - fastapi
+# - outros
+
