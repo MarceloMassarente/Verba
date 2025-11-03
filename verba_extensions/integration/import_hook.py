@@ -26,7 +26,15 @@ def patch_weaviate_manager():
         ):
             """Importa documento e captura passage_uuids para ETL"""
             # Verifica se ETL está habilitado ANTES de importar
+            # Padrão: True (ETL sempre ativo por padrão, a menos que explicitamente desabilitado)
             enable_etl = document.meta.get("enable_etl", True) if hasattr(document, 'meta') and document.meta else True
+            
+            # Se não há meta ou não tem enable_etl, assume True (ETL universal)
+            if not hasattr(document, 'meta') or not document.meta:
+                enable_etl = True
+            elif "enable_etl" not in document.meta:
+                # Se não especificado, assume True para aplicar ETL universalmente
+                enable_etl = True
             
             # Chama método original (retorna doc_uuid)
             doc_uuid = await original_import(self, client, document, embedder)
