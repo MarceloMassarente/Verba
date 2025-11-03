@@ -280,6 +280,12 @@ class WeaviateManager:
                     use_https = True
                 elif port_int == 80:
                     use_https = False
+                elif ".railway.internal" in actual_host.lower():
+                    # Rede interna Railway - usa HTTP direto na porta 8080
+                    use_https = False
+                    if port_int == 443 or not port_int:
+                        port_int = 8080  # Porta padrão interna Railway
+                    msg.info("Rede interna Railway detectada - usando HTTP porta 8080")
                 elif ".railway.app" in actual_host.lower() and port_int == 8080:
                     # Railway porta 8080 é interna - acesso externo é via HTTPS porta 443
                     # Railway mostra porta 8080 na config, mas expõe via HTTPS na porta padrão
