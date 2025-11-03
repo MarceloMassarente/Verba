@@ -101,8 +101,31 @@ async def check_same_origin(request: Request, call_next):
     # Check if origin is allowed
     origin_allowed = False
     
-    # Check exact match
-    if origin == base_url_str:
+    # Normalize URLs for comparison (remove scheme, trailing slash)
+    def normalize_url(url):
+        """Normalize URL for comparison (remove scheme, port, trailing slash)"""
+        if not url:
+            return ""
+        # Remove scheme
+        url = url.replace("https://", "").replace("http://", "")
+        # Remove trailing slash
+        url = url.rstrip("/")
+        # Remove port if present
+        if ":" in url and "/" in url:
+            # Port is before first /
+            parts = url.split("/", 1)
+            if ":" in parts[0]:
+                host_port = parts[0].split(":")[0]
+                url = host_port + "/" + parts[1] if len(parts) > 1 else host_port
+        elif ":" in url:
+            url = url.split(":")[0]
+        return url.lower()
+    
+    origin_normalized = normalize_url(origin)
+    base_url_normalized = normalize_url(base_url_str)
+    
+    # Check exact match (normalized)
+    if origin_normalized == base_url_normalized:
         origin_allowed = True
     # Check localhost (for development)
     elif origin and origin.startswith("http://localhost:") and request.base_url.hostname == "localhost":
@@ -111,15 +134,28 @@ async def check_same_origin(request: Request, call_next):
     elif allowed_origins:
         if "*" in allowed_origins:
             origin_allowed = True
-        elif origin and any(origin.startswith(allowed.rstrip("*")) for allowed in allowed_origins if allowed != "*"):
+        elif origin:
+            # Check if origin matches any allowed origin (normalized)
+            for allowed in allowed_origins:
+                if allowed == "*":
+                    origin_allowed = True
+                    break
+                allowed_normalized = normalize_url(allowed)
+                if origin_normalized == allowed_normalized or origin_normalized.startswith(allowed_normalized.rstrip("*")):
+                    origin_allowed = True
+                    break
+    # Check if origin matches base URL domain (for Railway subdomain variations)
+    if not origin_allowed and origin and base_url_str:
+        base_host = request.base_url.hostname or ""
+        origin_host = ""
+        if "://" in origin:
+            origin_host = origin.split("://")[1].split("/")[0].split(":")[0]
+        # Allow if same hostname (ignoring scheme)
+        if base_host and origin_host and base_host.lower() == origin_host.lower():
             origin_allowed = True
-        # Check if origin matches base URL domain (for Railway subdomain variations)
-        elif origin and base_url_str:
-            base_host = request.base_url.hostname
-            origin_host = origin.split("://")[1].split("/")[0] if "://" in origin else ""
-            # Allow if same domain (e.g., both on railway.app)
-            if base_host and origin_host and (base_host.endswith(".railway.app") and origin_host.endswith(".railway.app")):
-                origin_allowed = True
+        # Allow if both on railway.app (same domain)
+        elif base_host and origin_host and (base_host.endswith(".railway.app") and origin_host.endswith(".railway.app")):
+            origin_allowed = True
     
     if origin_allowed:
         return await call_next(request)
