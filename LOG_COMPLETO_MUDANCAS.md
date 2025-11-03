@@ -216,6 +216,9 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 | `goldenverba/components/managers.py` | ~105 | **Adição** | SentenceTransformersEmbedder na lista |
 | `goldenverba/components/managers.py` | ~240-450 | **Modificação Completa** | Método `connect_to_custom()` |
 | `goldenverba/components/generation/OpenAIGenerator.py` | ~127-146 | **Modificação** | Método `get_models()` - Filtro melhorado para incluir todos modelos de chat |
+| `verba_extensions/compatibility/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
+| `verba_extensions/integration/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
+| `verba_extensions/plugins/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 
 ---
 

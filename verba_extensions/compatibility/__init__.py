@@ -2,9 +2,23 @@
 Compatibility layer para Weaviate v3/v4
 """
 
-from .weaviate_imports import Filter, WEAVIATE_V4, WEAVIATE_V3
-from .weaviate_version_detector import detect_weaviate_version
-from .weaviate_v3_adapter import WeaviateV3HTTPAdapter
+# Imports opcionais para evitar erros se módulos não estiverem disponíveis
+try:
+    from .weaviate_imports import Filter, WEAVIATE_V4, WEAVIATE_V3
+except ImportError:
+    Filter = None
+    WEAVIATE_V4 = None
+    WEAVIATE_V3 = None
+
+try:
+    from .weaviate_version_detector import detect_weaviate_version
+except ImportError:
+    detect_weaviate_version = None
+
+try:
+    from .weaviate_v3_adapter import WeaviateV3HTTPAdapter
+except ImportError:
+    WeaviateV3HTTPAdapter = None
 
 __all__ = [
     "Filter",
