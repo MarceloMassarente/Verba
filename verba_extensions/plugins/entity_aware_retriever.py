@@ -20,14 +20,14 @@ ENTIDADE (spaCy NER) vs SEMÂNTICA (Vector Search):
    - LIMITAÇÃO: Pode trazer resultados sem entidade esperada
    - EXEMPLO: "inovação" → vetor [0.234, 0.891, ...]
 
-3. HÍBRIDO (IDEAL)
+3. HÍBRIDO (IDEAL - O QUE IMPLEMENTAMOS)
    - Combina: entity_filter AND semantic_search
    - QUERY: "apple e inovação"
    - FLUXO:
      1. Extrai entidade: Apple → entity_id="Q123"
      2. Extrai semanticamente: "inovação" → busca vetorial
-     3. Aplica WHERE: chunks.entity_id = "Q123"
-     4. Combina com score de similaridade
+     3. Aplica WHERE: chunks.entity_id = "Q123" (FILTRA)
+     4. Dentro desses chunks, busca: "inovação" (SEMANTICAMENTE)
      5. Retorna: chunks sobre Apple que mencionam inovação
 """
 
@@ -37,39 +37,53 @@ from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
 from typing import Optional, Dict, Any, List
 from wasabi import msg
 
+
 class EntityAwareRetriever(Retriever):
     """
-    Retriever que suporta pre-filter entity-aware usando where filters do Weaviate
-    Mantém compatibilidade com interface padrão do Verba
+    Retriever que combina filtros entity-aware com busca semântica.
+    
+    Fluxo:
+    1. Extrai entidades da query (spaCy + Gazetteer)
+    2. Aplica WHERE filter no Weaviate (rápido!)
+    3. Dentro dos resultados, faz busca semântica (relevância)
+    4. Retorna chunks filtrados + relevantes
+    
+    Exemplo:
+    Query: "descreva o que se fala sobre a Apple e Inovação"
+    ├─ Entidade: Apple → entity_id="Q123"
+    ├─ Semântica: "inovação" → vetor
+    ├─ WHERE: entities = "Q123" (FILTRA)
+    ├─ Vector search: "inovação" (DENTRO dos resultados)
+    └─ Resultado: chunks sobre Apple que falam de inovação
     """
     
     def __init__(self):
         super().__init__()
-        self.description = "Retrieve relevant chunks with entity-aware filtering to prevent contamination"
+        self.description = "Entity-Aware Retriever com busca semântica"
         self.name = "EntityAware"
         
         self.config["Search Mode"] = InputConfig(
             type="dropdown",
             value="Hybrid Search",
-            description="Switch between search types.",
+            description="Search mode to use.",
             values=["Hybrid Search"],
         )
         self.config["Limit Mode"] = InputConfig(
             type="dropdown",
             value="Autocut",
-            description="Method for limiting the results.",
+            description="Method for limiting results",
             values=["Autocut", "Fixed"],
         )
         self.config["Limit/Sensitivity"] = InputConfig(
             type="number",
-            value=32,
-            description="Value for limiting the results.",
+            value=1,
+            description="Limit value or sensitivity",
             values=[],
         )
         self.config["Chunk Window"] = InputConfig(
             type="number",
             value=1,
-            description="Number of surrounding chunks to add to context",
+            description="Number of surrounding chunks",
             values=[],
         )
         self.config["Alpha"] = InputConfig(
@@ -82,6 +96,12 @@ class EntityAwareRetriever(Retriever):
             type="bool",
             value=True,
             description="Enable entity-aware pre-filtering",
+            values=[],
+        )
+        self.config["Enable Semantic Search"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable semantic search within filtered results",
             values=[],
         )
     
@@ -97,201 +117,108 @@ class EntityAwareRetriever(Retriever):
         document_uuids: List[str],
     ):
         """
-        Retrieval com suporte a filtros entity-aware
-        Compatível com interface padrão do Verba
+        Retrieval com filtros entity-aware + busca semântica
+        
+        Fluxo:
+        1. Parse query para separar entidades de conceitos
+        2. Se tem entidades: aplica WHERE filter
+        3. Dentro dos filtrados: faz busca semântica
+        4. Retorna chunks ordenados por relevância
         """
         from goldenverba.components.retriever.WindowRetriever import WindowRetriever
+        from verba_extensions.plugins.query_parser import parse_query
         
-        # Usa WindowRetriever como base e adiciona filtros entity-aware
+        msg.info(f"EntityAwareRetriever processando: '{query}'")
+        
+        # CONFIG
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value
         limit = int(config["Limit/Sensitivity"].value)
-        # Alpha pode ser string ou número, converter para float
         alpha_value = config["Alpha"].value
         alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
+        enable_semantic = config.get("Enable Semantic Search", {}).value if isinstance(config.get("Enable Semantic Search"), InputConfig) else True
         
-        # Constrói filtros adicionais baseados em entity_ids se disponível
-        # Isso seria injetado via orquestrador ou query analysis
+        # 1. PARSE QUERY
+        parsed = parse_query(query)
+        entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
+        semantic_terms = parsed["semantic_concepts"]
+        
+        msg.info(f"  Entidades: {entity_ids}")
+        msg.info(f"  Conceitos: {semantic_terms}")
+        
+        # 2. CONSTRÓI FILTRO DE ENTIDADE (WHERE clause)
         entity_filter = None
+        if enable_entity_filter and entity_ids:
+            entity_filter = Filter.by_property("entities_local_ids").contains_any(entity_ids)
+            msg.good(f"  Aplicando filtro: entities = {entity_ids}")
         
-        # Se entity_filter estiver disponível no contexto (via hooks), usa ele
-        from verba_extensions.hooks import global_hooks
-        # Usa execute_hook_async se disponível (para hooks async)
-        try:
-            entity_context = await global_hooks.execute_hook_async('entity_aware.get_filters', query)
-        except:
-            # Fallback para sync
-            entity_context = global_hooks.execute_hook('entity_aware.get_filters', query)
+        # 3. DETERMINA QUERY PARA BUSCA SEMÂNTICA
+        search_query = query  # Padrão: query completa
         
-        if entity_context and enable_entity_filter:
-            entity_filter = self._build_entity_filter(entity_context)
+        if enable_semantic and semantic_terms:
+            # Se tem conceitos semânticos, usa-os para melhorar a busca
+            search_query = " ".join(semantic_terms)
+            msg.info(f"  Query semântica: '{search_query}'")
         
-        # Combina filtros
-        all_filters = []
-        
-        # Constrói filtros compatíveis com v3/v4
-        filter_dict = {}
-        
-        if labels:
-            if WEAVIATE_V4:
-                all_filters.append(Filter.by_property("labels").contains_all(labels))
-            else:
-                filter_dict['labels'] = {'path': ['labels'], 'operator': 'ContainsAll', 'valueString': labels}
-        
-        if document_uuids:
-            if WEAVIATE_V4:
-                all_filters.append(Filter.by_property("doc_uuid").contains_any(document_uuids))
-            else:
-                filter_dict['doc_uuid'] = {'path': ['doc_uuid'], 'operator': 'ContainsAny', 'valueString': document_uuids}
-        
-        if entity_filter:
-            if WEAVIATE_V4:
-                all_filters.append(entity_filter)
-            else:
-                # Para v3, entity_filter já deve ser dict
-                if isinstance(entity_filter, dict):
-                    filter_dict['entity'] = entity_filter
-        
-        # Aplica filtros combinados
-        final_filter = None
-        if WEAVIATE_V4:
-            if len(all_filters) > 1:
-                final_filter = all_filters[0]
-                for f in all_filters[1:]:
-                    final_filter = final_filter & f
-            elif len(all_filters) == 1:
-                final_filter = all_filters[0]
-        else:
-            # Para v3, usa dict com operador "And"
-            if filter_dict:
-                if len(filter_dict) > 1:
-                    final_filter = {
-                        'operator': 'And',
-                        'operands': list(filter_dict.values())
-                    }
-                else:
-                    final_filter = list(filter_dict.values())[0]
-        
-        # Busca híbrida com filtros
+        # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!)
         if search_mode == "Hybrid Search":
-            chunks = await weaviate_manager.hybrid_chunks(
-                client,
-                embedder,
-                query,
-                vector,
-                limit_mode,
-                limit,
-                labels,  # Mantém compatibilidade
-                document_uuids,  # Mantém compatibilidade
-            )
-            
-            # Se temos filtros entity-aware, aplica pós-busca ou modifica a busca
-            # Para compatibilidade total, precisamos modificar hybrid_chunks
-            # Por enquanto, filtra resultados manualmente se necessário
-            if entity_filter and chunks:
-                chunks = await self._filter_chunks_by_entity(chunks, entity_context)
+            try:
+                if entity_filter and enable_entity_filter:
+                    # FILTRA por entidade, DEPOIS faz busca semântica
+                    msg.info(f"  Executando: Hybrid search com entity filter")
+                    
+                    chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                        client=client,
+                        embedder=embedder,
+                        query=search_query,        # ← Query semântica ou completa
+                        vector=vector,              # ← Vetor da query
+                        limit_mode=limit_mode,
+                        limit=limit,
+                        labels=labels,
+                        document_uuids=document_uuids,
+                        filters=entity_filter,      # ← FILTRA por entidade PRIMEIRO
+                        alpha=alpha,
+                    )
+                else:
+                    # Sem filtro de entidade: busca normal
+                    msg.info(f"  Executando: Hybrid search sem entity filter")
+                    
+                    chunks = await weaviate_manager.hybrid_chunks(
+                        client=client,
+                        embedder=embedder,
+                        query=search_query,
+                        vector=vector,
+                        limit_mode=limit_mode,
+                        limit=limit,
+                        labels=labels,
+                        document_uuids=document_uuids,
+                    )
+            except Exception as e:
+                msg.fail(f"Erro na busca híbrida: {str(e)}")
+                # Fallback
+                chunks = []
         
         if len(chunks) == 0:
-            return ([], "We couldn't find any chunks matching the query")
+            msg.warn("Nenhum chunk encontrado")
+            return ([], "We couldn't find any chunks to the query")
         
-        # Resto da lógica similar ao WindowRetriever
-        return await self._process_chunks(
+        msg.good(f"Encontrados {len(chunks)} chunks")
+        
+        # 5. PROCESSA CHUNKS (aplicar window)
+        chunks, message = await self._process_chunks(
             client, chunks, weaviate_manager, embedder, config
         )
-    
-    def _build_entity_filter(self, entity_context: Dict) -> Optional[Any]:
-        """Constrói filtro Weaviate baseado em entity IDs (compatível v3/v4)"""
-        if not entity_context or 'entity_ids' not in entity_context:
-            return None
         
-        entity_ids = entity_context['entity_ids']
-        if not entity_ids:
-            return None
-        
-        # Para v4, usa Filter objects; para v3, usa dict
-        if WEAVIATE_V4:
-            # Filtro: entities_local_ids OU (section_entity_ids + confidence)
-            filters = []
-            
-            # Entidades no chunk
-            filters.append(
-                Filter.by_property("entities_local_ids").contains_any(entity_ids)
-            )
-            
-            # Entidades na seção com confiança alta
-            if entity_context.get('require_section_confidence', 0.7):
-                section_filters = [
-                    Filter.by_property("section_entity_ids").contains_any(entity_ids),
-                    Filter.by_property("section_scope_confidence").greater_or_equal(
-                        entity_context.get('require_section_confidence', 0.7)
-                    )
-                ]
-                section_combo = section_filters[0]
-                for sf in section_filters[1:]:
-                    section_combo = section_combo & sf
-                filters.append(section_combo)
-            
-            # Combina com OR
-            if len(filters) > 1:
-                combined = filters[0]
-                for f in filters[1:]:
-                    combined = combined | f
-                return combined
-            
-            return filters[0] if filters else None
-        else:
-            # Para v3, retorna dict
-            local_filter = {
-                'path': ['entities_local_ids'],
-                'operator': 'ContainsAny',
-                'valueString': entity_ids
-            }
-            
-            section_filter = {
-                'path': ['section_entity_ids'],
-                'operator': 'ContainsAny',
-                'valueString': entity_ids
-            }
-            
-            # Combina com OR
-            return {
-                'operator': 'Or',
-                'operands': [local_filter, section_filter]
-            }
-    
-    async def _filter_chunks_by_entity(self, chunks: List, entity_context: Dict) -> List:
-        """Filtra chunks por entidades (fallback se filtro não funcionar na busca)"""
-        entity_ids = set(entity_context.get('entity_ids', []))
-        if not entity_ids:
-            return chunks
-        
-        filtered = []
-        for chunk in chunks:
-            props = chunk.properties
-            local_ids = set(props.get('entities_local_ids', []))
-            section_ids = set(props.get('section_entity_ids', []))
-            
-            # Inclui se tem entidade local OU na seção com confiança alta
-            if local_ids & entity_ids:
-                filtered.append(chunk)
-            elif section_ids & entity_ids:
-                confidence = props.get('section_scope_confidence', 0.0)
-                if confidence >= entity_context.get('require_section_confidence', 0.7):
-                    filtered.append(chunk)
-        
-        return filtered if filtered else chunks  # Fallback se nenhum match
+        return (chunks, message)
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
-        """Processa chunks similar ao WindowRetriever - retorna chunks processados"""
-        # Em vez de chamar WindowRetriever (que espera Threshold e outros params),
-        # processamos os chunks diretamente aqui
+        """Processa chunks aplicando window technique"""
         
-        # Aplica window technique se configurado
         chunk_window = int(config.get("Chunk Window", {}).value if hasattr(config.get("Chunk Window"), 'value') else config.get("Chunk Window", 1))
         
         if chunk_window > 0 and chunks:
-            # Agrupa chunks adjacentes
+            # Agrupa chunks adjacentes com window
             windowed_chunks = []
             for i, chunk in enumerate(chunks):
                 context_chunks = chunks[max(0, i - chunk_window):min(len(chunks), i + chunk_window + 1)]

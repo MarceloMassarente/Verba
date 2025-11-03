@@ -1046,6 +1046,88 @@ class WeaviateManager:
 
             return chunks.objects
 
+    async def hybrid_chunks_with_filter(
+        self,
+        client: WeaviateAsyncClient,
+        embedder: str,
+        query: str,
+        vector: list[float],
+        limit_mode: str,
+        limit: int,
+        labels: list[str],
+        document_uuids: list[str],
+        filters: "Filter" = None,
+        alpha: float = 0.5,
+    ):
+        """
+        Hybrid search com filtros entity-aware aplicados PRIMEIRO.
+        
+        Fluxo:
+        1. Aplica WHERE filter (entity-aware)
+        2. Dentro dos resultados, faz busca híbrida (BM25 + Vector)
+        3. Retorna chunks filtrados + ordenados por relevância
+        
+        Exemplo:
+        filters = Filter.by_property("entities_local_ids").contains_any(["Q123"])
+        chunks = await weaviate_manager.hybrid_chunks_with_filter(
+            client=client,
+            embedder=embedder,
+            query="inovação",
+            vector=vector,
+            filters=filters,
+            alpha=0.6
+        )
+        # Retorna chunks sobre Apple (Q123) ordenados por "inovação"
+        """
+        if await self.verify_embedding_collection(client, embedder):
+            embedder_collection = client.collections.get(self.embedding_table[embedder])
+
+            # Constrói lista de filtros combinados
+            all_filters = []
+
+            # 1. Filtro entity-aware (principal)
+            if filters:
+                all_filters.append(filters)
+
+            # 2. Filtros de labels
+            if labels:
+                all_filters.append(Filter.by_property("labels").contains_all(labels))
+
+            # 3. Filtros de documentos
+            if document_uuids:
+                all_filters.append(
+                    Filter.by_property("doc_uuid").contains_any(document_uuids)
+                )
+
+            # Combina todos os filtros com AND
+            apply_filters = None
+            if all_filters:
+                apply_filters = all_filters[0]
+                for f in all_filters[1:]:
+                    apply_filters = apply_filters & f
+
+            # Executa busca híbrida COM os filtros
+            if limit_mode == "Autocut":
+                chunks = await embedder_collection.query.hybrid(
+                    query=query,
+                    vector=vector,
+                    alpha=alpha,
+                    auto_limit=limit,
+                    return_metadata=MetadataQuery(score=True, explain_score=False),
+                    filters=apply_filters,
+                )
+            else:
+                chunks = await embedder_collection.query.hybrid(
+                    query=query,
+                    vector=vector,
+                    alpha=alpha,
+                    limit=limit,
+                    return_metadata=MetadataQuery(score=True, explain_score=False),
+                    filters=apply_filters,
+                )
+
+            return chunks.objects
+
     async def get_chunk_by_ids(
         self, client: WeaviateAsyncClient, embedder: str, doc_uuid: str, ids: list[int]
     ):
