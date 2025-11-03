@@ -1,6 +1,34 @@
 """
 Plugin: Entity-Aware Retriever
 Retriever que usa filtros entity-aware para evitar contaminação
+
+=== ARQUITETURA ===
+
+ENTIDADE (spaCy NER) vs SEMÂNTICA (Vector Search):
+
+1. ENTIDADE
+   - O QUÊ: Coisas com identidade única (Apple, Steve Jobs, São Paulo)
+   - COMO: spaCy extrai menções, Gazetteer mapeia para entity_id
+   - BENEFÍCIO: WHERE filter (rápido, preciso)
+   - LIMITAÇÃO: Só funciona com nomes conhecidos
+   - EXEMPLO: "apple" → entity_id="Q123"
+
+2. SEMÂNTICA
+   - O QUÊ: Significado e contexto (inovação, visão, disruptivo)
+   - COMO: Embedding model converte em vetor
+   - BENEFÍCIO: Captura conceitos abstratos
+   - LIMITAÇÃO: Pode trazer resultados sem entidade esperada
+   - EXEMPLO: "inovação" → vetor [0.234, 0.891, ...]
+
+3. HÍBRIDO (IDEAL)
+   - Combina: entity_filter AND semantic_search
+   - QUERY: "apple e inovação"
+   - FLUXO:
+     1. Extrai entidade: Apple → entity_id="Q123"
+     2. Extrai semanticamente: "inovação" → busca vetorial
+     3. Aplica WHERE: chunks.entity_id = "Q123"
+     4. Combina com score de similaridade
+     5. Retorna: chunks sobre Apple que mencionam inovação
 """
 
 from goldenverba.components.interfaces import Retriever
