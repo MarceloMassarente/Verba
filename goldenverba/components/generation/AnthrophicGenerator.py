@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from goldenverba.components.interfaces import Generator
 from goldenverba.components.types import InputConfig
 from goldenverba.components.util import get_environment
+from typing import List
+from wasabi import msg
 import aiohttp
 import json
 
@@ -21,11 +23,13 @@ class AnthropicGenerator(Generator):
         self.context_window = 10000
         self.url = "https://api.anthropic.com/v1/messages"
 
-        models = ["claude-3-5-sonnet-20240620"]
+        api_key = get_environment({}, "API Key", "ANTHROPIC_API_KEY", None)
+        models = self.get_models(api_key)
+        default_model = os.getenv("ANTHROPIC_MODEL", models[0] if models else "claude-3-5-sonnet-20240620")
 
         self.config["Model"] = InputConfig(
             type="dropdown",
-            value=models[0],
+            value=default_model,
             description="Select an Anthropic Model",
             values=models,
         )
@@ -37,6 +41,57 @@ class AnthropicGenerator(Generator):
                 description="You can set your Anthropic API Key here or set it as environment variable `ANTHROPIC_API_KEY`",
                 values=[],
             )
+
+    def get_models(self, api_key: str = None) -> List[str]:
+        """Fetch available Anthropic models."""
+        default_models = [
+            "claude-3-5-sonnet-20240620",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307",
+        ]
+        
+        try:
+            if api_key is None:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+            
+            if not api_key:
+                msg.info("No Anthropic API key provided, using default models")
+                return default_models
+
+            # Anthropic não tem endpoint público de modelos, mas podemos tentar
+            # usar a lista conhecida de modelos disponíveis
+            # Ou fazer uma requisição de teste para verificar quais funcionam
+            try:
+                import requests
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json"
+                }
+                # Testa modelos conhecidos para ver quais estão disponíveis
+                available_models = []
+                known_models = [
+                    "claude-3-5-sonnet-20240620",
+                    "claude-3-opus-20240229",
+                    "claude-3-sonnet-20240229",
+                    "claude-3-haiku-20240307",
+                    "claude-3-5-haiku-20241022",
+                    "claude-3-5-opus-20241022",
+                ]
+                
+                # Por enquanto, retorna todos os modelos conhecidos
+                # Anthropic não fornece endpoint de listagem como OpenAI
+                msg.info(f"Using Anthropic models list (API doesn't provide model listing)")
+                return known_models
+                
+            except Exception as e:
+                msg.warn(f"Could not verify Anthropic models: {str(e)}")
+                return default_models
+                
+        except Exception as e:
+            msg.warn(f"Failed to fetch Anthropic models: {str(e)}")
+            return default_models
 
     async def generate_stream(
         self,
