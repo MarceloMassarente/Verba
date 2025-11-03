@@ -77,20 +77,40 @@ ENABLE_ETL_A2=true
 
 ### Usando Weaviate Externo
 
-Se você já tem um Weaviate rodando (Railway, Cloud, etc):
+**Opção 1: Editar docker-compose.yml**
+
+Comente o serviço `weaviate:` e remova `depends_on: weaviate`:
 
 ```yaml
-# Em docker-compose.yml, comente o serviço weaviate
-# E ajuste WEAVIATE_URL_VERBA no .env
-
 services:
   verba:
-    # ...
     environment:
-      - WEAVIATE_URL_VERBA=https://seu-weaviate.up.railway.app
-      - WEAVIATE_API_KEY_VERBA=sua-api-key
-    # Remova depends_on: weaviate
+      - WEAVIATE_URL_VERBA=${WEAVIATE_URL_VERBA}  # Configure no .env
+      - WEAVIATE_API_KEY_VERBA=${WEAVIATE_API_KEY_VERBA}
+    # depends_on:  # COMENTE esta seção
+    #   weaviate:
+    #     condition: service_healthy
+
+  # weaviate:  # COMENTE todo este serviço
+  #   image: semitechnologies/weaviate:1.25.10
+  #   # ...
 ```
+
+Configure no `.env`:
+```bash
+WEAVIATE_URL_VERBA=https://seu-weaviate.up.railway.app
+WEAVIATE_API_KEY_VERBA=sua-api-key
+```
+
+**Opção 2: Usar docker-compose.externo.yml**
+
+```bash
+cp docker-compose.externo.yml docker-compose.yml
+# Edite .env com sua URL do Weaviate
+docker-compose up -d
+```
+
+**Para mais detalhes, veja:** `GUIA_WEAVIATE_DOCKER.md`
 
 ---
 

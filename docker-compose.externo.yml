@@ -1,0 +1,54 @@
+# docker-compose.yml para usar Weaviate EXTERNO
+# Copie este arquivo ou ajuste o docker-compose.yml original
+---
+services:
+  verba:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - 8000:8000
+    environment:
+      # Weaviate externo - configure no .env
+      - WEAVIATE_URL_VERBA=${WEAVIATE_URL_VERBA:-https://seu-weaviate.exemplo.com}
+      - WEAVIATE_API_KEY_VERBA=${WEAVIATE_API_KEY_VERBA:-}
+      
+      # Outras APIs
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - COHERE_API_KEY=${COHERE_API_KEY:-}
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-}
+      - UNSTRUCTURED_API_KEY=${UNSTRUCTURED_API_KEY:-}
+      - UNSTRUCTURED_API_URL=${UNSTRUCTURED_API_URL:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      
+      # Extensões
+      - ENABLE_EXTENSIONS=true
+      - ENABLE_ETL_A2=${ENABLE_ETL_A2:-true}
+
+    volumes:
+      - ./data:/data/
+    
+    # SEM depends_on - Weaviate é externo
+    # Não depende de nenhum serviço local
+    
+    healthcheck:
+      test: wget --no-verbose --tries=3 --spider http://localhost:8000 || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - verba-net
+    restart: unless-stopped
+
+  # Serviço Weaviate REMOVIDO - usando externo
+  # Se você precisa de Weaviate local, use docker-compose.yml original
+
+networks:
+  verba-net:
+    external: false
+
+# Sem volumes do Weaviate - usando externo
+

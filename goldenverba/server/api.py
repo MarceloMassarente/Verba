@@ -86,11 +86,42 @@ async def check_same_origin(request: Request, call_next):
         return await call_next(request)
 
     origin = request.headers.get("origin")
-    if origin == str(request.base_url).rstrip("/") or (
-        origin
-        and origin.startswith("http://localhost:")
-        and request.base_url.hostname == "localhost"
-    ):
+    base_url_str = str(request.base_url).rstrip("/")
+    
+    # Get allowed origins from environment (for Railway, etc.)
+    allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+    allowed_origins = []
+    if allowed_origins_env:
+        if allowed_origins_env == "*":
+            # Allow all origins if explicitly set
+            allowed_origins = ["*"]
+        else:
+            allowed_origins = [o.strip() for o in allowed_origins_env.split(",")]
+    
+    # Check if origin is allowed
+    origin_allowed = False
+    
+    # Check exact match
+    if origin == base_url_str:
+        origin_allowed = True
+    # Check localhost (for development)
+    elif origin and origin.startswith("http://localhost:") and request.base_url.hostname == "localhost":
+        origin_allowed = True
+    # Check allowed origins from env
+    elif allowed_origins:
+        if "*" in allowed_origins:
+            origin_allowed = True
+        elif origin and any(origin.startswith(allowed.rstrip("*")) for allowed in allowed_origins if allowed != "*"):
+            origin_allowed = True
+        # Check if origin matches base URL domain (for Railway subdomain variations)
+        elif origin and base_url_str:
+            base_host = request.base_url.hostname
+            origin_host = origin.split("://")[1].split("/")[0] if "://" in origin else ""
+            # Allow if same domain (e.g., both on railway.app)
+            if base_host and origin_host and (base_host.endswith(".railway.app") and origin_host.endswith(".railway.app")):
+                origin_allowed = True
+    
+    if origin_allowed:
         return await call_next(request)
     else:
         # Only apply restrictions to /api/ routes (except /api/health)
