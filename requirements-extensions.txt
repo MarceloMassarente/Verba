@@ -9,6 +9,9 @@ spacy>=3.7.0
 # Para chunker do ingestor (se precisar usar diretamente)
 nltk>=3.9.0
 
+# Para Sentence Transformers Embedder
+sentence-transformers>=2.2.0
+
 # Já incluídas no Verba base:
 # - weaviate-client
 # - fastapi

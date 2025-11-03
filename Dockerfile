@@ -15,6 +15,9 @@ COPY . /Verba
 # Instala dependências do Verba base
 RUN pip install --no-cache-dir '.'
 
+# Instala sentence-transformers (para embedder local)
+RUN pip install --no-cache-dir sentence-transformers || true
+
 # Instala dependências das extensões
 RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 
