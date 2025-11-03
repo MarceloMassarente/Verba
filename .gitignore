@@ -21,3 +21,20 @@ cache.txt
 .ruff_cache
 *_secrets.json
 ollama
+
+# Arquivos de teste temporários
+test_*.py
+!goldenverba/tests/**/*.py
+
+# Resultados de testes e análises temporárias
+RESULTADO_*.md
+RESUMO_FINAL_TESTES.md
+ANALISE_*.md
+!ANALISE_PROJETO.md
+SOLUCAO_*.md
+!SOLUCAO_SENTENCE_TRANSFORMERS.md
+
+# Arquivos de debug
+*.log
+*.tmp
+*.bak
