@@ -11,6 +11,7 @@ nltk>=3.9.0
 
 # Para Sentence Transformers Embedder
 sentence-transformers>=2.2.0
+pypdf>=3.0.0
 
 # Já incluídas no Verba base:
 # - weaviate-client
