@@ -258,49 +258,51 @@ class WeaviateManager:
         else:
             # Apenas hostname - constrói URL baseado na porta
             actual_host = host
+            port_int = int(port) if port else 8080
             
             # Remove http:// ou https:// se presente (mas não detectou antes)
             if actual_host.startswith("http://"):
                 actual_host = actual_host.replace("http://", "")
-                # Se tinha http:// mas é Railway, força HTTPS
-                if ".railway.app" in actual_host.lower():
-                    use_https = True
-                    port_int = 443  # Railway HTTPS sempre porta 443
-                else:
-                    use_https = False
-                    port_int = int(port) if port else 80
+                # Preserva o protocolo HTTP se explicitamente indicado
+                use_https = False
+                if not port:
+                    port_int = 80 if port_int == 8080 else port_int
             elif actual_host.startswith("https://"):
                 actual_host = actual_host.replace("https://", "")
+                # Preserva o protocolo HTTPS se explicitamente indicado
                 use_https = True
-                port_int = int(port) if port else 443
+                if not port or port_int == 8080:
+                    port_int = 443
             else:
-                # Hostname puro
-                port_int = int(port) if port else 8080
-                
-                # Detecta HTTPS baseado em porta ou domínio Railway
+                # Hostname puro - tenta detectar automaticamente
+                # Railway na porta 8080 geralmente é HTTP, mas pode aceitar HTTPS também
                 if port_int == 443:
-                    url = f"https://{actual_host}"
                     use_https = True
                 elif port_int == 80:
-                    url = f"http://{actual_host}"
                     use_https = False
+                elif ".railway.app" in actual_host.lower() and port_int == 8080:
+                    # Railway porta 8080: tenta HTTP primeiro (padrão Railway)
+                    # Se falhar, código vai tentar HTTPS como fallback
+                    use_https = False
+                    msg.info("Railway porta 8080 detectado - tentando HTTP primeiro")
                 elif ".railway.app" in actual_host.lower():
-                    # Railway sempre usa HTTPS na porta padrão
-                    url = f"https://{actual_host}"
-                    port_int = 443  # Força porta 443 para Railway
+                    # Railway outras portas: assume HTTPS se não especificado
                     use_https = True
+                    if port_int != 443:
+                        port_int = 443
                 else:
-                    url = f"http://{actual_host}:{port_int}"
                     use_https = False
             
-            # Reconstrói URL se necessário
-            if 'url' not in locals():
-                if use_https:
-                    url = f"https://{actual_host}" if port_int == 443 else f"https://{actual_host}:{port_int}"
-                else:
-                    url = f"http://{actual_host}" if port_int == 80 else f"http://{actual_host}:{port_int}"
+            # Reconstrói URL
+            if use_https:
+                url = f"https://{actual_host}" if port_int == 443 else f"https://{actual_host}:{port_int}"
+            else:
+                url = f"http://{actual_host}" if port_int == 80 else f"http://{actual_host}:{port_int}"
 
         msg.info(f"URL Weaviate: {url} (port: {port_int}, HTTPS: {use_https})")
+        
+        # Para Railway porta 8080, tenta HTTP primeiro, depois HTTPS como fallback
+        is_railway_8080 = ".railway.app" in actual_host.lower() and port_int == 8080
         
         # Para HTTPS externo, usa adapter HTTP direto (funciona melhor que use_async_with_local)
         if use_https:
@@ -383,9 +385,25 @@ class WeaviateManager:
                         ),
                     )
             except Exception as e:
-                # Se falhar, pode ser incompatibilidade v3/v4
                 error_str = str(e).lower()
-                if any(x in error_str for x in ['api', 'version', 'schema', 'client', 'attribute']):
+                
+                # Para Railway porta 8080, se HTTP falhou, tenta HTTPS como fallback
+                if is_railway_8080 and not use_https:
+                    msg.warn(f"Conexao HTTP falhou: {str(e)[:100]}")
+                    msg.info("Tentando HTTPS como fallback para Railway porta 8080...")
+                    try:
+                        https_url = f"https://{actual_host}"
+                        from verba_extensions.compatibility.weaviate_v3_adapter import WeaviateV3HTTPAdapter
+                        adapter = WeaviateV3HTTPAdapter(https_url, w_key if w_key else None)
+                        
+                        if await adapter.is_ready():
+                            msg.good("Conexao HTTPS estabelecida como fallback")
+                            return adapter
+                    except Exception as e_https:
+                        msg.warn(f"Tentativa HTTPS fallback falhou: {str(e_https)[:100]}")
+                
+                # Se falhar, pode ser incompatibilidade v3/v4
+                if any(x in error_str for x in ['api', 'version', 'schema', 'client', 'attribute', 'connection']):
                     msg.warn(f"Conexao v4 falhou (possivel incompatibilidade): {str(e)}")
                     msg.info("Tentando conexao via API REST direta para v3...")
                     
