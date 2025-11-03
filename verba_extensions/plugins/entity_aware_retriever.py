@@ -45,9 +45,9 @@ class EntityAwareRetriever(Retriever):
             values=[],
         )
         self.config["Alpha"] = InputConfig(
-            type="number",
-            value=0.6,
-            description="Hybrid search alpha (0.0=keyword, 1.0=vector)",
+            type="text",
+            value="0.6",
+            description="Hybrid search alpha (0.0=keyword, 1.0=vector). Use decimal format (e.g., 0.6)",
             values=[],
         )
         self.config["Enable Entity Filter"] = InputConfig(
@@ -78,7 +78,9 @@ class EntityAwareRetriever(Retriever):
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value
         limit = int(config["Limit/Sensitivity"].value)
-        alpha = float(config["Alpha"].value)
+        # Alpha pode ser string ou número, converter para float
+        alpha_value = config["Alpha"].value
+        alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
         
         # Constrói filtros adicionais baseados em entity_ids se disponível
