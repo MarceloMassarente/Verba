@@ -37,13 +37,37 @@ def patch_weaviate_manager():
                 enable_etl = True
             
             # Chama método original (retorna doc_uuid)
-            doc_uuid = await original_import(self, client, document, embedder)
+            doc_uuid = None
+            try:
+                doc_uuid = await original_import(self, client, document, embedder)
+            except Exception as import_error:
+                # Se falhar, tenta recuperar doc_uuid pela busca do documento
+                # (alguns chunks podem ter sido inseridos mesmo com erro)
+                msg.warn(f"Import teve erro, mas tentando executar ETL: {str(import_error)}")
+                try:
+                    # Tenta buscar documento pelo nome para recuperar doc_uuid
+                    document_collection = client.collections.get(self.document_collection_name)
+                    results = await document_collection.query.fetch_objects(
+                        filters=Filter.by_property("title").equal(document.title),
+                        limit=1
+                    )
+                    if results.objects:
+                        doc_uuid = str(results.objects[0].uuid)
+                        msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
+                except Exception as recovery_error:
+                    msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
+                # Re-raise para não mascarar o erro original
+                raise import_error
             
             # Se ETL habilitado e doc_uuid obtido, dispara ETL
             if enable_etl and doc_uuid:
                 try:
                     import asyncio
-                    from weaviate.classes.query import Filter
+                    try:
+                        from weaviate.classes.query import Filter
+                    except ImportError:
+                        # Fallback para v3
+                        Filter = None
                     
                     embedder_collection_name = self.embedding_table.get(embedder)
                     if embedder_collection_name:
