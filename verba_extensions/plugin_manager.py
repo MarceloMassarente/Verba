@@ -101,7 +101,10 @@ class PluginManager:
         # Hook 3: Adiciona novos readers
         self._hook_readers()
         
-        # Hook 4: Modifica managers para incluir plugins
+        # Hook 4: Adiciona novos chunkers
+        self._hook_chunkers()
+        
+        # Hook 5: Modifica managers para incluir plugins
         self._hook_managers()
         
         self.hooks_applied = True
@@ -162,6 +165,24 @@ class PluginManager:
             managers.readers = original_readers
         except Exception as e:
             msg.warn(f"Erro ao aplicar hook de readers: {str(e)}")
+    
+    def _hook_chunkers(self):
+        """Adiciona chunkers customizados aos managers"""
+        try:
+            from goldenverba.components import managers
+            
+            original_chunkers = managers.chunkers.copy()
+            
+            for plugin_name, plugin_data in self.plugins.items():
+                if 'chunkers' in plugin_data['info']:
+                    for chunker in plugin_data['info']['chunkers']:
+                        if chunker not in original_chunkers:
+                            original_chunkers.append(chunker)
+                            msg.info(f"Chunker adicionado: {chunker.name}")
+            
+            managers.chunkers = original_chunkers
+        except Exception as e:
+            msg.warn(f"Erro ao aplicar hook de chunkers: {str(e)}")
     
     def _hook_managers(self):
         """Aplica patches nos managers se necessário"""
