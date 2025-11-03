@@ -57,7 +57,16 @@ def get_nlp():
         return None
 
 def extract_entities_from_query(query: str) -> List[str]:
-    """Extrai entity_ids da query usando SpaCy + Gazetteer"""
+    """Extrai entity_ids da query usando SpaCy + Gazetteer
+    
+    Suporta:
+    - Entidades nomeadas (ORG, PERSON, GPE, LOC): "Apple", "Spencer Stuart"
+    - Múltiplas entidades: "apple e microsoft"
+    - Retorna entity_ids apenas (não palavras-chave)
+    
+    Nota: Palavras-chave como "inovação" são ignoradas pelo filtro entity-aware.
+          Para melhor resultado, combine com busca vetorial.
+    """
     nlp_model = get_nlp()
     gaz = load_gazetteer()
     
@@ -83,6 +92,10 @@ def extract_entities_from_query(query: str) -> List[str]:
                     if entity_id not in entity_ids:
                         entity_ids.append(entity_id)
                     break
+        
+        # Log para debug
+        if entity_ids:
+            msg.info(f"Entidades extraídas: {entity_ids}")
         
         return entity_ids
     except Exception as e:
