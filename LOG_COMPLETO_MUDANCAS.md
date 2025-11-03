@@ -222,6 +222,7 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 | `verba_extensions/plugins/entity_aware_retriever.py` | ~47-52 | **Correção** | InputConfig Alpha: mudado de `type="number" value=0.6` para `type="text" value="0.6"` (InputConfig não aceita float) |
 | `verba_extensions/plugins/entity_aware_retriever.py` | ~81-83 | **Correção** | Adicionada conversão de string para float ao usar Alpha value |
 | `verba_extensions/integration/import_hook.py` | ~39-68 | **Melhoria** | Adicionado tratamento de exceções para tentar recuperar doc_uuid mesmo após erro de conexão durante Weaviating |
+| `goldenverba/components/generation/AnthrophicGenerator.py` | ~24-94 | **Melhoria** | Adicionado método `get_models()` para listar todos modelos Claude disponíveis (incluindo 3.5) ao invés de apenas 1 hardcoded |
 
 ---
 
