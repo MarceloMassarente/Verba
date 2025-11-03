@@ -222,8 +222,16 @@ class EntityAwareRetriever(Retriever):
             windowed_chunks = []
             for i, chunk in enumerate(chunks):
                 context_chunks = chunks[max(0, i - chunk_window):min(len(chunks), i + chunk_window + 1)]
-                combined_content = " ".join([c.content for c in context_chunks])
-                chunk.content = combined_content
+                # Acessa content do Weaviate object corretamente
+                combined_content = " ".join([
+                    c.properties["content"] if hasattr(c, "properties") else c.get("content", "")
+                    for c in context_chunks
+                ])
+                # Atualiza o content do chunk atual
+                if hasattr(chunk, "properties"):
+                    chunk.properties["content"] = combined_content
+                else:
+                    chunk["content"] = combined_content
                 windowed_chunks.append(chunk)
             chunks = windowed_chunks
         
