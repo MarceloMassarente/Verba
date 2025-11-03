@@ -219,6 +219,9 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 | `verba_extensions/compatibility/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 | `verba_extensions/integration/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 | `verba_extensions/plugins/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
+| `verba_extensions/plugins/entity_aware_retriever.py` | ~47-52 | **Correção** | InputConfig Alpha: mudado de `type="number" value=0.6` para `type="text" value="0.6"` (InputConfig não aceita float) |
+| `verba_extensions/plugins/entity_aware_retriever.py` | ~81-83 | **Correção** | Adicionada conversão de string para float ao usar Alpha value |
+| `verba_extensions/integration/import_hook.py` | ~39-68 | **Melhoria** | Adicionado tratamento de exceções para tentar recuperar doc_uuid mesmo após erro de conexão durante Weaviating |
 
 ---
 
