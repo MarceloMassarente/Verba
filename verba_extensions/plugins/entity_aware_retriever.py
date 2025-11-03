@@ -255,21 +255,24 @@ class EntityAwareRetriever(Retriever):
         return filtered if filtered else chunks  # Fallback se nenhum match
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
-        """Processa chunks similar ao WindowRetriever"""
-        from goldenverba.components.retriever.WindowRetriever import WindowRetriever
+        """Processa chunks similar ao WindowRetriever - retorna chunks processados"""
+        # Em vez de chamar WindowRetriever (que espera Threshold e outros params),
+        # processamos os chunks diretamente aqui
         
-        # Reutiliza lógica do WindowRetriever
-        window_retriever = WindowRetriever()
-        return await window_retriever.retrieve(
-            client=client,
-            query="",  # Já temos chunks
-            vector=[],
-            config=config,
-            weaviate_manager=weaviate_manager,
-            embedder=embedder,
-            labels=[],
-            document_uuids=[],
-        )
+        # Aplica window technique se configurado
+        chunk_window = int(config.get("Chunk Window", {}).value if hasattr(config.get("Chunk Window"), 'value') else config.get("Chunk Window", 1))
+        
+        if chunk_window > 0 and chunks:
+            # Agrupa chunks adjacentes
+            windowed_chunks = []
+            for i, chunk in enumerate(chunks):
+                context_chunks = chunks[max(0, i - chunk_window):min(len(chunks), i + chunk_window + 1)]
+                combined_content = " ".join([c.content for c in context_chunks])
+                chunk.content = combined_content
+                windowed_chunks.append(chunk)
+            chunks = windowed_chunks
+        
+        return (chunks, "Chunks retrieved with entity-aware filtering")
     
     def combine_context(self, documents: list[dict]) -> str:
         """Combina contexto dos documentos"""
