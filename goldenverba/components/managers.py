@@ -196,8 +196,8 @@ class WeaviateManager:
             
             # Usar API key se disponível
             api_key = w_key or os.getenv("WEAVIATE_API_KEY_VERBA")
-            # Usar Auth.api_key() conforme manual (v4)
-            auth_creds = Auth.api_key(api_key) if api_key else None
+            # Usar AuthApiKey (mantém compatibilidade com código existente)
+            auth_creds = AuthApiKey(api_key) if api_key else None
             
             try:
                 # Usar connect_to_custom para PaaS (permite portas HTTP e gRPC separadas)
