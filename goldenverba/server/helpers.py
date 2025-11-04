@@ -66,53 +66,60 @@ class BatchManager:
 
     def add_batch(self, payload: DataBatchPayload) -> FileConfig:
         try:
-            msg.info(f"[BATCH] Receiving batch for {payload.fileID}: chunk {payload.order + 1}/{payload.total}")
-
+            # Log only first batch, every 50 batches, or last batch to reduce log spam
+            should_log = (
+                payload.order == 0 or 
+                payload.order % 50 == 0 or 
+                payload.isLastChunk or 
+                payload.order == payload.total - 1
+            )
+            
             if payload.fileID not in self.batches:
                 self.batches[payload.fileID] = {
                     "fileID": payload.fileID,
                     "total": payload.total,
                     "chunks": {},
                 }
-                msg.info(f"[BATCH] Started new batch collection for {payload.fileID} ({payload.total} chunks expected)")
-
+                msg.info(f"[BATCH] Started collection for {payload.fileID[:50]}... ({payload.total} chunks)")
+            
             self.batches[payload.fileID]["chunks"][payload.order] = payload.chunk
+            
+            if should_log:
+                received = len(self.batches[payload.fileID]["chunks"].keys())
+                msg.info(f"[BATCH] Progress: {received}/{payload.total} chunks received ({round(received/payload.total*100, 1)}%)")
 
             fileConfig = self.check_batch(payload.fileID)
 
             if fileConfig is not None or payload.isLastChunk:
-                msg.info(f"[BATCH] Removing {payload.fileID} from BatchManager")
+                msg.info(f"[BATCH] Completed collection for {payload.fileID[:50]}...")
                 del self.batches[payload.fileID]
 
             return fileConfig
 
         except Exception as e:
             import traceback
-            msg.fail(f"[BATCH] Failed to add batch to BatchManager: {type(e).__name__}: {str(e)}")
+            msg.fail(f"[BATCH] Failed to add batch: {type(e).__name__}: {str(e)}")
             msg.fail(f"[BATCH] Traceback: {traceback.format_exc()}")
             return None
 
     def check_batch(self, fileID: str):
         if len(self.batches[fileID]["chunks"].keys()) == self.batches[fileID]["total"]:
-            msg.good(f"[BATCH] Collected all batches of {fileID}")
+            msg.good(f"[BATCH] All batches collected for {fileID[:50]}...")
             chunks = self.batches[fileID]["chunks"]
             # Sort chunks by order to ensure correct order
             sorted_chunks = [chunks[order] for order in sorted(chunks.keys())]
             data = "".join(sorted_chunks)
             
             try:
-                msg.info(f"[BATCH] Parsing FileConfig JSON for {fileID} (length: {len(data)} chars)")
                 fileConfig = FileConfig.model_validate_json(data)
-                msg.good(f"[BATCH] Successfully parsed FileConfig for {fileConfig.filename} (Reader: {fileConfig.rag_config.get('Reader', {}).get('selected', 'unknown')})")
+                msg.good(f"[BATCH] Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {fileConfig.rag_config.get('Reader', {}).get('selected', 'unknown')})")
                 return fileConfig
             except Exception as e:
                 import traceback
-                msg.fail(f"[BATCH] Failed to parse FileConfig JSON for {fileID}: {type(e).__name__}: {str(e)}")
-                msg.fail(f"[BATCH] JSON data preview (first 500 chars): {data[:500]}")
+                msg.fail(f"[BATCH] Failed to parse FileConfig JSON: {type(e).__name__}: {str(e)}")
+                msg.fail(f"[BATCH] JSON preview (first 500 chars): {data[:500]}")
                 msg.fail(f"[BATCH] Traceback: {traceback.format_exc()}")
                 raise
         else:
-            received = len(self.batches[fileID]["chunks"].keys())
-            total = self.batches[fileID]["total"]
-            msg.info(f"[BATCH] Waiting for more chunks for {fileID}: {received}/{total} received")
+            # Don't log every check - only log periodically or on errors
             return None
