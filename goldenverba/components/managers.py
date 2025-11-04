@@ -369,44 +369,46 @@ class WeaviateManager:
                 # weaviate-client v4 suporta HTTPS via URL completa
                 if w_key is None or w_key == "":
                     # Tenta conexão via URL completa sem auth
-                    # Para Railway, use_async_with_local pode funcionar se configurado corretamente
+                    # Para Railway HTTPS, tenta connect_to_custom primeiro (mais confiável)
                     try:
-                        client = weaviate.use_async_with_local(
-                            host=actual_host,
-                            port=port_int,
-                            skip_init_checks=True,
+                        client = weaviate.connect_to_custom(
+                            http_host=actual_host,
+                            http_port=port_int,
+                            http_secure=True,
+                            grpc_host=actual_host,
+                            grpc_port=50051,
+                            grpc_secure=True,
+                            skip_init_checks=False,
                             additional_config=AdditionalConfig(
                                 timeout=Timeout(init=60, query=300, insert=300)
                             ),
                         )
                         await client.connect()
                         if await client.is_ready():
-                            msg.good("Conexao HTTPS estabelecida via use_async_with_local")
+                            msg.good("Conexao HTTPS estabelecida via connect_to_custom")
                             return client
                         await client.close()
-                    except Exception as e_local:
-                        msg.warn(f"use_async_with_local falhou: {str(e_local)[:100]}")
+                    except Exception as e_custom:
+                        msg.warn(f"connect_to_custom falhou: {str(e_custom)[:100]}")
                         
-                        # Tenta via connect_to_custom com URL completa (funciona melhor para HTTPS)
+                        # Fallback: use_async_with_local
                         try:
-                            # Para v4, pode usar connect_to_custom com http_host, http_port, http_secure
-                            # Mas isso pode não estar disponível, então tenta adapter v3 como fallback
-                            try:
-                                from verba_extensions.compatibility.weaviate_v3_adapter import WeaviateV3HTTPAdapter
-                                adapter = WeaviateV3HTTPAdapter(url, None)
-                                if await adapter.is_ready():
-                                    msg.good("Conexao HTTPS estabelecida via adapter v3")
-                                    return adapter
-                            except ImportError:
-                                msg.warn("Adapter v3 nao disponivel - usando metodo alternativo")
-                            except Exception as e_adapter:
-                                msg.warn(f"Adapter v3 falhou: {str(e_adapter)[:100]}")
-                            
-                            # Última tentativa: use_async_with_weaviate_cloud com URL customizada
-                            # Isso funciona para HTTPS externo mesmo sem API key
-                            raise e_local  # Se chegou aqui, todos os métodos falharam
-                        except Exception:
-                            raise e_local
+                            client = weaviate.use_async_with_local(
+                                host=actual_host,
+                                port=port_int,
+                                skip_init_checks=True,
+                                additional_config=AdditionalConfig(
+                                    timeout=Timeout(init=60, query=300, insert=300)
+                                ),
+                            )
+                            await client.connect()
+                            if await client.is_ready():
+                                msg.good("Conexao HTTPS estabelecida via use_async_with_local")
+                                return client
+                            await client.close()
+                        except Exception as e_local:
+                            msg.warn(f"use_async_with_local falhou: {str(e_local)[:100]}")
+                            raise e_custom  # Re-raise erro do connect_to_custom
                 else:
                     # Com API key, usa auth
                     client = weaviate.use_async_with_local(
@@ -428,20 +430,11 @@ class WeaviateManager:
                 error_str = str(e).lower()
                 msg.warn(f"Tentativa HTTPS falhou: {str(e)[:150]}")
                 
-                # Se erro indica problema de versão/incompatibilidade, tenta adapter v3
-                if any(x in error_str for x in ['api', 'version', 'schema', '400', 'meta endpoint']):
-                    try:
-                        from verba_extensions.compatibility.weaviate_v3_adapter import WeaviateV3HTTPAdapter
-                        msg.info("Tentando adapter v3 HTTP como fallback...")
-                        adapter = WeaviateV3HTTPAdapter(url, w_key if w_key else None)
-                        if await adapter.is_ready():
-                            msg.good("Conexao estabelecida via adapter v3 HTTP")
-                            return adapter
-                    except ImportError:
-                        # Adapter não disponível - erro final será o original
-                        pass
-                    except Exception as e_adapter:
-                        msg.warn(f"Adapter v3 falhou: {str(e_adapter)[:100]}")
+                # Se chegou aqui, todos os métodos falharam
+                msg.warn("Todos os metodos de conexao falharam. Verifique:")
+                msg.warn("  - URL do Weaviate esta correta?")
+                msg.warn("  - API key esta correta?")
+                msg.warn("  - Servidor Weaviate esta acessivel?")
                 
                 raise  # Re-raise erro original se todos os métodos falharam
         else:
@@ -474,36 +467,29 @@ class WeaviateManager:
                     msg.warn(f"Conexao HTTP falhou: {str(e)[:100]}")
                     msg.info("Tentando HTTPS como fallback para Railway porta 8080...")
                     try:
-                        https_url = f"https://{actual_host}"
-                        from verba_extensions.compatibility.weaviate_v3_adapter import WeaviateV3HTTPAdapter
-                        adapter = WeaviateV3HTTPAdapter(https_url, w_key if w_key else None)
-                        
-                        if await adapter.is_ready():
+                        # Tenta connect_to_custom com HTTPS
+                        client = weaviate.connect_to_custom(
+                            http_host=actual_host,
+                            http_port=443,
+                            http_secure=True,
+                            grpc_host=actual_host,
+                            grpc_port=50051,
+                            grpc_secure=True,
+                            skip_init_checks=False,
+                            additional_config=AdditionalConfig(
+                                timeout=Timeout(init=60, query=300, insert=300)
+                            ),
+                        )
+                        await client.connect()
+                        if await client.is_ready():
                             msg.good("Conexao HTTPS estabelecida como fallback")
-                            return adapter
+                            return client
+                        await client.close()
                     except Exception as e_https:
                         msg.warn(f"Tentativa HTTPS fallback falhou: {str(e_https)[:100]}")
                 
-                # Se falhar, pode ser incompatibilidade v3/v4
-                if any(x in error_str for x in ['api', 'version', 'schema', 'client', 'attribute', 'connection']):
-                    msg.warn(f"Conexao v4 falhou (possivel incompatibilidade): {str(e)}")
-                    msg.info("Tentando conexao via API REST direta para v3...")
-                    
-                    # Cria adapter v3 como fallback
-                    try:
-                        from verba_extensions.compatibility.weaviate_v3_adapter import WeaviateV3HTTPAdapter
-                        adapter = WeaviateV3HTTPAdapter(url, w_key if w_key else None)
-                        
-                        if await adapter.is_ready():
-                            msg.good("Conexao v3 estabelecida via API REST direta")
-                            return adapter
-                        else:
-                            raise Exception("Weaviate v3 nao esta pronto")
-                    except Exception as e2:
-                        msg.fail(f"Tentativa v3 tambem falhou: {str(e2)}")
-                        raise e  # Re-raise erro original
-                else:
-                    raise  # Re-raise se não for erro de versão
+                # Se falhar, re-raise erro original
+                raise
 
     async def connect_to_embedded(self):
         msg.info(f"Connecting to Weaviate Embedded")
@@ -534,7 +520,15 @@ class WeaviateManager:
                 raise Exception(f"Invalid deployment type: {deployment}")
 
             if client is not None:
-                await client.connect()
+                # Clientes v4 já estão conectados após connect_to_*, mas verificamos ready
+                # Se cliente não tem connect(), já está conectado (comportamento v4)
+                try:
+                    if hasattr(client, 'connect'):
+                        await client.connect()
+                except AttributeError:
+                    # Cliente já está conectado (comportamento padrão v4)
+                    pass
+                
                 if await client.is_ready():
                     msg.good("Succesfully Connected to Weaviate")
                     return client

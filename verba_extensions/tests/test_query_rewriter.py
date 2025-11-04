@@ -88,12 +88,12 @@ class TestQueryRewriterPlugin(unittest.TestCase):
         self.assertEqual(len(self.plugin.cache), 0)
     
     @patch('verba_extensions.plugins.query_rewriter.QueryRewriterPlugin._get_generator')
-    def test_rewrite_query_without_generator(self, mock_get_generator):
+    async def test_rewrite_query_without_generator(self, mock_get_generator):
         """Testa reescrita sem generator disponível"""
         mock_get_generator.return_value = None
         
         query = "test query"
-        response = self.plugin.rewrite_query(query, use_cache=False)
+        response = await self.plugin.rewrite_query(query, use_cache=False)
         
         # Deve retornar fallback
         self.assertEqual(response["semantic_query"], query)

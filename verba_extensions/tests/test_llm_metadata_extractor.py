@@ -7,7 +7,7 @@ import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from pydantic import ValidationError
 
-from goldenverba.components.types import Chunk
+from goldenverba.components.chunk import Chunk
 from verba_extensions.plugins.llm_metadata_extractor import (
     LLMMetadataExtractorPlugin,
     EnrichedMetadata,

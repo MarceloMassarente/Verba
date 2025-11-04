@@ -214,7 +214,7 @@ async def test_named_vectors_via_rest():
             msg.warn(f"  Erro ao remover collection: {e}")
     
     msg.good("\n" + "=" * 60)
-    msg.good("[OK] TESTE DE NAMED VECTORS VIA REST CONCLUÍDO!")
+    msg.good("[OK] TESTE DE NAMED VECTORS VIA REST CONCLUIDO!")
     msg.good("=" * 60)
     msg.info("\nConclusao:")
     msg.info("  - API REST do Weaviate suporta named vectors")
