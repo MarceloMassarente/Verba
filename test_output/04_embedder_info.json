@@ -1,0 +1,16 @@
+{
+  "embedder": "all-MiniLM-L6-v2",
+  "total_vectors": 10,
+  "dimension": 384,
+  "vectors_shape": [
+    10,
+    384
+  ],
+  "vectors_dtype": "float32",
+  "stats": {
+    "norm_mean": 1.0,
+    "norm_min": 0.9999999403953552,
+    "norm_max": 1.0,
+    "norm_std": 3.7697287069704544e-08
+  }
+}

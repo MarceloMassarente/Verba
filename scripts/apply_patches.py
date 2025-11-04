@@ -64,6 +64,26 @@ except Exception as e:
         "insert_after": True,
         "insert": "        SentenceTransformersEmbedder(),",
         "description": "Adicionar SentenceTransformersEmbedder na lista"
+    },
+    "verba_manager_etl_pre_chunking": {
+        "file": "goldenverba/verba_manager.py",
+        "find": "# Check if ETL is enabled BEFORE chunking",
+        "after_find": True,
+        "insert": '''            # FASE 1: ETL Pré-Chunking (extrai entidades do documento completo)
+            # ⚠️ PATCH: Integração de ETL pré-chunking via hook
+            # Documentado em: verba_extensions/patches/README_PATCHES.md
+            # Ao atualizar Verba, verificar se este patch ainda funciona
+            if enable_etl:
+                try:
+                    from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
+                    document = apply_etl_pre_chunking(document, enable_etl=True)
+                    msg.info(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
+                except ImportError:
+                    msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem)")
+                except Exception as e:
+                    msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {str(e)}")
+            ''',
+        "description": "ETL Pré-Chunking Hook - extrai entidades antes do chunking para entity-aware chunking"
     }
 }
 

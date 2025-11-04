@@ -1,0 +1,54 @@
+Entidades encontradas em 5 chunks
+
+Chunk 0:
+  - Leadership Advisory Pur (PER)
+  - Play no Brasil
+ (MISC)
+  - Leadership Advisory (PER)
+
+Chunk 1:
+  - ESA (ORG)
+  - Dasein (LOC)
+  - MAIO (MISC)
+  - Executive Search (MISC)
+  - Advisory (ORG)
+  - Cultura (MISC)
+  - Leadership Advisory (PER)
+
+Chunk 2:
+  - mo referência nacional indiscutível (LOC)
+  - Vale (LOC)
+  - Suzano (LOC)
+  - Itaú (LOC)
+  - Gerdau (ORG)
+  - Natura&Co (ORG)
+  - Volkswagen (ORG)
+  - Betania Tanure (PER)
+  - PhD (PER)
+  - Brunel University (ORG)
+
+Chunk 3:
+  - Exame 2023 (MISC)
+  - PDCA (MISC)
+  - Falconi (PER)
+  - Escritório (MISC)
+  - Chicago (LOC)
+  - Corall Consultoria (ORG)
+  - Brasil (LOC)
+  - Capitalismo Consciente (MISC)
+  - Instituto Capitalismo Consciente Brasil (LOC)
+  - Coca-Cola (PER)
+
+Chunk 4:
+  - Flow de
+Mihaly Csikszentmihalyi (MISC)
+  - Brasil (LOC)
+  - Ferrero (PER)
+  - Pirelli (ORG)
+  - Natura (ORG)
+  - Heineken (ORG)
+  - Mars (MISC)
+  - Mondelez (MISC)
+  - Crescimentum (LOC)
+  - Barrett (PER)
+

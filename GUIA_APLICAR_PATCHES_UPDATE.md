@@ -41,6 +41,33 @@ git clone https://github.com/weaviate/verba.git verba_new
 
 ### **PASSO 3: Aplicar Mudanças Core**
 
+#### **Mudança 0: ETL Pré-Chunking Hook** ⭐ NOVO
+
+**Arquivo**: `goldenverba/verba_manager.py`
+
+**Localização**: No método `process_single_document()`, antes do chunking (linha ~238)
+
+**Adicionar**:
+```python
+# FASE 1: ETL Pré-Chunking (extrai entidades do documento completo)
+# ⚠️ PATCH: Integração de ETL pré-chunking via hook
+# Documentado em: verba_extensions/patches/README_PATCHES.md
+# Ao atualizar Verba, verificar se este patch ainda funciona
+if enable_etl:
+    try:
+        from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
+        document = apply_etl_pre_chunking(document, enable_etl=True)
+        msg.info(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
+    except ImportError:
+        msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem)")
+    except Exception as e:
+        msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {str(e)}")
+```
+
+**Ver documentação completa:** `verba_extensions/patches/README_PATCHES.md`
+
+---
+
 #### **Mudança 1: Carregamento de Extensões**
 
 **Arquivo**: `goldenverba/server/api.py`
@@ -161,6 +188,37 @@ cp docker-compose.yml verba_nova/
 cp requirements-extensions.txt verba_nova/
 ```
 
+### **PASSO 4.5: Verificar Patches de ETL e Hooks** ⭐ NOVO
+
+Após copiar arquivos, verificar se patches de ETL estão funcionando:
+
+```bash
+# 1. Verificar se hook de ETL pré-chunking está sendo aplicado
+python -c "
+from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
+print('✅ ETL pré-chunking hook OK')
+"
+
+# 2. Verificar se import hook está sendo aplicado
+python -c "
+from verba_extensions.integration.import_hook import patch_weaviate_manager
+from goldenverba.components import managers
+# Verificar se método ainda existe
+if hasattr(managers.WeaviateManager, 'import_document'):
+    print('✅ WeaviateManager.import_document existe - patch pode ser aplicado')
+else:
+    print('⚠️ WeaviateManager.import_document não encontrado - verificar estrutura')
+"
+
+# 3. Verificar se SectionAwareChunker aceita entity_spans
+python -c "
+from verba_extensions.plugins.section_aware_chunker import SectionAwareChunker
+print('✅ SectionAwareChunker OK')
+"
+```
+
+**Se algum verificar falhar, ver:** `verba_extensions/patches/README_PATCHES.md`
+
 ---
 
 ### **PASSO 5: Verificar Dependências**
@@ -252,11 +310,13 @@ Após aplicar todos os patches:
 
 - [ ] Backup feito
 - [ ] Verba atualizado
+- [ ] Mudança 0 aplicada (ETL Pré-Chunking Hook) ⭐ NOVO
 - [ ] Mudança 1 aplicada (extensões)
 - [ ] Mudança 2 aplicada (CORS)
 - [ ] Mudança 3 aplicada (SentenceTransformers)
 - [ ] Mudança 4 aplicada (connect_to_custom)
 - [ ] Arquivos novos copiados
+- [ ] Patches de ETL verificados (PASSO 4.5) ⭐ NOVO
 - [ ] Dependências atualizadas
 - [ ] Testes passando
 - [ ] Documentação atualizada

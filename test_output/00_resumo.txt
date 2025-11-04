@@ -1,0 +1,25 @@
+
+RESUMO DO TESTE
+===============
+Data: 2025-11-04 14:29:53
+Arquivo: Mercado de Leadership Advisory Pure Play no Brasil_ Realidade de Especialização versus Modelo Integrado com Executive Search.pdf
+
+RESULTADOS:
+-----------
+Texto extraido: 42797 caracteres
+Chunks criados: 53
+Chunks com entidades: 5
+
+ARQUIVOS GERADOS:
+-----------------
+- 01_texto_extraido.txt
+- 02_chunks.txt
+- 02_chunks_data.json
+- 03_entidades.txt
+- 03_entidades_data.json
+- 00_resumo.txt (este arquivo)
+
+PROXIMO PASSO:
+--------------
+Testar com Weaviate em: https://weaviate-production-0d0e.up.railway.app
+Execute: python test_pipeline_simples.py

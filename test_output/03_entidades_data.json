@@ -1,0 +1,189 @@
+{
+  "entities": [
+    {
+      "chunk_id": 0,
+      "entities": [
+        {
+          "text": "Leadership Advisory Pur",
+          "label": "PER"
+        },
+        {
+          "text": "Play no Brasil\n",
+          "label": "MISC"
+        },
+        {
+          "text": "Leadership Advisory",
+          "label": "PER"
+        }
+      ]
+    },
+    {
+      "chunk_id": 1,
+      "entities": [
+        {
+          "text": "ESA",
+          "label": "ORG"
+        },
+        {
+          "text": "Dasein",
+          "label": "LOC"
+        },
+        {
+          "text": "MAIO",
+          "label": "MISC"
+        },
+        {
+          "text": "Executive Search",
+          "label": "MISC"
+        },
+        {
+          "text": "Advisory",
+          "label": "ORG"
+        },
+        {
+          "text": "Cultura",
+          "label": "MISC"
+        },
+        {
+          "text": "Leadership Advisory",
+          "label": "PER"
+        }
+      ]
+    },
+    {
+      "chunk_id": 2,
+      "entities": [
+        {
+          "text": "mo referência nacional indiscutível",
+          "label": "LOC"
+        },
+        {
+          "text": "Vale",
+          "label": "LOC"
+        },
+        {
+          "text": "Suzano",
+          "label": "LOC"
+        },
+        {
+          "text": "Itaú",
+          "label": "LOC"
+        },
+        {
+          "text": "Gerdau",
+          "label": "ORG"
+        },
+        {
+          "text": "Natura&Co",
+          "label": "ORG"
+        },
+        {
+          "text": "Volkswagen",
+          "label": "ORG"
+        },
+        {
+          "text": "Betania Tanure",
+          "label": "PER"
+        },
+        {
+          "text": "PhD",
+          "label": "PER"
+        },
+        {
+          "text": "Brunel University",
+          "label": "ORG"
+        }
+      ]
+    },
+    {
+      "chunk_id": 3,
+      "entities": [
+        {
+          "text": "Exame 2023",
+          "label": "MISC"
+        },
+        {
+          "text": "PDCA",
+          "label": "MISC"
+        },
+        {
+          "text": "Falconi",
+          "label": "PER"
+        },
+        {
+          "text": "Escritório",
+          "label": "MISC"
+        },
+        {
+          "text": "Chicago",
+          "label": "LOC"
+        },
+        {
+          "text": "Corall Consultoria",
+          "label": "ORG"
+        },
+        {
+          "text": "Brasil",
+          "label": "LOC"
+        },
+        {
+          "text": "Capitalismo Consciente",
+          "label": "MISC"
+        },
+        {
+          "text": "Instituto Capitalismo Consciente Brasil",
+          "label": "LOC"
+        },
+        {
+          "text": "Coca-Cola",
+          "label": "PER"
+        }
+      ]
+    },
+    {
+      "chunk_id": 4,
+      "entities": [
+        {
+          "text": "Flow de\nMihaly Csikszentmihalyi",
+          "label": "MISC"
+        },
+        {
+          "text": "Brasil",
+          "label": "LOC"
+        },
+        {
+          "text": "Ferrero",
+          "label": "PER"
+        },
+        {
+          "text": "Pirelli",
+          "label": "ORG"
+        },
+        {
+          "text": "Natura",
+          "label": "ORG"
+        },
+        {
+          "text": "Heineken",
+          "label": "ORG"
+        },
+        {
+          "text": "Mars",
+          "label": "MISC"
+        },
+        {
+          "text": "Mondelez",
+          "label": "MISC"
+        },
+        {
+          "text": "Crescimentum",
+          "label": "LOC"
+        },
+        {
+          "text": "Barrett",
+          "label": "PER"
+        }
+      ]
+    }
+  ]
+}

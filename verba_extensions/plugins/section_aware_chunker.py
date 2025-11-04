@@ -1,6 +1,15 @@
 """
 Section-Aware Chunker - Chunking que respeita limites de seções
 Melhora qualidade ao evitar cortar entidades/seções no meio
+
+⚠️ PATCH - Documentado em verba_extensions/patches/README_PATCHES.md
+
+Este chunker foi modificado para usar entity_spans pré-extraídos (via ETL pré-chunking).
+Ao atualizar Verba, verificar se estrutura de Document ainda aceita meta.entity_spans.
+
+Dependências:
+- verba_extensions/integration/chunking_hook.py (fornece entity_spans)
+- goldenverba/verba_manager.py (chama ETL pré-chunking antes deste chunker)
 """
 
 import re
@@ -131,13 +140,20 @@ class SectionAwareChunker(Chunker):
             
             text = document.content
             
+            # Pega entidades pré-extraídas (se disponível via ETL pré-chunking)
+            entity_spans = []
+            if hasattr(document, 'meta') and document.meta:
+                entity_spans = document.meta.get("entity_spans", [])
+                if entity_spans:
+                    msg.info(f"[ENTITY-AWARE] Usando {len(entity_spans)} entidades pré-extraídas para chunking entity-aware")
+            
             # Detecta seções
             sections = detect_sections(text)
             
             if len(sections) <= 1:
-                # Sem seções claras, usa chunking padrão por sentenças
+                # Sem seções claras, usa chunking padrão por sentenças (entity-aware se disponível)
                 msg.info(f"Documento sem seções claras, usando chunking por sentenças")
-                await self._chunk_by_sentences(document, chunk_size, overlap)
+                await self._chunk_by_sentences_entity_aware(document, chunk_size, overlap, entity_spans)
                 continue
             
             msg.info(f"Detectadas {len(sections)} seções no documento")
@@ -172,18 +188,39 @@ class SectionAwareChunker(Chunker):
                     chunk_id_counter += 1
                     
                 else:
-                    # Seção grande: divide respeitando parágrafos
+                    # Seção grande: divide respeitando parágrafos E entidades
                     paragraphs = section_text.split('\n\n')
+                    
+                    # Filtra entidades que estão nesta seção
+                    section_entities = [
+                        e for e in entity_spans
+                        if section["start"] <= e["start"] < section["end"]
+                    ] if entity_spans else []
                     
                     current_chunk_parts = []
                     current_chunk_words = 0
                     char_offset = section["start"]
                     
-                    for para in paragraphs:
+                    for para_idx, para in enumerate(paragraphs):
                         para_words = len(para.split())
+                        para_start = char_offset
+                        para_end = char_offset + len(para)
                         
-                        if current_chunk_words + para_words > chunk_size and current_chunk_parts:
-                            # Finaliza chunk atual
+                        # Verifica se este parágrafo contém entidades que não devem ser cortadas
+                        para_entities = [
+                            e for e in section_entities
+                            if para_start <= e["start"] < para_end or para_start <= e["end"] < para_end
+                        ]
+                        
+                        # Se próximo chunk ultrapassaria tamanho E tem entidades no meio, tenta evitar cortar
+                        would_exceed = current_chunk_words + para_words > chunk_size
+                        has_entities_in_middle = any(
+                            e["start"] > char_offset and e["end"] < char_offset + len(para)
+                            for e in para_entities
+                        )
+                        
+                        if would_exceed and current_chunk_parts and not has_entities_in_middle:
+                            # Finaliza chunk atual (entidade não será cortada)
                             chunk_text = '\n\n'.join(current_chunk_parts)
                             chunk_start = char_offset - len(chunk_text)
                             chunk_end = char_offset
@@ -207,6 +244,14 @@ class SectionAwareChunker(Chunker):
                             else:
                                 current_chunk_parts = []
                                 current_chunk_words = 0
+                        elif would_exceed and has_entities_in_middle and current_chunk_parts:
+                            # Tenta evitar cortar entidade: inclui parágrafo atual mesmo se ultrapassar um pouco
+                            # Isso mantém entidade completa no mesmo chunk
+                            msg.info(f"[ENTITY-AWARE] Evitando cortar entidade no meio - incluindo parágrafo completo")
+                            current_chunk_parts.append(para)
+                            current_chunk_words += para_words
+                            char_offset += len(para) + 2
+                            continue
                         
                         current_chunk_parts.append(para)
                         current_chunk_words += para_words
@@ -245,15 +290,34 @@ class SectionAwareChunker(Chunker):
         
         return documents
     
+    async def _chunk_by_sentences_entity_aware(
+        self,
+        document: Document,
+        chunk_size: int,
+        overlap: int,
+        entity_spans: list = None
+    ):
+        """
+        Chunking por sentenças com consciência de entidades (evita cortar entidades)
+        """
+        if entity_spans is None:
+            entity_spans = []
+        
+        await self._chunk_by_sentences(document, chunk_size, overlap, entity_spans)
+    
     async def _chunk_by_sentences(
         self,
         document: Document,
         chunk_size: int,
-        overlap: int
+        overlap: int,
+        entity_spans: list = None
     ):
         """
         Fallback: chunking por sentenças (quando não há seções claras)
+        Agora com suporte a entity_spans para evitar cortar entidades
         """
+        if entity_spans is None:
+            entity_spans = []
         try:
             # Usa SpaCy se disponível no documento
             if hasattr(document, 'spacy_doc') and document.spacy_doc:

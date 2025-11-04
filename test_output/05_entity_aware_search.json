@@ -1,0 +1,427 @@
+[
+  {
+    "query": "Quais empresas brasileiras são mencionadas no documento?",
+    "query_entities": [],
+    "semantic_results": [
+      {
+        "chunk_id": 9,
+        "score": 0.5968877077102661,
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 3,
+        "score": 0.5612943172454834,
+        "text": "aiores da Exame 2023.  A metodologia PDCA  e\ngerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam\na Falconi como líder técnico em gerenciamento d",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 0,
+        "score": 0.5511687994003296,
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 7,
+        "score": 0.5420184135437012,
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 1,
+        "score": 0.47604691982269287,
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "semantic"
+      }
+    ],
+    "entity_aware_results": [
+      {
+        "chunk_id": 9,
+        "semantic_score": 0.5968877077102661,
+        "entity_score": 0.0,
+        "combined_score": 0.41782137751579285,
+        "entity_matches": [],
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 3,
+        "semantic_score": 0.5612943172454834,
+        "entity_score": 0.0,
+        "combined_score": 0.3929060101509094,
+        "entity_matches": [],
+        "text": "aiores da Exame 2023.  A metodologia PDCA  e\ngerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam\na Falconi como líder técnico em gerenciamento d",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 0,
+        "semantic_score": 0.5511687994003296,
+        "entity_score": 0.0,
+        "combined_score": 0.38581815361976624,
+        "entity_matches": [],
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 7,
+        "semantic_score": 0.5420184135437012,
+        "entity_score": 0.0,
+        "combined_score": 0.3794128894805908,
+        "entity_matches": [],
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 1,
+        "semantic_score": 0.47604691982269287,
+        "entity_score": 0.0,
+        "combined_score": 0.3332328498363495,
+        "entity_matches": [],
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "entity_aware"
+      }
+    ],
+    "comparison": {
+      "overlap": [
+        0,
+        1,
+        3,
+        7,
+        9
+      ],
+      "semantic_only": [],
+      "entity_only": []
+    }
+  },
+  {
+    "query": "Leadership Advisory no Brasil",
+    "query_entities": [
+      {
+        "text": "Leadership Advisory",
+        "label": "PER"
+      },
+      {
+        "text": "Brasil",
+        "label": "LOC"
+      }
+    ],
+    "semantic_results": [
+      {
+        "chunk_id": 0,
+        "score": 0.6579769849777222,
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 1,
+        "score": 0.5779975652694702,
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 6,
+        "score": 0.5200701951980591,
+        "text": " Medalha de Bronze Shingo, focando transformação cultural em\nmanufatura, engenharia e supply chain com foco sênior em pessoas e comportamentos. \nDextera Consultoria  especializou-se em Or ganizational",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 7,
+        "score": 0.4942992925643921,
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 9,
+        "score": 0.45586109161376953,
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "semantic"
+      }
+    ],
+    "entity_aware_results": [
+      {
+        "chunk_id": 0,
+        "semantic_score": 0.6579769849777222,
+        "entity_score": 4.0,
+        "combined_score": 0.7605838775634766,
+        "entity_matches": [
+          "Leadership Advisory Pur",
+          "Play no Brasil\n",
+          "Leadership Advisory"
+        ],
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 1,
+        "semantic_score": 0.5779975652694702,
+        "entity_score": 3.0,
+        "combined_score": 0.7045983076095581,
+        "entity_matches": [
+          "Advisory",
+          "Leadership Advisory"
+        ],
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 3,
+        "semantic_score": 0.3929862380027771,
+        "entity_score": 2.5,
+        "combined_score": 0.5750904083251953,
+        "entity_matches": [
+          "Brasil",
+          "Instituto Capitalismo Consciente Brasil"
+        ],
+        "text": "aiores da Exame 2023.  A metodologia PDCA  e\ngerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam\na Falconi como líder técnico em gerenciamento d",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 4,
+        "semantic_score": 0.33185455203056335,
+        "entity_score": 1.5,
+        "combined_score": 0.4572981595993042,
+        "entity_matches": [
+          "Brasil"
+        ],
+        "text": " baseada no conceito de Flow de\nMihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, \n atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem\nrelaciona habilidades ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 6,
+        "semantic_score": 0.5200701951980591,
+        "entity_score": 0.5,
+        "combined_score": 0.4390491247177124,
+        "entity_matches": [],
+        "text": " Medalha de Bronze Shingo, focando transformação cultural em\nmanufatura, engenharia e supply chain com foco sênior em pessoas e comportamentos. \nDextera Consultoria  especializou-se em Or ganizational",
+        "method": "entity_aware"
+      }
+    ],
+    "comparison": {
+      "overlap": [
+        0,
+        1,
+        6
+      ],
+      "semantic_only": [
+        9,
+        7
+      ],
+      "entity_only": [
+        3,
+        4
+      ]
+    }
+  },
+  {
+    "query": "Consultorias de estratégia e Executive Search",
+    "query_entities": [
+      {
+        "text": "Executive Search",
+        "label": "MISC"
+      }
+    ],
+    "semantic_results": [
+      {
+        "chunk_id": 1,
+        "score": 0.6273263096809387,
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 7,
+        "score": 0.5477290153503418,
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 0,
+        "score": 0.5293704867362976,
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 9,
+        "score": 0.510342538356781,
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 8,
+        "score": 0.4607885777950287,
+        "text": "Sua expertise combina\ngovernança, cultura or ganizacional e sucessão empresarial.  A base acadêmica em\nINSEAD, London Business School e TRIUM, somada a artigos na Harvard Business Review e livros\nsobr",
+        "method": "semantic"
+      }
+    ],
+    "entity_aware_results": [
+      {
+        "chunk_id": 1,
+        "semantic_score": 0.6273263096809387,
+        "entity_score": 1.5,
+        "combined_score": 0.7391284108161926,
+        "entity_matches": [
+          "Executive Search"
+        ],
+        "text": "ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,\nnão sendo pure play .  O mercado genuinamente pure play concentra-se em três\narquétipos: consultorias de estratégia que nunca fiz",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 7,
+        "semantic_score": 0.5477290153503418,
+        "entity_score": 0.5,
+        "combined_score": 0.5334103107452393,
+        "entity_matches": [],
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 0,
+        "semantic_score": 0.5293704867362976,
+        "entity_score": 0.5,
+        "combined_score": 0.5205593109130859,
+        "entity_matches": [],
+        "text": "Mercado de Leadership Advisory Pur e Play no Brasil\nA pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são\ngenuinamente pur e play  em Leadership Advisory sem Executiv",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 9,
+        "semantic_score": 0.510342538356781,
+        "entity_score": 0.0,
+        "combined_score": 0.3572397828102112,
+        "entity_matches": [],
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 8,
+        "semantic_score": 0.4607885777950287,
+        "entity_score": 0.0,
+        "combined_score": 0.32255199551582336,
+        "entity_matches": [],
+        "text": "Sua expertise combina\ngovernança, cultura or ganizacional e sucessão empresarial.  A base acadêmica em\nINSEAD, London Business School e TRIUM, somada a artigos na Harvard Business Review e livros\nsobr",
+        "method": "entity_aware"
+      }
+    ],
+    "comparison": {
+      "overlap": [
+        0,
+        1,
+        7,
+        8,
+        9
+      ],
+      "semantic_only": [],
+      "entity_only": []
+    }
+  },
+  {
+    "query": "Vale, Suzano e Itaú",
+    "query_entities": [
+      {
+        "text": "Vale",
+        "label": "LOC"
+      },
+      {
+        "text": "Suzano",
+        "label": "LOC"
+      },
+      {
+        "text": "Itaú",
+        "label": "LOC"
+      }
+    ],
+    "semantic_results": [
+      {
+        "chunk_id": 4,
+        "score": 0.26393646001815796,
+        "text": " baseada no conceito de Flow de\nMihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, \n atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem\nrelaciona habilidades ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 2,
+        "score": 0.2381725013256073,
+        "text": "mo referência nacional indiscutível.  Fundada em\n2007, a consultoria  atende mais de 60 grandes empresas incluindo Vale, Suzano, Itaú,\nGerdau, Natura&Co e Volkswagen.  Betania Tanure, PhD pela Brunel ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 7,
+        "score": 0.2092481553554535,
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 9,
+        "score": 0.20287936925888062,
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "semantic"
+      },
+      {
+        "chunk_id": 3,
+        "score": 0.20216694474220276,
+        "text": "aiores da Exame 2023.  A metodologia PDCA  e\ngerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam\na Falconi como líder técnico em gerenciamento d",
+        "method": "semantic"
+      }
+    ],
+    "entity_aware_results": [
+      {
+        "chunk_id": 2,
+        "semantic_score": 0.2381725013256073,
+        "entity_score": 4.5,
+        "combined_score": 0.4667207598686218,
+        "entity_matches": [
+          "Vale",
+          "Suzano",
+          "Itaú"
+        ],
+        "text": "mo referência nacional indiscutível.  Fundada em\n2007, a consultoria  atende mais de 60 grandes empresas incluindo Vale, Suzano, Itaú,\nGerdau, Natura&Co e Volkswagen.  Betania Tanure, PhD pela Brunel ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 4,
+        "semantic_score": 0.26393646001815796,
+        "entity_score": 0.0,
+        "combined_score": 0.18475551903247833,
+        "entity_matches": [],
+        "text": " baseada no conceito de Flow de\nMihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, \n atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem\nrelaciona habilidades ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 7,
+        "semantic_score": 0.2092481553554535,
+        "entity_score": 0.0,
+        "combined_score": 0.1464737057685852,
+        "entity_matches": [],
+        "text": "bro EMA  Partners, 6.500+ executivos contratados via search). \nGovernança corporativa enfr enta escassez crítica de pur e play no mer cado\nA pesquisa revelou realidade surpreendente: apenas 2 players ",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 9,
+        "semantic_score": 0.20287936925888062,
+        "entity_score": 0.0,
+        "combined_score": 0.14201556146144867,
+        "entity_matches": [],
+        "text": "ona-se como consultoria em\ngovernança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como\nsearch firm. \nO ecossistema brasileiro de governança concentra-se em form",
+        "method": "entity_aware"
+      },
+      {
+        "chunk_id": 3,
+        "semantic_score": 0.20216694474220276,
+        "entity_score": 0.0,
+        "combined_score": 0.14151686429977417,
+        "entity_matches": [],
+        "text": "aiores da Exame 2023.  A metodologia PDCA  e\ngerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam\na Falconi como líder técnico em gerenciamento d",
+        "method": "entity_aware"
+      }
+    ],
+    "comparison": {
+      "overlap": [
+        2,
+        3,
+        4,
+        7,
+        9
+      ],
+      "semantic_only": [],
+      "entity_only": []
+    }
+  }
+]

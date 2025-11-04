@@ -234,8 +234,21 @@ class VerbaManager:
 
             # Check if ETL is enabled BEFORE chunking
             enable_etl = document.meta.get("enable_etl", False) if hasattr(document, 'meta') and document.meta else False
+            
+            # FASE 1: ETL Pré-Chunking (extrai entidades do documento completo)
+            # ⚠️ PATCH: Integração de ETL pré-chunking via hook
+            # Documentado em: verba_extensions/patches/README_PATCHES.md
+            # Ao atualizar Verba, verificar se este patch ainda funciona
             if enable_etl:
-                msg.info(f"[ETL] ETL A2 habilitado - será executado APÓS chunking e embedding")
+                try:
+                    from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
+                    document = apply_etl_pre_chunking(document, enable_etl=True)
+                    msg.info(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
+                except ImportError:
+                    msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem)")
+                except Exception as e:
+                    msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {str(e)}")
+                msg.info(f"[ETL] ETL A2 habilitado - será executado APÓS chunking e embedding também")
             else:
                 msg.info(f"[ETL] ETL A2 não habilitado para este documento")
             

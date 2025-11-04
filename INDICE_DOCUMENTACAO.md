@@ -91,6 +91,16 @@ Este documento serve como índice centralizado de toda a documentação do proje
 - **[ANALISE_ETL_ENTITIES.md](ANALISE_ETL_ENTITIES.md)**
   - Análise do sistema ETL de entidades
 
+- **[ANALISE_ETL_ANTES_CHUNKING.md](ANALISE_ETL_ANTES_CHUNKING.md)** ⭐ NOVO
+  - Análise de viabilidade ETL pré-chunking
+  - Entity-aware chunking
+  - Proposta de implementação
+
+- **[verba_extensions/patches/README_PATCHES.md](verba_extensions/patches/README_PATCHES.md)** ⭐ NOVO
+  - **Documentação completa de patches ETL e hooks**
+  - Guia de reaplicação após upgrade
+  - Troubleshooting de patches
+
 ### 🗄️ **Weaviate e Conexão**
 - **[PATCHES_VERBA_WEAVIATE_V4.md](PATCHES_VERBA_WEAVIATE_V4.md)** ⭐ ESSENCIAL
   - Patches para Weaviate v4
@@ -285,6 +295,8 @@ Este documento serve como índice centralizado de toda a documentação do proje
 - `GUIA_INGESTOR_UNIVERSAL.md`
 - `EXPLICACAO_FLUXO_COMPLETO_ETL.md`
 - `ANALISE_ETL_ENTITIES.md`
+- `ANALISE_ETL_ANTES_CHUNKING.md` ⭐ NOVO
+- `verba_extensions/patches/README_PATCHES.md` ⭐ NOVO
 
 ## 📖 Guias de Leitura
 

@@ -328,3 +328,5 @@ railway logs | grep "production"
 4. **Depois:** Compartilhar output completo de `railway logs` durante uma tentativa de import
 
 **Qualquer uma dessas informações vai nos ajudar a identificar o problema com 95% de certeza.**
+
+

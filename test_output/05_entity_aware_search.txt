@@ -1,0 +1,314 @@
+RESULTADOS DO TESTE DE BUSCA ENTITY-AWARE
+============================================================
+
+
+============================================================
+QUERY: Quais empresas brasileiras são mencionadas no documento?
+============================================================
+
+BUSCA SEMÂNTICA TRADICIONAL (Top 5):
+------------------------------------------------------------
+1. Chunk 9 (Score: 0.5969)
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+2. Chunk 3 (Score: 0.5613)
+   aiores da Exame 2023.  A metodologia PDCA  e
+gerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam
+a Falconi como líder técnico em gerenciamento d...
+
+3. Chunk 0 (Score: 0.5512)
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+4. Chunk 7 (Score: 0.5420)
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+5. Chunk 1 (Score: 0.4760)
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+BUSCA ENTITY-AWARE (Top 5):
+------------------------------------------------------------
+1. Chunk 9 (Combined: 0.4178)
+   Semântico: 0.5969, Entidades: 0.00
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+2. Chunk 3 (Combined: 0.3929)
+   Semântico: 0.5613, Entidades: 0.00
+   aiores da Exame 2023.  A metodologia PDCA  e
+gerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam
+a Falconi como líder técnico em gerenciamento d...
+
+3. Chunk 0 (Combined: 0.3858)
+   Semântico: 0.5512, Entidades: 0.00
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+4. Chunk 7 (Combined: 0.3794)
+   Semântico: 0.5420, Entidades: 0.00
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+5. Chunk 1 (Combined: 0.3332)
+   Semântico: 0.4760, Entidades: 0.00
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+COMPARAÇÃO:
+------------------------------------------------------------
+Overlap: 5 chunks
+Semântico apenas: 0 chunks
+Entity-aware apenas: 0 chunks
+
+
+============================================================
+QUERY: Leadership Advisory no Brasil
+============================================================
+
+Entidades na query:
+  - Leadership Advisory (PER)
+  - Brasil (LOC)
+
+BUSCA SEMÂNTICA TRADICIONAL (Top 5):
+------------------------------------------------------------
+1. Chunk 0 (Score: 0.6580)
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+2. Chunk 1 (Score: 0.5780)
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+3. Chunk 6 (Score: 0.5201)
+    Medalha de Bronze Shingo, focando transformação cultural em
+manufatura, engenharia e supply chain com foco sênior em pessoas e comportamentos. 
+Dextera Consultoria  especializou-se em Or ganizational...
+
+4. Chunk 7 (Score: 0.4943)
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+5. Chunk 9 (Score: 0.4559)
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+BUSCA ENTITY-AWARE (Top 5):
+------------------------------------------------------------
+1. Chunk 0 (Combined: 0.7606)
+   Semântico: 0.6580, Entidades: 4.00
+   Matches: Leadership Advisory Pur, Play no Brasil
+, Leadership Advisory
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+2. Chunk 1 (Combined: 0.7046)
+   Semântico: 0.5780, Entidades: 3.00
+   Matches: Advisory, Leadership Advisory
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+3. Chunk 3 (Combined: 0.5751)
+   Semântico: 0.3930, Entidades: 2.50
+   Matches: Brasil, Instituto Capitalismo Consciente Brasil
+   aiores da Exame 2023.  A metodologia PDCA  e
+gerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam
+a Falconi como líder técnico em gerenciamento d...
+
+4. Chunk 4 (Combined: 0.4573)
+   Semântico: 0.3319, Entidades: 1.50
+   Matches: Brasil
+    baseada no conceito de Flow de
+Mihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, 
+ atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem
+relaciona habilidades ...
+
+5. Chunk 6 (Combined: 0.4390)
+   Semântico: 0.5201, Entidades: 0.50
+    Medalha de Bronze Shingo, focando transformação cultural em
+manufatura, engenharia e supply chain com foco sênior em pessoas e comportamentos. 
+Dextera Consultoria  especializou-se em Or ganizational...
+
+COMPARAÇÃO:
+------------------------------------------------------------
+Overlap: 3 chunks
+Semântico apenas: 2 chunks
+Entity-aware apenas: 2 chunks
+
+
+============================================================
+QUERY: Consultorias de estratégia e Executive Search
+============================================================
+
+Entidades na query:
+  - Executive Search (MISC)
+
+BUSCA SEMÂNTICA TRADICIONAL (Top 5):
+------------------------------------------------------------
+1. Chunk 1 (Score: 0.6273)
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+2. Chunk 7 (Score: 0.5477)
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+3. Chunk 0 (Score: 0.5294)
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+4. Chunk 9 (Score: 0.5103)
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+5. Chunk 8 (Score: 0.4608)
+   Sua expertise combina
+governança, cultura or ganizacional e sucessão empresarial.  A base acadêmica em
+INSEAD, London Business School e TRIUM, somada a artigos na Harvard Business Review e livros
+sobr...
+
+BUSCA ENTITY-AWARE (Top 5):
+------------------------------------------------------------
+1. Chunk 1 (Combined: 0.7391)
+   Semântico: 0.6273, Entidades: 1.50
+   Matches: Executive Search
+   ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O mercado genuinamente pure play concentra-se em três
+arquétipos: consultorias de estratégia que nunca fiz...
+
+2. Chunk 7 (Combined: 0.5334)
+   Semântico: 0.5477, Entidades: 0.50
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+3. Chunk 0 (Combined: 0.5206)
+   Semântico: 0.5294, Entidades: 0.50
+   Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32% dos players originalmente mapeados são
+genuinamente pur e play  em Leadership Advisory sem Executiv...
+
+4. Chunk 9 (Combined: 0.3572)
+   Semântico: 0.5103, Entidades: 0.00
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+5. Chunk 8 (Combined: 0.3226)
+   Semântico: 0.4608, Entidades: 0.00
+   Sua expertise combina
+governança, cultura or ganizacional e sucessão empresarial.  A base acadêmica em
+INSEAD, London Business School e TRIUM, somada a artigos na Harvard Business Review e livros
+sobr...
+
+COMPARAÇÃO:
+------------------------------------------------------------
+Overlap: 5 chunks
+Semântico apenas: 0 chunks
+Entity-aware apenas: 0 chunks
+
+
+============================================================
+QUERY: Vale, Suzano e Itaú
+============================================================
+
+Entidades na query:
+  - Vale (LOC)
+  - Suzano (LOC)
+  - Itaú (LOC)
+
+BUSCA SEMÂNTICA TRADICIONAL (Top 5):
+------------------------------------------------------------
+1. Chunk 4 (Score: 0.2639)
+    baseada no conceito de Flow de
+Mihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, 
+ atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem
+relaciona habilidades ...
+
+2. Chunk 2 (Score: 0.2382)
+   mo referência nacional indiscutível.  Fundada em
+2007, a consultoria  atende mais de 60 grandes empresas incluindo Vale, Suzano, Itaú,
+Gerdau, Natura&Co e Volkswagen.  Betania Tanure, PhD pela Brunel ...
+
+3. Chunk 7 (Score: 0.2092)
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+4. Chunk 9 (Score: 0.2029)
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+5. Chunk 3 (Score: 0.2022)
+   aiores da Exame 2023.  A metodologia PDCA  e
+gerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam
+a Falconi como líder técnico em gerenciamento d...
+
+BUSCA ENTITY-AWARE (Top 5):
+------------------------------------------------------------
+1. Chunk 2 (Combined: 0.4667)
+   Semântico: 0.2382, Entidades: 4.50
+   Matches: Vale, Suzano, Itaú
+   mo referência nacional indiscutível.  Fundada em
+2007, a consultoria  atende mais de 60 grandes empresas incluindo Vale, Suzano, Itaú,
+Gerdau, Natura&Co e Volkswagen.  Betania Tanure, PhD pela Brunel ...
+
+2. Chunk 4 (Combined: 0.1848)
+   Semântico: 0.2639, Entidades: 0.00
+    baseada no conceito de Flow de
+Mihaly Csikszentmihalyi.  Presente em 9 países e no Brasil desde 2017, 
+ atende Ferrero, Pirelli, Natura, Heineken, Mars e Mondelez.  A abordagem
+relaciona habilidades ...
+
+3. Chunk 7 (Combined: 0.1465)
+   Semântico: 0.2092, Entidades: 0.00
+   bro EMA  Partners, 6.500+ executivos contratados via search). 
+Governança corporativa enfr enta escassez crítica de pur e play no mer cado
+A pesquisa revelou realidade surpreendente: apenas 2 players ...
+
+4. Chunk 9 (Combined: 0.1420)
+   Semântico: 0.2029, Entidades: 0.00
+   ona-se como consultoria em
+governança com equipe multidisciplinar de carreiras executivas nacionais e internacionais, não como
+search firm. 
+O ecossistema brasileiro de governança concentra-se em form...
+
+5. Chunk 3 (Combined: 0.1415)
+   Semântico: 0.2022, Entidades: 0.00
+   aiores da Exame 2023.  A metodologia PDCA  e
+gerenciamento por diretrizes, aliada a investimento em inteligência artificial e data analytics, posicionam
+a Falconi como líder técnico em gerenciamento d...
+
+COMPARAÇÃO:
+------------------------------------------------------------
+Overlap: 5 chunks
+Semântico apenas: 0 chunks
+Entity-aware apenas: 0 chunks
+

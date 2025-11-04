@@ -1,0 +1,42 @@
+RESULTADO DO TESTE DE EMBEDDER
+============================================================
+
+Embedder: all-MiniLM-L6-v2
+Total de vetores: 10
+Dimensao: 384
+Shape: (10, 384)
+Tipo: float32
+
+ESTATISTICAS:
+------------------------------------------------------------
+Norma media: 1.0000
+Norma min: 1.0000
+Norma max: 1.0000
+Norma std: 0.0000
+
+AMOSTRA DE VETORES:
+------------------------------------------------------------
+
+Chunk 0:
+  Texto: Mercado de Leadership Advisory Pur e Play no Brasil
+A pesquisa revela descoberta crítica: apenas 32%...
+  Vetor (primeiros 10 valores): [0.007244952954351902, -0.006680096499621868, -0.01296569686383009, -0.03067694418132305, -0.06019643321633339, 0.09528399258852005, -0.012191683985292912, 0.06883763521909714, 0.02662983536720276, 0.11700843274593353]
+  Norma: 1.0000
+
+Chunk 1:
+  Texto: ESA, Dasein, MAIO) operam modelo híbrido Executive Search + Advisory ,
+não sendo pure play .  O merc...
+  Vetor (primeiros 10 valores): [0.047335416078567505, -0.0014425540575757623, -0.019672133028507233, -0.035016659647226334, -0.09039376676082611, 0.04406103119254112, -0.034725479781627655, 0.07427506148815155, 0.019487177953124046, 0.09980691969394684]
+  Norma: 1.0000
+
+Chunk 2:
+  Texto: mo referência nacional indiscutível.  Fundada em
+2007, a consultoria  atende mais de 60 grandes empr...
+  Vetor (primeiros 10 valores): [0.06452274322509766, -0.020410683006048203, -0.050672486424446106, -0.020978618413209915, -0.0936598926782608, 0.003530992893502116, -0.020901620388031006, 0.007697825785726309, 0.018028246238827705, -0.002421178389340639]
+  Norma: 1.0000
+
+SIMILARIDADE COSSENO (primeiros 3 chunks):
+------------------------------------------------------------
+Chunk 0 vs Chunk 1: 0.8672
+Chunk 0 vs Chunk 2: 0.4458
+Chunk 1 vs Chunk 2: 0.5155

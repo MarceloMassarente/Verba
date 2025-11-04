@@ -163,3 +163,5 @@ Enviar:
 
 **⏱️ Tempo total esperado:** 5-10 minutos  
 **📈 Taxa de sucesso:** 95%
+
+

@@ -1,6 +1,13 @@
 """
 Integração: Hook no import_document para capturar passage_uuids
 e disparar ETL A2 após importação
+
+⚠️ PATCH/MONKEY PATCH - Documentado em verba_extensions/patches/README_PATCHES.md
+
+Este é um monkey patch que modifica WeaviateManager.import_document() sem alterar código original.
+Ao atualizar Verba, verificar se método ainda existe e reaplicar se necessário.
+
+Aplicado via: verba_extensions/startup.py (durante inicialização)
 """
 
 import os

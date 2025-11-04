@@ -79,6 +79,8 @@ Patches complexos precisam ser aplicados manualmente:
 ### Técnica
 - **[PATCHES_VERBA_WEAVIATE_V4.md](PATCHES_VERBA_WEAVIATE_V4.md)** - Detalhes técnicos Weaviate
 - **[ANALISE_COMPARATIVA_VERBA_OFFICIAL_VS_CUSTOM.md](ANALISE_COMPARATIVA_VERBA_OFFICIAL_VS_CUSTOM.md)** - Análise comparativa
+- **[verba_extensions/patches/README_PATCHES.md](verba_extensions/patches/README_PATCHES.md)** - **Documentação completa de patches ETL e hooks** ⭐ NOVO
+- **[ANALISE_ETL_ANTES_CHUNKING.md](ANALISE_ETL_ANTES_CHUNKING.md)** - Análise de viabilidade ETL pré-chunking
 
 ### Scripts
 - **[SCRIPTS_README.md](SCRIPTS_README.md)** - Documentação de scripts
@@ -95,6 +97,11 @@ Patches complexos precisam ser aplicados manualmente:
 - ⚠️ CORS middleware (`api.py`)
 - ⚠️ `connect_to_cluster()` (`managers.py`)
 - ⚠️ `get_models()` (`OpenAIGenerator.py`, `AnthropicGenerator.py`)
+- ⚠️ **ETL Pré-Chunking Hook** (`verba_manager.py`) - Novo!
+
+### ⭐⭐⭐ Alta (Manual com Hooks)
+- 🔧 **Import Hook (ETL Pós-Chunking)** (`import_hook.py`) - Monkey patch
+- 🔧 **Section-Aware Chunker Entity-Aware** (`section_aware_chunker.py`) - Modificado
 
 ### ⭐⭐⭐⭐⭐ Muito Alta (Manual Complexo)
 - 🚨 `connect_to_custom()` (`managers.py`) - ~200 linhas reescritas
