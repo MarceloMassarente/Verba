@@ -28,9 +28,51 @@ class Chunk:
     def to_json(self) -> dict:
         """Convert the Chunk object to a dictionary."""
         import json
+        
+        # Convert chunk_id to float if it's a string (e.g., '6_154' -> 6.154 or hash)
+        # Weaviate requires chunk_id to be a number, not a string
+        chunk_id_value = self.chunk_id
+        if isinstance(chunk_id_value, str):
+            # If it's a string like '6_154', convert to unique float
+            if '_' in chunk_id_value:
+                try:
+                    # Try to parse as 'original_subindex' format
+                    parts = chunk_id_value.split('_')
+                    if len(parts) == 2:
+                        original = float(parts[0])
+                        subindex = float(parts[1])
+                        # Convert to float: original.subindex (e.g., 6_154 -> 6.154)
+                        # But if subindex is > 1000, use hash to avoid precision issues
+                        if subindex < 1000:
+                            chunk_id_value = original + (subindex / 1000.0)
+                        else:
+                            # Use hash for large subindexes to ensure uniqueness
+                            chunk_id_value = float(hash(chunk_id_value) % (10**10))
+                    else:
+                        # Fallback: use hash for any string format
+                        chunk_id_value = float(hash(chunk_id_value) % (10**10))
+                except (ValueError, IndexError):
+                    # If parsing fails, use hash
+                    chunk_id_value = float(hash(chunk_id_value) % (10**10))
+            else:
+                # Try to convert string to float directly
+                try:
+                    chunk_id_value = float(chunk_id_value)
+                except (ValueError, TypeError):
+                    # Fallback: use hash
+                    chunk_id_value = float(hash(str(chunk_id_value)) % (10**10))
+        elif chunk_id_value is None or chunk_id_value == "":
+            chunk_id_value = 0.0
+        else:
+            # Ensure it's a number
+            try:
+                chunk_id_value = float(chunk_id_value)
+            except (ValueError, TypeError):
+                chunk_id_value = 0.0
+        
         return {
             "content": self.content,
-            "chunk_id": self.chunk_id,
+            "chunk_id": chunk_id_value,  # Now guaranteed to be float
             "doc_uuid": self.doc_uuid,
             "title": self.title,
             "pca": self.pca,

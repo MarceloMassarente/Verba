@@ -12,7 +12,13 @@ import os
 import asyncio
 import json
 import re
+import logging
 from datetime import datetime
+
+# Reduz logging excessivo do Weaviate SDK para evitar rate limits
+# Logs de vetores individuais são muito verbosos e causam rate limit no Railway
+logging.getLogger("weaviate").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # HTTP requests também logam muito
 
 from sklearn.decomposition import PCA
 
