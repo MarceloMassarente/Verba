@@ -22,6 +22,8 @@ class Chunk:
         self.labels = []
         self.meta = {}  # Metadata dict for plugins (e.g., enriched metadata from LLMMetadataExtractor)
         self.uuid = None  # UUID for chunk identification
+        self.chunk_lang = None  # Language code (pt, en, etc.) for bilingual filtering
+        self.chunk_date = None  # Date in ISO format (YYYY-MM-DD) for temporal filtering
 
     def to_json(self) -> dict:
         """Convert the Chunk object to a dictionary."""
@@ -38,6 +40,8 @@ class Chunk:
             "labels": self.labels,
             "meta": json.dumps(self.meta) if self.meta else "{}",  # Serialize meta dict
             "uuid": self.uuid,
+            "chunk_lang": self.chunk_lang or "",  # Language code for bilingual filtering
+            "chunk_date": self.chunk_date or "",  # Date in ISO format for temporal filtering
         }
 
     @classmethod
@@ -55,6 +59,8 @@ class Chunk:
         )
         chunk.doc_uuid = (data.get("doc_uuid", ""),)
         chunk.uuid = data.get("uuid")
+        chunk.chunk_lang = data.get("chunk_lang")  # Language code
+        chunk.chunk_date = data.get("chunk_date")  # Date
         # Deserialize meta if present
         meta_str = data.get("meta", "{}")
         try:

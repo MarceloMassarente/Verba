@@ -104,6 +104,36 @@ class EntityAwareRetriever(Retriever):
             description="Enable semantic search within filtered results",
             values=[],
         )
+        self.config["Enable Language Filter"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable automatic language filtering based on query language",
+            values=[],
+        )
+        self.config["Enable Query Rewriting"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable LLM-based query rewriting for better search results",
+            values=[],
+        )
+        self.config["Query Rewriter Cache TTL"] = InputConfig(
+            type="number",
+            value=3600,
+            description="Cache TTL in seconds for query rewriting (default: 3600)",
+            values=[],
+        )
+        self.config["Enable Temporal Filter"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable automatic temporal filtering based on dates in query",
+            values=[],
+        )
+        self.config["Date Field Name"] = InputConfig(
+            type="text",
+            value="chunk_date",
+            description="Name of the date field in Weaviate (default: chunk_date)",
+            values=[],
+        )
     
     async def retrieve(
         self,
@@ -138,9 +168,40 @@ class EntityAwareRetriever(Retriever):
         alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
         enable_semantic = config.get("Enable Semantic Search", {}).value if isinstance(config.get("Enable Semantic Search"), InputConfig) else True
+        enable_query_rewriting = config.get("Enable Query Rewriting", {}).value if isinstance(config.get("Enable Query Rewriting"), InputConfig) else False
+        cache_ttl = int(config.get("Query Rewriter Cache TTL", {}).value) if isinstance(config.get("Query Rewriter Cache TTL"), InputConfig) else 3600
+        enable_temporal_filter = config.get("Enable Temporal Filter", {}).value if isinstance(config.get("Enable Temporal Filter"), InputConfig) else True
+        date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
         
-        # 1. PARSE QUERY
-        parsed = parse_query(query)
+        # 0. QUERY REWRITING (antes de parsing)
+        rewritten_query = query
+        rewritten_alpha = alpha
+        if enable_query_rewriting:
+            try:
+                from verba_extensions.plugins.query_rewriter import QueryRewriterPlugin
+                rewriter = QueryRewriterPlugin(cache_ttl_seconds=cache_ttl)
+                strategy = await rewriter.rewrite_query(query, use_cache=True)
+                
+                # Usar semantic_query para busca vetorial
+                rewritten_query = strategy.get("semantic_query", query)
+                
+                # Aplicar alpha sugerido
+                suggested_alpha = strategy.get("alpha")
+                if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
+                    rewritten_alpha = float(suggested_alpha)
+                    msg.info(f"  Query rewriting: alpha ajustado para {rewritten_alpha}")
+                
+                # Log intent se disponível
+                intent = strategy.get("intent", "search")
+                msg.info(f"  Query rewriting: intent={intent}")
+                
+            except Exception as e:
+                msg.warn(f"  Erro no query rewriting (não crítico): {str(e)}")
+                # Continua com query original
+        
+        # 1. PARSE QUERY (usar rewritten_query se disponível)
+        parse_query_text = rewritten_query if enable_query_rewriting else query
+        parsed = parse_query(parse_query_text)
         entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
         semantic_terms = parsed["semantic_concepts"]
         
@@ -153,20 +214,67 @@ class EntityAwareRetriever(Retriever):
             entity_filter = Filter.by_property("entities_local_ids").contains_any(entity_ids)
             msg.good(f"  Aplicando filtro: entities = {entity_ids}")
         
-        # 3. DETERMINA QUERY PARA BUSCA SEMÂNTICA
-        search_query = query  # Padrão: query completa
+        # 2.1. FILTRO DE IDIOMA (Bilingual Filter)
+        enable_lang_filter = config.get("Enable Language Filter", {}).value if isinstance(config.get("Enable Language Filter"), InputConfig) else True
+        lang_filter = None
+        if enable_lang_filter:
+            try:
+                from verba_extensions.plugins.bilingual_filter import BilingualFilterPlugin
+                bilingual_plugin = BilingualFilterPlugin()
+                lang_filter = bilingual_plugin.get_language_filter_for_query(query)
+                if lang_filter:
+                    msg.good(f"  Aplicando filtro de idioma: {bilingual_plugin.detect_query_language(query)}")
+            except Exception as e:
+                msg.warn(f"  Erro ao aplicar filtro de idioma (não crítico): {str(e)}")
         
-        if enable_semantic and semantic_terms:
+        # 2.2. FILTRO TEMPORAL (Temporal Filter)
+        temporal_filter = None
+        if enable_temporal_filter:
+            try:
+                from verba_extensions.plugins.temporal_filter import TemporalFilterPlugin
+                temporal_plugin = TemporalFilterPlugin()
+                temporal_filter = temporal_plugin.get_temporal_filter_for_query(query, date_field=date_field_name)
+                if temporal_filter:
+                    date_range = temporal_plugin.extract_date_range(query)
+                    if date_range:
+                        start_date, end_date = date_range
+                        msg.good(f"  Aplicando filtro temporal: {start_date} até {end_date}")
+            except Exception as e:
+                msg.warn(f"  Erro ao aplicar filtro temporal (não crítico): {str(e)}")
+        
+        # Combinar filtros (entity + language + temporal)
+        combined_filter = None
+        filters_list = []
+        if entity_filter:
+            filters_list.append(entity_filter)
+        if lang_filter:
+            filters_list.append(lang_filter)
+        if temporal_filter:
+            filters_list.append(temporal_filter)
+        
+        if len(filters_list) == 1:
+            combined_filter = filters_list[0]
+        elif len(filters_list) > 1:
+            combined_filter = Filter.all_of(filters_list)
+        
+        # 3. DETERMINA QUERY PARA BUSCA SEMÂNTICA
+        # Prioridade: rewritten_query > semantic_terms > query original
+        if enable_query_rewriting:
+            search_query = rewritten_query
+            msg.info(f"  Query semântica (rewritten): '{search_query}'")
+        elif enable_semantic and semantic_terms:
             # Se tem conceitos semânticos, usa-os para melhorar a busca
             search_query = " ".join(semantic_terms)
             msg.info(f"  Query semântica: '{search_query}'")
+        else:
+            search_query = query  # Padrão: query completa
         
         # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!)
         if search_mode == "Hybrid Search":
             try:
-                if entity_filter and enable_entity_filter:
-                    # FILTRA por entidade, DEPOIS faz busca semântica
-                    msg.info(f"  Executando: Hybrid search com entity filter")
+                if combined_filter:
+                    # FILTRA por entidade + idioma, DEPOIS faz busca semântica
+                    msg.info(f"  Executando: Hybrid search com filtros combinados")
                     
                     chunks = await weaviate_manager.hybrid_chunks_with_filter(
                         client=client,
@@ -177,12 +285,28 @@ class EntityAwareRetriever(Retriever):
                         limit=limit,
                         labels=labels,
                         document_uuids=document_uuids,
-                        filters=entity_filter,      # ← FILTRA por entidade PRIMEIRO
-                        alpha=alpha,
+                        filters=combined_filter,   # ← FILTRA por entidade + idioma PRIMEIRO
+                        alpha=rewritten_alpha,     # ← Alpha ajustado pelo query rewriting
+                    )
+                elif entity_filter and enable_entity_filter:
+                    # FILTRA apenas por entidade
+                    msg.info(f"  Executando: Hybrid search com entity filter")
+                    
+                    chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                        client=client,
+                        embedder=embedder,
+                        query=search_query,
+                        vector=vector,
+                        limit_mode=limit_mode,
+                        limit=limit,
+                        labels=labels,
+                        document_uuids=document_uuids,
+                        filters=entity_filter,
+                        alpha=rewritten_alpha,     # ← Alpha ajustado pelo query rewriting
                     )
                 else:
-                    # Sem filtro de entidade: busca normal
-                    msg.info(f"  Executando: Hybrid search sem entity filter")
+                    # Sem filtros: busca normal
+                    msg.info(f"  Executando: Hybrid search sem filtros")
                     
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,

@@ -233,6 +233,22 @@ class VerbaManager:
             )
             chunked_documents = await chunk_task
 
+            # Add chunk_lang to chunks (language detection)
+            from goldenverba.components.document import detect_language
+            for doc in chunked_documents:
+                for chunk in doc.chunks:
+                    if not chunk.chunk_lang:
+                        # Detect language from chunk content
+                        detected_lang = detect_language(chunk.content)
+                        # Normalize to pt/en for bilingual filtering
+                        if detected_lang in ["pt", "pt-br", "pt-BR"]:
+                            chunk.chunk_lang = "pt"
+                        elif detected_lang in ["en", "en-US", "en-GB"]:
+                            chunk.chunk_lang = "en"
+                        else:
+                            # Default to document language or empty
+                            chunk.chunk_lang = detected_lang if detected_lang != "unknown" else ""
+            
             # Apply plugin enrichment (e.g., LLMMetadataExtractor)
             if PLUGINS_AVAILABLE:
                 try:
