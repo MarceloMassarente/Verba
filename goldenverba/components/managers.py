@@ -168,11 +168,61 @@ class WeaviateManager:
     ### Connection Handling
 
     async def connect_to_cluster(self, w_url, w_key):
+        """
+        Connect to Weaviate cluster (WCS or custom deployment).
+        
+        Prioriza configuração PaaS explícita (Railway, etc.) que requer
+        portas HTTP e gRPC separadas para suportar gRPC.
+        """
         if w_url is None or w_url == "":
             raise Exception("No URL provided")
         
+        # PRIORIDADE 1: Verificar se há configuração PaaS explícita (Railway, etc.)
+        # Isso permite usar rede privada e portas HTTP/gRPC separadas
+        http_host = os.getenv("WEAVIATE_HTTP_HOST")
+        grpc_host = os.getenv("WEAVIATE_GRPC_HOST")
+        
+        if http_host and grpc_host:
+            # Configuração PaaS explícita - usar connect_to_custom com portas separadas
+            msg.info(f"Connecting to Weaviate via PaaS configuration (Railway/Private Network)")
+            msg.info(f"  HTTP Host: {http_host}")
+            msg.info(f"  gRPC Host: {grpc_host}")
+            
+            http_port = int(os.getenv("WEAVIATE_HTTP_PORT", "8080"))
+            grpc_port = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
+            
+            http_secure = os.getenv("WEAVIATE_HTTP_SECURE", "False").lower() == "true"
+            grpc_secure = os.getenv("WEAVIATE_GRPC_SECURE", "False").lower() == "true"
+            
+            # Usar API key se disponível
+            api_key = w_key or os.getenv("WEAVIATE_API_KEY_VERBA")
+            # Usar Auth.api_key() conforme manual (v4)
+            auth_creds = Auth.api_key(api_key) if api_key else None
+            
+            try:
+                # Usar connect_to_custom para PaaS (permite portas HTTP e gRPC separadas)
+                client = weaviate.connect_to_custom(
+                    http_host=http_host,
+                    http_port=http_port,
+                    http_secure=http_secure,
+                    grpc_host=grpc_host,
+                    grpc_port=grpc_port,
+                    grpc_secure=grpc_secure,
+                    auth_credentials=auth_creds,
+                    skip_init_checks=False,  # Forçar verificação de saúde para debug
+                    additional_config=AdditionalConfig(
+                        timeout=Timeout(init=60, query=300, insert=300)
+                    )
+                )
+                return client
+            except Exception as e:
+                msg.warn(f"PaaS connection failed: {str(e)[:200]}")
+                msg.info("Falling back to URL-based connection...")
+                # Continua para tentar método baseado em URL
+        
+        # PRIORIDADE 2: Weaviate Cloud (WCS) com API key
         if w_key is not None and w_key != "":
-            msg.info(f"Connecting to Weaviate Cluster {w_url} with Auth")
+            msg.info(f"Connecting to Weaviate Cloud at {w_url} with Auth")
             return weaviate.use_async_with_weaviate_cloud(
                 cluster_url=w_url,
                 auth_credentials=AuthApiKey(w_key),
@@ -180,31 +230,34 @@ class WeaviateManager:
                     timeout=Timeout(init=60, query=300, insert=300)
                 ),
             )
+        
+        # PRIORIDADE 3: Conexão baseada em URL (fallback para compatibilidade)
+        # Connect without auth (for Railway and other deployments without auth)
+        msg.info(f"Connecting to Weaviate at {w_url} without Auth (URL-based)")
+        from urllib.parse import urlparse
+        parsed = urlparse(w_url)
+        host = parsed.hostname or parsed.netloc.split(':')[0]
+        # Default ports based on scheme
+        if parsed.port:
+            port = str(parsed.port)
+        elif parsed.scheme == 'https':
+            port = "443"
+        elif parsed.scheme == 'http':
+            port = "80"
         else:
-            # Connect without auth (for Railway and other deployments without auth)
-            msg.info(f"Connecting to Weaviate at {w_url} without Auth")
-            from urllib.parse import urlparse
-            parsed = urlparse(w_url)
-            host = parsed.hostname or parsed.netloc.split(':')[0]
-            # Default ports based on scheme
-            if parsed.port:
-                port = str(parsed.port)
-            elif parsed.scheme == 'https':
-                port = "443"
-            elif parsed.scheme == 'http':
-                port = "80"
-            else:
-                port = "8080"  # Default Weaviate port
-            
-            # For HTTPS or external URLs, use local connection without auth
-            return weaviate.use_async_with_local(
-                host=host,
-                port=int(port),
-                skip_init_checks=True,
-                additional_config=AdditionalConfig(
-                    timeout=Timeout(init=60, query=300, insert=300)
-                ),
-            )
+            port = "8080"  # Default Weaviate port
+        
+        # For HTTPS or external URLs, use local connection without auth
+        # NOTA: use_async_with_local não suporta gRPC adequadamente para PaaS
+        # Use configuração PaaS explícita (WEAVIATE_HTTP_HOST/GRPC_HOST) para melhor performance
+        return weaviate.use_async_with_local(
+            host=host,
+            port=int(port),
+            skip_init_checks=True,
+            additional_config=AdditionalConfig(
+                timeout=Timeout(init=60, query=300, insert=300)
+            ),
+        )
 
     async def connect_to_docker(self, w_url):
         msg.info(f"Connecting to Weaviate Docker")
