@@ -37,6 +37,7 @@ from goldenverba.server.types import (
     GetVectorPayload,
     DataBatchPayload,
     ChunksPayload,
+    FileStatus,
 )
 
 load_dotenv()
