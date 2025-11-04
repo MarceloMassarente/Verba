@@ -356,7 +356,16 @@ async def websocket_import_files(websocket: WebSocket):
                 raise
             
             fileConfig = batcher.add_batch(batch_data)
+            
+            # Log detalhado sobre status do batch
+            if batch_data.isLastChunk:
+                msg.info(f"[WEBSOCKET] Last chunk received (order {batch_data.order}, total {batch_data.total})")
+                # Verifica se todos os chunks foram recebidos
+                if batch_data.order + 1 != batch_data.total:
+                    msg.warn(f"[WEBSOCKET] ⚠️ Last chunk order ({batch_data.order + 1}) doesn't match total ({batch_data.total})")
+            
             if fileConfig is not None:
+                msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import process")
                 # Send STARTING status immediately to update frontend
                 try:
                     await logger.send_report(
@@ -411,6 +420,13 @@ async def websocket_import_files(websocket: WebSocket):
 
         except WebSocketDisconnect:
             msg.warn("[WEBSOCKET] Import WebSocket connection closed by client (normal during long imports)")
+            # Verifica se há batches incompletos antes de fechar
+            if batcher.batches:
+                msg.warn(f"[WEBSOCKET] ⚠️ WebSocket closed but {len(batcher.batches)} batch(es) still incomplete:")
+                for fileID, batch_info in batcher.batches.items():
+                    received = len(batch_info["chunks"].keys())
+                    total = batch_info["total"]
+                    msg.warn(f"[WEBSOCKET]   - {fileID[:50]}...: {received}/{total} chunks received")
             # Don't break immediately - the import might still be running in background
             # Wait a bit to see if import completes
             await asyncio.sleep(1)

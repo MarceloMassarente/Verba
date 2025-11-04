@@ -103,12 +103,31 @@ class BatchManager:
             return None
 
     def check_batch(self, fileID: str):
-        if len(self.batches[fileID]["chunks"].keys()) == self.batches[fileID]["total"]:
-            msg.good(f"[BATCH] All batches collected for {fileID[:50]}...")
+        if fileID not in self.batches:
+            msg.warn(f"[BATCH] FileID {fileID[:50]}... not found in batches")
+            return None
+            
+        received = len(self.batches[fileID]["chunks"].keys())
+        total = self.batches[fileID]["total"]
+        
+        if received == total:
+            msg.good(f"[BATCH] All batches collected for {fileID[:50]}... ({received}/{total})")
             chunks = self.batches[fileID]["chunks"]
+            
+            # Verifica se há gaps na sequência
+            missing_chunks = []
+            for i in range(total):
+                if i not in chunks:
+                    missing_chunks.append(i)
+            
+            if missing_chunks:
+                msg.fail(f"[BATCH] Missing chunks: {missing_chunks[:10]}... (total missing: {len(missing_chunks)})")
+                return None
+            
             # Sort chunks by order to ensure correct order
             sorted_chunks = [chunks[order] for order in sorted(chunks.keys())]
             data = "".join(sorted_chunks)
+            msg.info(f"[BATCH] Assembled JSON data: {len(data)} chars")
             
             try:
                 fileConfig = FileConfig.model_validate_json(data)
@@ -116,14 +135,18 @@ class BatchManager:
                 reader_name = "unknown"
                 if "Reader" in fileConfig.rag_config and fileConfig.rag_config["Reader"]:
                     reader_name = fileConfig.rag_config["Reader"].selected
-                msg.good(f"[BATCH] Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {reader_name})")
+                msg.good(f"[BATCH] ✅ Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {reader_name})")
                 return fileConfig
             except Exception as e:
                 import traceback
                 msg.fail(f"[BATCH] Failed to parse FileConfig JSON: {type(e).__name__}: {str(e)}")
                 msg.fail(f"[BATCH] JSON preview (first 500 chars): {data[:500]}")
+                msg.fail(f"[BATCH] JSON preview (last 500 chars): {data[-500:]}")
                 msg.fail(f"[BATCH] Traceback: {traceback.format_exc()}")
                 raise
         else:
-            # Don't log every check - only log periodically or on errors
+            # Log periodicamente se ainda está esperando
+            if received % 50 == 0 or received == total - 1:
+                missing = total - received
+                msg.info(f"[BATCH] Still waiting: {received}/{total} chunks received ({missing} missing)")
             return None
