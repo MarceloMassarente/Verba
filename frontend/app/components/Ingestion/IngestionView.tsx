@@ -45,17 +45,22 @@ const IngestionView: React.FC<IngestionViewProps> = ({
   // Setup Import WebSocket and messages
   useEffect(() => {
     const socketHost = getImportWebSocketApiHost();
+    console.log("[WS-SETUP] Creating WebSocket connection to:", socketHost);
     const localSocket = new WebSocket(socketHost);
 
     localSocket.onopen = () => {
-      console.log("Import WebSocket connection opened to " + socketHost);
+      console.log("[WS-SETUP] ✅ WebSocket connection OPENED to", socketHost);
+      console.log("[WS-SETUP] ReadyState:", localSocket.readyState, "(1=OPEN)");
       setSocketStatus("ONLINE");
     };
 
     localSocket.onmessage = (event) => {
+      console.log("[WS-MESSAGE] Received message, length:", event.data.length);
       setSocketStatus("ONLINE");
       try {
         const data: StatusReport | CreateNewDocument = JSON.parse(event.data);
+        console.log("[WS-MESSAGE] Parsed data type:", "new_file_id" in data ? "CreateNewDocument" : "StatusReport");
+        console.log("[WS-MESSAGE] Data:", data);
         if ("new_file_id" in data) {
           setFileMap((prevFileMap) => {
             const newFileMap: FileMap = { ...prevFileMap };
@@ -71,34 +76,39 @@ const IngestionView: React.FC<IngestionViewProps> = ({
           updateStatus(data);
         }
       } catch (e) {
-        console.error("Received data is not valid JSON:", event.data);
+        console.error("[WS-MESSAGE] ❌ Failed to parse JSON:", e);
+        console.error("[WS-MESSAGE] Raw data:", event.data);
         return;
       }
     };
 
     localSocket.onerror = (error) => {
-      console.error("Import WebSocket Error:", error);
+      console.error("[WS-ERROR] ❌ WebSocket Error:", error);
+      console.error("[WS-ERROR] ReadyState:", localSocket.readyState);
       setSocketStatus("OFFLINE");
       setSocketErrorStatus();
       setReconnect((prev) => !prev);
     };
 
     localSocket.onclose = (event) => {
+      console.log("[WS-CLOSE] WebSocket closed, code:", event.code, "reason:", event.reason, "wasClean:", event.wasClean);
       setSocketStatus("OFFLINE");
       setSocketErrorStatus();
       if (event.wasClean) {
         console.log(
-          `Import WebSocket connection closed cleanly, code=${event.code}, reason=${event.reason}`
+          `[WS-CLOSE] ✅ Connection closed cleanly, code=${event.code}, reason=${event.reason}`
         );
       } else {
-        console.error("WebSocket connection died");
+        console.error("[WS-CLOSE] ❌ WebSocket connection died unexpectedly");
       }
       setReconnect((prev) => !prev);
     };
 
     setSocket(localSocket);
+    console.log("[WS-SETUP] WebSocket object set to state");
 
     return () => {
+      console.log("[WS-SETUP] Cleaning up WebSocket, readyState:", localSocket.readyState);
       if (localSocket.readyState !== WebSocket.CLOSED) {
         localSocket.close();
       }
@@ -201,7 +211,13 @@ const IngestionView: React.FC<IngestionViewProps> = ({
   };
 
   const sendDataBatches = (data: string, fileID: string) => {
+    const socketHost = getImportWebSocketApiHost();
+    console.log("[UPLOAD-DEBUG] Starting upload");
+    console.log("[UPLOAD-DEBUG] WebSocket URL:", socketHost);
+    console.log("[UPLOAD-DEBUG] FileID:", fileID);
+    
     if (socket?.readyState === WebSocket.OPEN) {
+      console.log("[UPLOAD-DEBUG] Socket is OPEN, proceeding with send");
       setInitialStatus(fileID);
       const chunkSize = 2000; // Define chunk size (in bytes)
       const batches = [];
@@ -215,22 +231,39 @@ const IngestionView: React.FC<IngestionViewProps> = ({
       }
 
       const totalBatches = batches.length;
+      console.log(`[UPLOAD-DEBUG] Total data length: ${data.length} chars`);
+      console.log(`[UPLOAD-DEBUG] Total batches to send: ${totalBatches}`);
 
       // Send the batches
       batches.forEach((chunk, order) => {
-        socket.send(
-          JSON.stringify({
+        try {
+          const payload = {
             chunk: chunk,
             isLastChunk: order === totalBatches - 1,
             total: totalBatches,
             order: order,
             fileID: fileID,
             credentials: credentials,
-          })
-        );
+          };
+          const payloadString = JSON.stringify(payload);
+          
+          if (order === 0) {
+            console.log(`[UPLOAD-DEBUG] Sending batch 1/${totalBatches}, payload size: ${payloadString.length} bytes`);
+          } else if (order % 50 === 0 || order === totalBatches - 1) {
+            console.log(`[UPLOAD-DEBUG] Sending batch ${order + 1}/${totalBatches}, payload size: ${payloadString.length} bytes`);
+          }
+          
+          socket.send(payloadString);
+        } catch (e) {
+          console.error(`[UPLOAD-DEBUG] Error sending batch ${order}:`, e);
+        }
       });
+      
+      console.log(`[UPLOAD-DEBUG] All ${totalBatches} batches sent to WebSocket`);
     } else {
-      console.error("WebSocket is not open. ReadyState:", socket?.readyState);
+      console.error("[UPLOAD-DEBUG] WebSocket is not open. ReadyState:", socket?.readyState, 
+                    "(CONNECTING=0, OPEN=1, CLOSING=2, CLOSED=3)");
+      console.error("[UPLOAD-DEBUG] Socket:", socket);
       setReconnect((prevState) => !prevState);
     }
   };
