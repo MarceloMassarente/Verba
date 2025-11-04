@@ -232,6 +232,14 @@ class VerbaManager:
             elif duplicate_uuid is not None and currentFileConfig.overwrite:
                 await self.weaviate_manager.delete_document(client, duplicate_uuid)
 
+            # Check if ETL is enabled BEFORE chunking
+            enable_etl = document.meta.get("enable_etl", False) if hasattr(document, 'meta') and document.meta else False
+            if enable_etl:
+                msg.info(f"[ETL] ETL A2 habilitado - será executado APÓS chunking e embedding")
+            else:
+                msg.info(f"[ETL] ETL A2 não habilitado para este documento")
+            
+            msg.info(f"[CHUNKING] Iniciando chunking para '{document.title}' (ETL={'enabled' if enable_etl else 'disabled'})")
             chunk_task = asyncio.create_task(
                 self.chunker_manager.chunk(
                     currentFileConfig.rag_config["Chunker"].selected,
@@ -244,6 +252,8 @@ class VerbaManager:
                 )
             )
             chunked_documents = await chunk_task
+            total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
+            msg.info(f"[CHUNKING] Chunking concluído: {total_chunks} chunks criados (ETL será executado após import)")
 
             # Add chunk_lang to chunks (language detection)
             from goldenverba.components.document import detect_language

@@ -82,6 +82,7 @@ def patch_weaviate_manager():
                 try:
                     import asyncio
                     
+                    msg.info(f"[ETL] ETL A2 habilitado - buscando chunks importados para doc_uuid: {doc_uuid[:50]}...")
                     embedder_collection_name = self.embedding_table.get(embedder)
                     if embedder_collection_name:
                         embedder_collection = client.collections.get(embedder_collection_name)
@@ -90,6 +91,7 @@ def patch_weaviate_manager():
                         await asyncio.sleep(0.2)
                         
                         # Busca passages por doc_uuid
+                        msg.info(f"[ETL] Buscando passages no Weaviate após import...")
                         passages = await embedder_collection.query.fetch_objects(
                             filters=Filter.by_property("doc_uuid").equal(doc_uuid),
                             limit=10000
@@ -98,22 +100,30 @@ def patch_weaviate_manager():
                         passage_uuids = [str(p.uuid) for p in passages.objects]
                         
                         if passage_uuids:
+                            msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")
                             # Dispara ETL via hook (async, não bloqueia import)
                             from verba_extensions.hooks import global_hooks
                             tenant = os.getenv("WEAVIATE_TENANT")
                             
                             # Executa em background para não bloquear
                             async def run_etl_hook():
-                                await global_hooks.execute_hook_async(
-                                    'import.after',
-                                    client,
-                                    doc_uuid,
-                                    passage_uuids,
-                                    tenant=tenant,
-                                    enable_etl=True
-                                )
+                                msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
+                                try:
+                                    await global_hooks.execute_hook_async(
+                                        'import.after',
+                                        client,
+                                        doc_uuid,
+                                        passage_uuids,
+                                        tenant=tenant,
+                                        enable_etl=True
+                                    )
+                                    msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
+                                except Exception as etl_error:
+                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
                             
                             asyncio.create_task(run_etl_hook())
+                        else:
+                            msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
                                 
                 except Exception as e:
                     # Não falha o import se ETL der erro
