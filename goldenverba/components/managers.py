@@ -1614,30 +1614,48 @@ class EmbeddingManager:
             ]
             msg.info(f"[BATCH_VECTORIZE] Created {len(tasks)} vectorization tasks")
             
+            # Track progress with a shared counter
+            completed_count = {"count": 0}
+            
+            # Wrap tasks to track completion
+            async def track_progress(task, batch_idx):
+                """Wrap task to track when it completes"""
+                try:
+                    result = await task
+                    completed_count["count"] += 1
+                    return result
+                except Exception as e:
+                    completed_count["count"] += 1
+                    raise e
+            
             # Start progress monitoring task to keep WebSocket alive
             async def send_progress_updates():
                 """Send periodic progress updates during vectorization"""
-                completed = 0
                 total = len(batches)
-                while completed < total:
-                    await asyncio.sleep(5)  # Send update every 5 seconds
-                    if logger and file_id:
-                        progress = round((completed / total) * 100, 1) if total > 0 else 0
+                last_reported = 0
+                while completed_count["count"] < total:
+                    await asyncio.sleep(2)  # Send update every 2 seconds
+                    current = completed_count["count"]
+                    if current > last_reported and logger and file_id:
+                        progress = round((current / total) * 100, 1) if total > 0 else 0
                         try:
                             await logger.send_report(
                                 file_id,
                                 FileStatus.EMBEDDING,
-                                f"Vectorizing: {completed}/{total} batches completed ({progress}%)",
+                                f"Vectorizing: {current}/{total} batches completed ({progress}%)",
                                 took=0,
                             )
-                        except Exception:
-                            pass  # Ignore if WebSocket is closed
+                            last_reported = current
+                        except Exception as e:
+                            # Log but don't fail if WebSocket is closed
+                            msg.warn(f"[BATCH_VECTORIZE] Failed to send progress update: {str(e)}")
             
             # Start progress monitoring (will run until all tasks complete)
             progress_task = asyncio.create_task(send_progress_updates())
             
-            # Execute all tasks in parallel
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Execute all tasks in parallel with progress tracking
+            wrapped_tasks = [track_progress(task, idx) for idx, task in enumerate(tasks)]
+            results = await asyncio.gather(*wrapped_tasks, return_exceptions=True)
             
             # Cancel progress monitoring
             progress_task.cancel()
@@ -1645,6 +1663,18 @@ class EmbeddingManager:
                 await progress_task
             except asyncio.CancelledError:
                 pass
+            
+            # Send final progress update
+            if logger and file_id:
+                try:
+                    await logger.send_report(
+                        file_id,
+                        FileStatus.EMBEDDING,
+                        f"Vectorizing: {len(batches)}/{len(batches)} batches completed (100.0%)",
+                        took=0,
+                    )
+                except Exception:
+                    pass  # Ignore if WebSocket is closed
             
             msg.info(f"[BATCH_VECTORIZE] All {len(results)} batches processed")
 

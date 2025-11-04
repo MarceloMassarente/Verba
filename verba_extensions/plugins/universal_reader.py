@@ -49,20 +49,37 @@ class UniversalA2Reader(Reader):
         """
         Carrega arquivo usando Default Reader e garante ETL
         """
-        enable_etl = config.get("Enable ETL", {}).value if hasattr(config.get("Enable ETL", {}), 'value') else True
-        language_hint = config.get("Language Hint", {}).value if hasattr(config.get("Language Hint", {}), 'value') else "pt"
+        # Extrai valores do config de forma robusta
+        # O config pode vir como InputConfig (backend) ou dict simples (frontend)
+        def get_config_value(config_key: str, default_value):
+            """Extrai valor do config de forma segura"""
+            config_item = config.get(config_key, {})
+            if isinstance(config_item, dict):
+                return config_item.get("value", default_value)
+            elif hasattr(config_item, 'value'):
+                return config_item.value
+            else:
+                return default_value
+        
+        enable_etl = get_config_value("Enable ETL", True)
+        language_hint = get_config_value("Language Hint", "pt")
         
         # Importa Default Reader dinamicamente
         try:
             from goldenverba.components.reader.BasicReader import BasicReader
             default_reader = BasicReader()
-        except ImportError:
-            msg.fail("Default Reader não disponível")
-            return []
+        except ImportError as e:
+            msg.fail(f"Default Reader não disponível: {str(e)}")
+            raise ImportError(f"Failed to import BasicReader: {str(e)}")
         
         # Carrega usando Default Reader (suporta PDF, DOCX, TXT, etc.)
         try:
+            msg.info(f"Iniciando carregamento do arquivo: {fileConfig.filename}")
             documents = await default_reader.load(config, fileConfig)
+            
+            if not documents:
+                msg.warn(f"Nenhum documento foi carregado de {fileConfig.filename}")
+                return []
             
             # Garante que todos os documentos tenham enable_etl=True
             for doc in documents:
@@ -79,7 +96,10 @@ class UniversalA2Reader(Reader):
             return documents
             
         except Exception as e:
-            msg.fail(f"Erro ao carregar arquivo: {str(e)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            msg.fail(f"Erro ao carregar arquivo '{fileConfig.filename}': {str(e)}")
+            msg.fail(f"Traceback completo:\n{error_trace}")
             raise
 
 

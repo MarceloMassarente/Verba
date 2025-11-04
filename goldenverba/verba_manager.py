@@ -130,9 +130,18 @@ class VerbaManager:
                     took=0,
                 )
 
-            documents = await self.reader_manager.load(
-                fileConfig.rag_config["Reader"].selected, fileConfig, logger
-            )
+            reader_name = fileConfig.rag_config.get("Reader", {}).get("selected", "unknown")
+            msg.info(f"[IMPORT] Loading file '{fileConfig.filename}' with reader '{reader_name}'")
+            try:
+                documents = await self.reader_manager.load(
+                    reader_name, fileConfig, logger
+                )
+                msg.good(f"[IMPORT] Successfully loaded {len(documents)} document(s) from '{fileConfig.filename}'")
+            except Exception as e:
+                import traceback
+                msg.fail(f"[IMPORT] Failed to load file '{fileConfig.filename}' with reader '{reader_name}': {type(e).__name__}: {str(e)}")
+                msg.fail(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                raise
 
             tasks = [
                 self.process_single_document(client, doc, fileConfig, logger)
