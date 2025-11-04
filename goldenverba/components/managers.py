@@ -1516,68 +1516,68 @@ class EmbeddingManager:
             config = fileConfig.rag_config["Embedder"].components[embedder].config
             msg.info(f"[EMBEDDER] Config loaded for embedder: {embedder}")
 
-                for doc_idx, document in enumerate(documents):
-                    msg.info(f"[EMBEDDER] Processing document {doc_idx+1}/{len(documents)}: {document.title[:50]}...")
-                    content = [
-                        document.metadata + "\n" + chunk.content
-                        for chunk in document.chunks
+            for doc_idx, document in enumerate(documents):
+                msg.info(f"[EMBEDDER] Processing document {doc_idx+1}/{len(documents)}: {document.title[:50]}...")
+                content = [
+                    document.metadata + "\n" + chunk.content
+                    for chunk in document.chunks
+                ]
+                msg.info(f"[EMBEDDER] Document has {len(content)} chunks to vectorize")
+                
+                try:
+                    # Pass logger and file_id to enable progress updates (keep-alive)
+                    embeddings = await self.batch_vectorize(
+                        embedder, config, content, logger, fileConfig.fileID
+                    )
+                    msg.info(f"[EMBEDDER] Generated {len(embeddings)} embeddings for document {doc_idx+1}")
+                except Exception as e:
+                    msg.fail(f"[EMBEDDER] Batch vectorize failed for document {doc_idx+1}: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    msg.fail(f"[EMBEDDER] Traceback: {traceback.format_exc()}")
+                    raise
+
+                if len(embeddings) >= 3:
+                    pca = PCA(n_components=3)
+                    generated_pca_embeddings = pca.fit_transform(embeddings)
+                    pca_embeddings = [
+                        pca_.tolist() for pca_ in generated_pca_embeddings
                     ]
-                    msg.info(f"[EMBEDDER] Document has {len(content)} chunks to vectorize")
-                    
-                    try:
-                        # Pass logger and file_id to enable progress updates (keep-alive)
-                        embeddings = await self.batch_vectorize(
-                            embedder, config, content, logger, fileConfig.fileID
-                        )
-                        msg.info(f"[EMBEDDER] Generated {len(embeddings)} embeddings for document {doc_idx+1}")
-                    except Exception as e:
-                        msg.fail(f"[EMBEDDER] Batch vectorize failed for document {doc_idx+1}: {type(e).__name__}: {str(e)}")
-                        import traceback
-                        msg.fail(f"[EMBEDDER] Traceback: {traceback.format_exc()}")
-                        raise
+                else:
+                    pca_embeddings = [embedding[0:3] for embedding in embeddings]
 
-                    if len(embeddings) >= 3:
-                        pca = PCA(n_components=3)
-                        generated_pca_embeddings = pca.fit_transform(embeddings)
-                        pca_embeddings = [
-                            pca_.tolist() for pca_ in generated_pca_embeddings
-                        ]
-                    else:
-                        pca_embeddings = [embedding[0:3] for embedding in embeddings]
+                for vector, chunk, pca_ in zip(
+                    embeddings, document.chunks, pca_embeddings
+                ):
+                    chunk.vector = vector
+                    chunk.pca = pca_
 
-                    for vector, chunk, pca_ in zip(
-                        embeddings, document.chunks, pca_embeddings
-                    ):
-                        chunk.vector = vector
-                        chunk.pca = pca_
+                document.meta["Embedder"] = (
+                    fileConfig.rag_config["Embedder"]
+                    .components[embedder]
+                    .model_dump()
+                )
 
-                    document.meta["Embedder"] = (
-                        fileConfig.rag_config["Embedder"]
-                        .components[embedder]
-                        .model_dump()
-                    )
-
-                elapsed_time = round(loop.time() - start_time, 2)
-                msg.info(f"[EMBEDDER] Vectorization completed in {elapsed_time}s")
-                
-                try:
-                    await logger.send_report(
-                        fileConfig.fileID,
-                        FileStatus.EMBEDDING,
-                        f"Vectorized all chunks",
-                        took=elapsed_time,
-                    )
-                except Exception as e:
-                    msg.warn(f"[EMBEDDER] Failed to send embedding report: {str(e)}")
-                
-                try:
-                    await logger.send_report(
-                        fileConfig.fileID, FileStatus.INGESTING, "", took=0
-                    )
-                except Exception as e:
-                    msg.warn(f"[EMBEDDER] Failed to send ingesting report: {str(e)}")
-                
-                return documents
+            elapsed_time = round(loop.time() - start_time, 2)
+            msg.info(f"[EMBEDDER] Vectorization completed in {elapsed_time}s")
+            
+            try:
+                await logger.send_report(
+                    fileConfig.fileID,
+                    FileStatus.EMBEDDING,
+                    f"Vectorized all chunks",
+                    took=elapsed_time,
+                )
+            except Exception as e:
+                msg.warn(f"[EMBEDDER] Failed to send embedding report: {str(e)}")
+            
+            try:
+                await logger.send_report(
+                    fileConfig.fileID, FileStatus.INGESTING, "", took=0
+                )
+            except Exception as e:
+                msg.warn(f"[EMBEDDER] Failed to send ingesting report: {str(e)}")
+            
+            return documents
         except Exception as e:
             msg.fail(f"[EMBEDDER] Vectorize failed: {type(e).__name__}: {str(e)}")
             import traceback
