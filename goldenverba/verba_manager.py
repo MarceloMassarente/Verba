@@ -130,7 +130,10 @@ class VerbaManager:
                     took=0,
                 )
 
-            reader_name = fileConfig.rag_config.get("Reader", {}).get("selected", "unknown")
+            # rag_config is dict[str, RAGComponentClass], so access selected attribute directly
+            reader_name = "unknown"
+            if "Reader" in fileConfig.rag_config and fileConfig.rag_config["Reader"]:
+                reader_name = fileConfig.rag_config["Reader"].selected
             msg.info(f"[IMPORT] Loading file '{fileConfig.filename}' with reader '{reader_name}'")
             try:
                 documents = await self.reader_manager.load(

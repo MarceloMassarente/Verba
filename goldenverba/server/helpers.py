@@ -112,7 +112,11 @@ class BatchManager:
             
             try:
                 fileConfig = FileConfig.model_validate_json(data)
-                msg.good(f"[BATCH] Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {fileConfig.rag_config.get('Reader', {}).get('selected', 'unknown')})")
+                # rag_config is dict[str, RAGComponentClass], so access selected attribute directly
+                reader_name = "unknown"
+                if "Reader" in fileConfig.rag_config and fileConfig.rag_config["Reader"]:
+                    reader_name = fileConfig.rag_config["Reader"].selected
+                msg.good(f"[BATCH] Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {reader_name})")
                 return fileConfig
             except Exception as e:
                 import traceback
