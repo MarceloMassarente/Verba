@@ -85,11 +85,12 @@ def patch_weaviate_manager():
                 raise import_error
             
             # Se ETL habilitado e doc_uuid obtido, dispara ETL
+            msg.info(f"[ETL-POST] Verificando ETL pós-chunking: enable_etl={enable_etl}, doc_uuid={'present' if doc_uuid else 'None'}")
             if enable_etl and doc_uuid:
                 try:
                     import asyncio
                     
-                    msg.info(f"[ETL] ETL A2 habilitado - buscando chunks importados para doc_uuid: {doc_uuid[:50]}...")
+                    msg.info(f"[ETL-POST] ETL A2 habilitado - buscando chunks importados para doc_uuid: {doc_uuid[:50]}...")
                     embedder_collection_name = self.embedding_table.get(embedder)
                     if embedder_collection_name:
                         embedder_collection = client.collections.get(embedder_collection_name)
@@ -134,7 +135,14 @@ def patch_weaviate_manager():
                                 
                 except Exception as e:
                     # Não falha o import se ETL der erro
-                    msg.warn(f"ETL A2 não executado (não crítico): {str(e)}")
+                    import traceback
+                    msg.warn(f"[ETL-POST] ETL A2 não executado (não crítico): {type(e).__name__}: {str(e)}")
+                    msg.warn(f"[ETL-POST] Traceback: {traceback.format_exc()}")
+            else:
+                if not enable_etl:
+                    msg.info(f"[ETL-POST] ETL pós-chunking não habilitado (enable_etl=False)")
+                if not doc_uuid:
+                    msg.warn(f"[ETL-POST] ETL pós-chunking não executado (doc_uuid não disponível)")
         
         # Substitui método (monkey patch)
         managers.WeaviateManager.import_document = patched_import_document
