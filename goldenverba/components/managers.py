@@ -626,8 +626,11 @@ class WeaviateManager:
         if not normalized or normalized.lower() in ["no config found", "unknown", ""]:
             return "unknown"
         
-        # Clean up the name - only allow alphanumeric, underscore, hyphen
-        normalized = re.sub(r"[^a-zA-Z0-9_-]", "_", normalized)
+        # Clean up the name - only allow alphanumeric and underscore (NO HYPHENS - Weaviate doesn't allow them)
+        # Replace hyphens with underscores first
+        normalized = normalized.replace("-", "_")
+        # Replace any other invalid characters with underscore
+        normalized = re.sub(r"[^a-zA-Z0-9_]", "_", normalized)
         # Remove multiple underscores
         normalized = re.sub(r"_+", "_", normalized)
         # Remove leading/trailing underscores
