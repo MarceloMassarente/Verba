@@ -488,72 +488,91 @@ class VerbaManager:
         return loaded_config
 
     def verify_config(self, a: dict, b: dict) -> bool:
-        # Check Settings ( RAG & Settings )
+        """
+        Verify if two RAG configurations are compatible.
+        Returns True if compatible, False otherwise.
+        Uses key-based comparison (not order-dependent) for flexibility.
+        """
         try:
             if os.getenv("VERBA_PRODUCTION") == "Demo":
                 return True
-            for a_component_key, b_component_key in zip(a, b):
-                if a_component_key != b_component_key:
-                    msg.fail(
-                        f"Config Validation Failed, component name mismatch: {a_component_key} != {b_component_key}"
+            
+            # Compare component keys (order-independent)
+            if set(a.keys()) != set(b.keys()):
+                msg.warn(
+                    f"Config Validation: Component type mismatch. Expected: {set(a.keys())}, Got: {set(b.keys())}"
+                )
+                return False
+            
+            for component_key in a.keys():
+                a_component = a[component_key]["components"]
+                b_component = b[component_key]["components"]
+
+                # Compare component names (order-independent)
+                if set(a_component.keys()) != set(b_component.keys()):
+                    missing_in_b = set(a_component.keys()) - set(b_component.keys())
+                    missing_in_a = set(b_component.keys()) - set(a_component.keys())
+                    msg.warn(
+                        f"Config Validation: {component_key} components mismatch. "
+                        f"Missing in stored: {missing_in_b}, Missing in current: {missing_in_a}. "
+                        f"Will use new configuration."
                     )
                     return False
 
-                a_component = a[a_component_key]["components"]
-                b_component = b[b_component_key]["components"]
-
-                if len(a_component) != len(b_component):
-                    msg.fail(
-                        f"Config Validation Failed, {a_component_key} component count mismatch: {len(a_component)} != {len(b_component)}"
-                    )
-                    return False
-
-                for a_rag_component_key, b_rag_component_key in zip(
-                    a_component, b_component
-                ):
-                    if a_rag_component_key != b_rag_component_key:
-                        msg.fail(
-                            f"Config Validation Failed, component name mismatch: {a_rag_component_key} != {b_rag_component_key}"
+                # Compare each component's config
+                for component_name in a_component.keys():
+                    if component_name not in b_component:
+                        msg.warn(
+                            f"Config Validation: Component '{component_name}' not found in stored config for {component_key}. "
+                            f"Will use new configuration."
                         )
                         return False
-                    a_rag_component = a_component[a_rag_component_key]
-                    b_rag_component = b_component[b_rag_component_key]
+                    
+                    a_rag_component = a_component[component_name]
+                    b_rag_component = b_component[component_name]
 
                     a_config = a_rag_component["config"]
                     b_config = b_rag_component["config"]
 
-                    if len(a_config) != len(b_config):
-                        msg.fail(
-                            f"Config Validation Failed, component config count mismatch: {len(a_config)} != {len(b_config)}"
+                    # Compare config keys (order-independent)
+                    if set(a_config.keys()) != set(b_config.keys()):
+                        msg.warn(
+                            f"Config Validation: Config keys mismatch for {component_key}.{component_name}. "
+                            f"Will use new configuration."
                         )
                         return False
 
-                    for a_config_key, b_config_key in zip(a_config, b_config):
-                        if a_config_key != b_config_key:
-                            msg.fail(
-                                f"Config Validation Failed, component name mismatch: {a_config_key} != {b_config_key}"
+                    # Compare each config setting
+                    for config_key in a_config.keys():
+                        if config_key not in b_config:
+                            msg.warn(
+                                f"Config Validation: Config key '{config_key}' not found in stored config. "
+                                f"Will use new configuration."
                             )
                             return False
 
-                        a_setting = a_config[a_config_key]
-                        b_setting = b_config[b_config_key]
+                        a_setting = a_config[config_key]
+                        b_setting = b_config[config_key]
 
-                        if a_setting["description"] != b_setting["description"]:
-                            msg.fail(
-                                f"Config Validation Failed, description mismatch: {a_setting['description']} != {b_setting['description']}"
+                        # Compare description (non-critical, but log if different)
+                        if a_setting.get("description") != b_setting.get("description"):
+                            msg.info(
+                                f"Config Validation: Description changed for {component_key}.{component_name}.{config_key}"
                             )
-                            return False
+                            # Don't fail on description change - it's just metadata
 
-                        if sorted(a_setting["values"]) != sorted(b_setting["values"]):
-                            msg.fail(
-                                f"Config Validation Failed, values mismatch: {a_setting['values']} != {b_setting['values']}"
+                        # Compare values (order-independent)
+                        if sorted(a_setting.get("values", [])) != sorted(b_setting.get("values", [])):
+                            msg.warn(
+                                f"Config Validation: Values mismatch for {component_key}.{component_name}.{config_key}. "
+                                f"Will use new configuration."
                             )
                             return False
 
             return True
 
         except Exception as e:
-            msg.fail(f"Config Validation failed: {str(e)}")
+            msg.warn(f"Config Validation failed (will use new config): {str(e)}")
             return False
 
     async def reset_rag_config(self, client):
