@@ -1508,15 +1508,33 @@ class EmbeddingManager:
         try:
             loop = asyncio.get_running_loop()
             start_time = loop.time()
-            if embedder in self.embedders:
-                config = fileConfig.rag_config["Embedder"].components[embedder].config
+            msg.info(f"[EMBEDDER] Starting vectorize: embedder={embedder}, documents={len(documents)}")
+            
+            if embedder not in self.embedders:
+                raise Exception(f"{embedder} Embedder not found")
+            
+            config = fileConfig.rag_config["Embedder"].components[embedder].config
+            msg.info(f"[EMBEDDER] Config loaded for embedder: {embedder}")
 
-                for document in documents:
+                for doc_idx, document in enumerate(documents):
+                    msg.info(f"[EMBEDDER] Processing document {doc_idx+1}/{len(documents)}: {document.title[:50]}...")
                     content = [
                         document.metadata + "\n" + chunk.content
                         for chunk in document.chunks
                     ]
-                    embeddings = await self.batch_vectorize(embedder, config, content)
+                    msg.info(f"[EMBEDDER] Document has {len(content)} chunks to vectorize")
+                    
+                    try:
+                        # Pass logger and file_id to enable progress updates (keep-alive)
+                        embeddings = await self.batch_vectorize(
+                            embedder, config, content, logger, fileConfig.fileID
+                        )
+                        msg.info(f"[EMBEDDER] Generated {len(embeddings)} embeddings for document {doc_idx+1}")
+                    except Exception as e:
+                        msg.fail(f"[EMBEDDER] Batch vectorize failed for document {doc_idx+1}: {type(e).__name__}: {str(e)}")
+                        import traceback
+                        msg.fail(f"[EMBEDDER] Traceback: {traceback.format_exc()}")
+                        raise
 
                     if len(embeddings) >= 3:
                         pca = PCA(n_components=3)
@@ -1540,55 +1558,124 @@ class EmbeddingManager:
                     )
 
                 elapsed_time = round(loop.time() - start_time, 2)
-                await logger.send_report(
-                    fileConfig.fileID,
-                    FileStatus.EMBEDDING,
-                    f"Vectorized all chunks",
-                    took=elapsed_time,
-                )
-                await logger.send_report(
-                    fileConfig.fileID, FileStatus.INGESTING, "", took=0
-                )
+                msg.info(f"[EMBEDDER] Vectorization completed in {elapsed_time}s")
+                
+                try:
+                    await logger.send_report(
+                        fileConfig.fileID,
+                        FileStatus.EMBEDDING,
+                        f"Vectorized all chunks",
+                        took=elapsed_time,
+                    )
+                except Exception as e:
+                    msg.warn(f"[EMBEDDER] Failed to send embedding report: {str(e)}")
+                
+                try:
+                    await logger.send_report(
+                        fileConfig.fileID, FileStatus.INGESTING, "", took=0
+                    )
+                except Exception as e:
+                    msg.warn(f"[EMBEDDER] Failed to send ingesting report: {str(e)}")
+                
                 return documents
-            else:
-                raise Exception(f"{embedder} Embedder not found")
         except Exception as e:
-            raise e
+            msg.fail(f"[EMBEDDER] Vectorize failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            msg.fail(f"[EMBEDDER] Full traceback: {traceback.format_exc()}")
+            raise
 
     async def batch_vectorize(
-        self, embedder: str, config: dict, content: list[str]
+        self, embedder: str, config: dict, content: list[str], logger: LoggerManager = None, file_id: str = None
     ) -> list[list[float]]:
-        """Vectorize content in batches"""
+        """Vectorize content in batches with progress updates to keep WebSocket alive"""
         try:
+            max_batch_size = self.embedders[embedder].max_batch_size
             batches = [
-                content[i : i + self.embedders[embedder].max_batch_size]
-                for i in range(0, len(content), self.embedders[embedder].max_batch_size)
+                content[i : i + max_batch_size]
+                for i in range(0, len(content), max_batch_size)
             ]
-            msg.info(f"Vectorizing {len(content)} chunks in {len(batches)} batches")
+            msg.info(f"[BATCH_VECTORIZE] Vectorizing {len(content)} chunks in {len(batches)} batches (batch_size={max_batch_size})")
+            
+            # Send initial progress update
+            if logger and file_id:
+                try:
+                    await logger.send_report(
+                        file_id,
+                        FileStatus.EMBEDDING,
+                        f"Starting vectorization: {len(batches)} batches",
+                        took=0,
+                    )
+                except Exception:
+                    pass  # Ignore if WebSocket is closed
+            
+            # Create tasks for parallel processing
             tasks = [
                 self.embedders[embedder].vectorize(config, batch) for batch in batches
             ]
+            msg.info(f"[BATCH_VECTORIZE] Created {len(tasks)} vectorization tasks")
+            
+            # Start progress monitoring task to keep WebSocket alive
+            async def send_progress_updates():
+                """Send periodic progress updates during vectorization"""
+                completed = 0
+                total = len(batches)
+                while completed < total:
+                    await asyncio.sleep(5)  # Send update every 5 seconds
+                    if logger and file_id:
+                        progress = round((completed / total) * 100, 1) if total > 0 else 0
+                        try:
+                            await logger.send_report(
+                                file_id,
+                                FileStatus.EMBEDDING,
+                                f"Vectorizing: {completed}/{total} batches completed ({progress}%)",
+                                took=0,
+                            )
+                        except Exception:
+                            pass  # Ignore if WebSocket is closed
+            
+            # Start progress monitoring (will run until all tasks complete)
+            progress_task = asyncio.create_task(send_progress_updates())
+            
+            # Execute all tasks in parallel
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Cancel progress monitoring
+            progress_task.cancel()
+            try:
+                await progress_task
+            except asyncio.CancelledError:
+                pass
+            
+            msg.info(f"[BATCH_VECTORIZE] All {len(results)} batches processed")
 
             # Check if all tasks were successful
             errors = [r for r in results if isinstance(r, Exception)]
             if errors:
-                error_messages = [str(e) for e in errors]
+                error_messages = [f"{type(e).__name__}: {str(e)}" for e in errors]
+                msg.fail(f"[BATCH_VECTORIZE] {len(errors)}/{len(results)} batches failed")
+                for idx, error in enumerate(errors):
+                    msg.fail(f"[BATCH_VECTORIZE] Batch {idx} error: {type(error).__name__}: {str(error)}")
                 raise Exception(
-                    f"Vectorization failed for some batches: {', '.join(error_messages)}"
+                    f"Vectorization failed for {len(errors)}/{len(results)} batches: {', '.join(error_messages[:3])}"
                 )
 
             # Flatten the results
             flattened_results = [item for sublist in results for item in sublist]
+            msg.info(f"[BATCH_VECTORIZE] Flattened results: {len(flattened_results)} vectors from {len(results)} batches")
 
             # Verify the number of vectors matches the input content
             if len(flattened_results) != len(content):
+                msg.fail(f"[BATCH_VECTORIZE] Mismatch: expected {len(content)} vectors, got {len(flattened_results)}")
                 raise Exception(
                     f"Mismatch in vectorization results: expected {len(content)} vectors, got {len(flattened_results)}"
                 )
 
+            msg.info(f"[BATCH_VECTORIZE] Successfully vectorized {len(flattened_results)} chunks")
             return flattened_results
         except Exception as e:
+            msg.fail(f"[BATCH_VECTORIZE] Batch vectorization failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            msg.fail(f"[BATCH_VECTORIZE] Traceback: {traceback.format_exc()}")
             raise Exception(f"Batch vectorization failed: {str(e)}")
 
     async def vectorize_query(

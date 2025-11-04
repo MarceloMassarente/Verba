@@ -265,15 +265,34 @@ class VerbaManager:
                     msg.warn(f"Plugin processing failed (non-critical): {str(e)}")
                     # Continue without enrichment if plugins fail
 
-            embedding_task = asyncio.create_task(
-                self.embedder_manager.vectorize(
-                    currentFileConfig.rag_config["Embedder"].selected,
-                    currentFileConfig,
-                    chunked_documents,
-                    logger,
+            # Log embedding start
+            embedder_name = currentFileConfig.rag_config["Embedder"].selected
+            total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
+            msg.info(f"[EMBEDDING] Starting vectorization: embedder={embedder_name}, chunks={total_chunks}, docs={len(chunked_documents)}")
+            
+            try:
+                embedding_task = asyncio.create_task(
+                    self.embedder_manager.vectorize(
+                        embedder_name,
+                        currentFileConfig,
+                        chunked_documents,
+                        logger,
+                    )
                 )
-            )
-            vectorized_documents = await embedding_task
+                vectorized_documents = await embedding_task
+                msg.info(f"[EMBEDDING] Vectorization completed successfully: {len(vectorized_documents)} documents")
+            except Exception as e:
+                msg.fail(f"[EMBEDDING] Vectorization failed: {type(e).__name__}: {str(e)}")
+                import traceback
+                msg.fail(f"[EMBEDDING] Traceback: {traceback.format_exc()}")
+                # Send error report to client
+                await logger.send_report(
+                    currentFileConfig.fileID,
+                    status=FileStatus.ERROR,
+                    message=f"Embedding failed: {str(e)}",
+                    took=0,
+                )
+                raise
 
             for document in vectorized_documents:
                 # Check if client is still connected, reconnect if needed

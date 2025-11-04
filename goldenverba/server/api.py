@@ -343,15 +343,49 @@ async def websocket_import_files(websocket: WebSocket):
                     if client is None or not await client.is_ready():
                         raise Exception("Failed to reconnect to Weaviate")
                 
-                await asyncio.create_task(
-                    manager.import_document(client, fileConfig, logger)
-                )
+                # Log import start
+                msg.info(f"[IMPORT] Starting import for file: {fileConfig.filename} (ID: {fileConfig.fileID})")
+                
+                try:
+                    import_task = asyncio.create_task(
+                        manager.import_document(client, fileConfig, logger)
+                    )
+                    await import_task
+                    msg.info(f"[IMPORT] Import completed successfully for: {fileConfig.filename}")
+                except Exception as e:
+                    msg.fail(f"[IMPORT] Import failed for {fileConfig.filename}: {type(e).__name__}: {str(e)}")
+                    import traceback
+                    msg.fail(f"[IMPORT] Traceback: {traceback.format_exc()}")
+                    # Try to send error report to client
+                    try:
+                        await logger.send_report(
+                            fileConfig.fileID,
+                            status=FileStatus.ERROR,
+                            message=f"Import failed: {str(e)}",
+                            took=0,
+                        )
+                    except Exception as report_error:
+                        msg.warn(f"[IMPORT] Failed to send error report: {str(report_error)}")
+                    # Re-raise to be caught by outer handler
+                    raise
 
         except WebSocketDisconnect:
-            msg.warn("Import WebSocket connection closed by client.")
+            msg.warn("[WEBSOCKET] Import WebSocket connection closed by client.")
             break
         except Exception as e:
-            msg.fail(f"Import WebSocket Error: {str(e)}")
+            msg.fail(f"[WEBSOCKET] Import WebSocket Error: {type(e).__name__}: {str(e)}")
+            import traceback
+            msg.fail(f"[WEBSOCKET] Traceback: {traceback.format_exc()}")
+            # Try to notify client about the error
+            try:
+                await logger.send_report(
+                    "unknown",
+                    status=FileStatus.ERROR,
+                    message=f"WebSocket error: {str(e)}",
+                    took=0,
+                )
+            except:
+                pass  # Ignore if we can't send the report
             break
 
 
