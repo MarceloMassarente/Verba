@@ -31,6 +31,14 @@ from goldenverba.components.managers import (
     WeaviateManager,
 )
 
+# Plugin Manager for chunk enrichment
+try:
+    from verba_extensions.plugins.plugin_manager import get_plugin_manager
+    PLUGINS_AVAILABLE = True
+except ImportError:
+    PLUGINS_AVAILABLE = False
+    msg.warn("Plugin extensions not available - chunk enrichment plugins disabled")
+
 load_dotenv()
 
 
@@ -224,6 +232,22 @@ class VerbaManager:
                 )
             )
             chunked_documents = await chunk_task
+
+            # Apply plugin enrichment (e.g., LLMMetadataExtractor)
+            if PLUGINS_AVAILABLE:
+                try:
+                    plugin_manager = get_plugin_manager()
+                    if plugin_manager.plugins:
+                        msg.info(f"Applying {len(plugin_manager.plugins)} plugin(s) to enrich chunks")
+                        enriched_documents = []
+                        for doc in chunked_documents:
+                            enriched_doc = await plugin_manager.process_document_chunks(doc)
+                            enriched_documents.append(enriched_doc)
+                        chunked_documents = enriched_documents
+                        msg.good(f"Chunks enriched with {plugin_manager.get_enabled_plugins()}")
+                except Exception as e:
+                    msg.warn(f"Plugin processing failed (non-critical): {str(e)}")
+                    # Continue without enrichment if plugins fail
 
             embedding_task = asyncio.create_task(
                 self.embedder_manager.vectorize(

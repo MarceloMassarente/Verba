@@ -1,6 +1,7 @@
 """
-Plugins customizados para o Verba
+Verba Extensions - Plugins
+
+Sistema de plugins para enriquecimento de chunks durante indexação.
 """
 
-__all__ = []
-
+__version__ = "1.0.0"

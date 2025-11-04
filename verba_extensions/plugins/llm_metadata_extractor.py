@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field
 from dataclasses import dataclass, field
 
 # Imports Verba
-from goldenverba.components.types import Chunk, VerbaPlugin
+from goldenverba.components.chunk import Chunk
+try:
+    from goldenverba.components.types import VerbaPlugin
+except ImportError:
+    # Fallback if VerbaPlugin not available
+    class VerbaPlugin:
+        pass
 from goldenverba.components.generation.AnthrophicGenerator import AnthropicGenerator
 from goldenverba.components.util import get_token
 import logging
