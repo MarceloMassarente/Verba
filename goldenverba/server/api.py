@@ -322,18 +322,21 @@ async def websocket_import_files(websocket: WebSocket):
         return
 
     await websocket.accept()
+    msg.info("[WEBSOCKET] Import WebSocket connection accepted")
     logger = LoggerManager(websocket)
     batcher = BatchManager()
 
     while True:
         try:
             data = await websocket.receive_text()
+            msg.info(f"[WEBSOCKET] Received message (length: {len(data)} chars)")
+            
             # Only log first chunk and errors to avoid log spam
             try:
                 batch_data = DataBatchPayload.model_validate_json(data)
                 # Log only first chunk, every 50th chunk, or last chunk
                 if batch_data.order == 0 or batch_data.order % 50 == 0 or batch_data.isLastChunk:
-                    msg.info(f"[WEBSOCKET] Received chunk {batch_data.order + 1}/{batch_data.total} for {batch_data.fileID[:50]}...")
+                    msg.info(f"[WEBSOCKET] Parsed chunk {batch_data.order + 1}/{batch_data.total} for {batch_data.fileID[:50]}...")
             except Exception as e:
                 import traceback
                 msg.fail(f"[WEBSOCKET] Failed to parse batch data: {type(e).__name__}: {str(e)}")
