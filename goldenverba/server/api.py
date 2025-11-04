@@ -343,6 +343,17 @@ async def websocket_import_files(websocket: WebSocket):
             
             fileConfig = batcher.add_batch(batch_data)
             if fileConfig is not None:
+                # Send STARTING status immediately to update frontend
+                try:
+                    await logger.send_report(
+                        fileConfig.fileID,
+                        status=FileStatus.STARTING,
+                        message="Starting import...",
+                        took=0,
+                    )
+                except Exception as e:
+                    msg.warn(f"[IMPORT] Failed to send STARTING status (WebSocket may be closed): {str(e)}")
+                
                 # Get client and ensure it's connected
                 client = await client_manager.connect(batch_data.credentials)
                 if client is None:
