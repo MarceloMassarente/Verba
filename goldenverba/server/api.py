@@ -4,6 +4,23 @@ from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
 import asyncio
+import warnings
+
+# Suppress websockets deprecation warnings from uvicorn
+# This is a known issue: uvicorn uses websockets.legacy API which is deprecated
+# The warning doesn't affect functionality and will be fixed in future uvicorn updates
+warnings.filterwarnings(
+    "ignore",
+    message=".*websockets.legacy.*",
+    category=DeprecationWarning,
+    module="websockets",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=".*remove second argument of ws_handler.*",
+    category=DeprecationWarning,
+    module="websockets",
+)
 
 from goldenverba.server.helpers import LoggerManager, BatchManager
 from weaviate.client import WeaviateAsyncClient
