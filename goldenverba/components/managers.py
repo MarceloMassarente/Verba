@@ -552,20 +552,54 @@ class WeaviateManager:
         else:
             return True
 
+    def _normalize_embedder_name(self, embedder: str) -> str:
+        """Normalize embedder name to create a valid collection name.
+        
+        Removes error messages and invalid characters from embedder names.
+        """
+        if not embedder or not isinstance(embedder, str):
+            return "unknown"
+        
+        # Remove common error message patterns
+        error_patterns = [
+            r"Couldn't connect to.*",
+            r"Failed to.*",
+            r"Error.*",
+            r"Connection.*failed.*",
+            r"http://.*",
+            r"https://.*",
+        ]
+        
+        normalized = embedder
+        for pattern in error_patterns:
+            normalized = re.sub(pattern, "", normalized, flags=re.IGNORECASE)
+        
+        # Remove leading/trailing whitespace and common error words
+        normalized = normalized.strip()
+        if not normalized or normalized.lower() in ["no config found", "unknown", ""]:
+            return "unknown"
+        
+        # Clean up the name - only allow alphanumeric, underscore, hyphen
+        normalized = re.sub(r"[^a-zA-Z0-9_-]", "_", normalized)
+        # Remove multiple underscores
+        normalized = re.sub(r"_+", "_", normalized)
+        # Remove leading/trailing underscores
+        normalized = normalized.strip("_")
+        
+        return normalized if normalized else "unknown"
+
     async def verify_embedding_collection(self, client: WeaviateAsyncClient, embedder):
         if embedder not in self.embedding_table:
-            self.embedding_table[embedder] = "VERBA_Embedding_" + re.sub(
-                r"[^a-zA-Z0-9]", "_", embedder
-            )
+            normalized = self._normalize_embedder_name(embedder)
+            self.embedding_table[embedder] = "VERBA_Embedding_" + normalized
             return await self.verify_collection(client, self.embedding_table[embedder])
         else:
             return True
 
     async def verify_cache_collection(self, client: WeaviateAsyncClient, embedder):
         if embedder not in self.embedding_table:
-            self.embedding_table[embedder] = "VERBA_Cache_" + re.sub(
-                r"[^a-zA-Z0-9]", "_", embedder
-            )
+            normalized = self._normalize_embedder_name(embedder)
+            self.embedding_table[embedder] = "VERBA_Cache_" + normalized
             return await self.verify_collection(client, self.embedding_table[embedder])
         else:
             return True
@@ -577,9 +611,8 @@ class WeaviateManager:
             if embedder.check_available(environment_variables, libraries):
                 if "Model" in embedder.config:
                     for _embedder in embedder.config["Model"].values:
-                        self.embedding_table[_embedder] = "VERBA_Embedding_" + re.sub(
-                            r"[^a-zA-Z0-9]", "_", _embedder
-                        )
+                        normalized = self._normalize_embedder_name(_embedder)
+                        self.embedding_table[_embedder] = "VERBA_Embedding_" + normalized
                         await self.verify_collection(
                             client, self.embedding_table[_embedder]
                         )
@@ -630,6 +663,15 @@ class WeaviateManager:
     async def import_document(
         self, client: WeaviateAsyncClient, document: Document, embedder: str
     ):
+        # Verify client is connected
+        try:
+            if not await client.is_ready():
+                raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
+        except Exception as e:
+            if "closed" in str(e).lower() or "not connected" in str(e).lower():
+                raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
+            raise
+        
         if await self.verify_collection(
             client, self.document_collection_name
         ) and await self.verify_embedding_collection(client, embedder):
@@ -1234,23 +1276,40 @@ class WeaviateManager:
     async def get_datacount(
         self, client: WeaviateAsyncClient, embedder: str, document_uuids: list[str] = []
     ) -> int:
-        if await self.verify_embedding_collection(client, embedder):
-            embedder_collection = client.collections.get(self.embedding_table[embedder])
+        try:
+            # Validate embedder name first
+            normalized = self._normalize_embedder_name(embedder)
+            if normalized == "unknown":
+                msg.warn(f"Invalid embedder name: {embedder}, returning 0")
+                return 0
+            
+            # Verify collection exists
+            if embedder not in self.embedding_table:
+                self.embedding_table[embedder] = "VERBA_Embedding_" + normalized
+            
+            collection_name = self.embedding_table[embedder]
+            
+            # Check if collection exists before querying
+            if not await client.collections.exists(collection_name):
+                msg.warn(f"Collection {collection_name} does not exist, returning 0")
+                return 0
+            
+            embedder_collection = client.collections.get(collection_name)
 
             if document_uuids:
                 filters = Filter.by_property("doc_uuid").contains_any(document_uuids)
             else:
                 filters = None
-            try:
-                response = await embedder_collection.aggregate.over_all(
-                    filters=filters,
-                    group_by=GroupByAggregate(prop="doc_uuid"),
-                    total_count=True,
-                )
-                return len(response.groups)
-            except Exception as e:
-                msg.fail(f"Failed to retrieve data count: {str(e)}")
-                return 0
+            
+            response = await embedder_collection.aggregate.over_all(
+                filters=filters,
+                group_by=GroupByAggregate(prop="doc_uuid"),
+                total_count=True,
+            )
+            return len(response.groups)
+        except Exception as e:
+            msg.fail(f"Failed to retrieve data count: Query call with protocol GQL Aggregate failed with message {str(e)}")
+            return 0
 
     async def get_chunk_count(
         self, client: WeaviateAsyncClient, embedder: str, doc_uuid: str

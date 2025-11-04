@@ -276,14 +276,31 @@ class VerbaManager:
             vectorized_documents = await embedding_task
 
             for document in vectorized_documents:
+                # Check if client is still connected, reconnect if needed
+                try:
+                    if not await client.is_ready():
+                        msg.warn("Client disconnected during import, attempting to reconnect...")
+                        # Note: In production, we should get the client from client_manager
+                        # For now, we'll raise an exception to be handled by the outer try-catch
+                        raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
+                except Exception as e:
+                    if "closed" in str(e).lower() or "not connected" in str(e).lower():
+                        msg.warn("Import teve erro, mas tentando executar ETL: " + str(e))
+                        raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
+                    raise
+                
+                embedder_model = (
+                    currentFileConfig.rag_config["Embedder"]
+                    .components[fileConfig.rag_config["Embedder"].selected]
+                    .config["Model"]
+                    .value
+                )
+                
                 ingesting_task = asyncio.create_task(
                     self.weaviate_manager.import_document(
                         client,
                         document,
-                        currentFileConfig.rag_config["Embedder"]
-                        .components[fileConfig.rag_config["Embedder"].selected]
-                        .config["Model"]
-                        .value,
+                        embedder_model,
                     )
                 )
                 await ingesting_task

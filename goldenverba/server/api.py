@@ -331,7 +331,18 @@ async def websocket_import_files(websocket: WebSocket):
             batch_data = DataBatchPayload.model_validate_json(data)
             fileConfig = batcher.add_batch(batch_data)
             if fileConfig is not None:
+                # Get client and ensure it's connected
                 client = await client_manager.connect(batch_data.credentials)
+                if client is None:
+                    raise Exception("Failed to connect to Weaviate")
+                
+                # Verify client is ready before import
+                if not await client.is_ready():
+                    msg.warn("Client not ready, reconnecting...")
+                    client = await client_manager.connect(batch_data.credentials)
+                    if client is None or not await client.is_ready():
+                        raise Exception("Failed to reconnect to Weaviate")
+                
                 await asyncio.create_task(
                     manager.import_document(client, fileConfig, logger)
                 )

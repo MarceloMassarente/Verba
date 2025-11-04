@@ -51,19 +51,29 @@ def patch_weaviate_manager():
                 # Se falhar, tenta recuperar doc_uuid pela busca do documento
                 # (alguns chunks podem ter sido inseridos mesmo com erro)
                 msg.warn(f"Import teve erro, mas tentando executar ETL: {str(import_error)}")
+                
+                # Verifica se o cliente está conectado antes de tentar recuperar
                 if Filter is not None:
                     try:
-                        # Tenta buscar documento pelo nome para recuperar doc_uuid
-                        document_collection = client.collections.get(self.document_collection_name)
-                        results = await document_collection.query.fetch_objects(
-                            filters=Filter.by_property("title").equal(document.title),
-                            limit=1
-                        )
-                        if results.objects:
-                            doc_uuid = str(results.objects[0].uuid)
-                            msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
+                        # Verifica se cliente está conectado
+                        if not await client.is_ready():
+                            msg.warn("Cliente não está conectado, não é possível recuperar doc_uuid")
+                        else:
+                            # Tenta buscar documento pelo nome para recuperar doc_uuid
+                            document_collection = client.collections.get(self.document_collection_name)
+                            results = await document_collection.query.fetch_objects(
+                                filters=Filter.by_property("title").equal(document.title),
+                                limit=1
+                            )
+                            if results.objects:
+                                doc_uuid = str(results.objects[0].uuid)
+                                msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
                     except Exception as recovery_error:
-                        msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
+                        # Se o erro for de cliente fechado, não tenta recuperar
+                        if "closed" in str(recovery_error).lower() or "not connected" in str(recovery_error).lower():
+                            msg.warn("Cliente fechado durante recuperação, não foi possível recuperar doc_uuid")
+                        else:
+                            msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
                 # Re-raise para não mascarar o erro original
                 raise import_error
             
