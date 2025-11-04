@@ -234,23 +234,28 @@ class VerbaManager:
 
             # Check if ETL is enabled BEFORE chunking
             enable_etl = document.meta.get("enable_etl", False) if hasattr(document, 'meta') and document.meta else False
+            msg.info(f"[ETL-PRE-CHECK] Verificando ETL para documento '{document.title}': enable_etl={enable_etl}, meta={document.meta if hasattr(document, 'meta') else 'None'}")
             
             # FASE 1: ETL Pré-Chunking (extrai entidades do documento completo)
             # ⚠️ PATCH: Integração de ETL pré-chunking via hook
             # Documentado em: verba_extensions/patches/README_PATCHES.md
             # Ao atualizar Verba, verificar se este patch ainda funciona
             if enable_etl:
+                msg.info(f"[ETL-PRE] ETL habilitado detectado - iniciando extração de entidades pré-chunking")
                 try:
                     from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
+                    msg.info(f"[ETL-PRE] Hook importado com sucesso - aplicando ETL pré-chunking")
                     document = apply_etl_pre_chunking(document, enable_etl=True)
-                    msg.info(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
-                except ImportError:
-                    msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem)")
+                    msg.good(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
+                except ImportError as import_err:
+                    msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem): {str(import_err)}")
                 except Exception as e:
-                    msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {str(e)}")
+                    import traceback
+                    msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {type(e).__name__}: {str(e)}")
+                    msg.warn(f"[ETL-PRE] Traceback: {traceback.format_exc()}")
                 msg.info(f"[ETL] ETL A2 habilitado - será executado APÓS chunking e embedding também")
             else:
-                msg.info(f"[ETL] ETL A2 não habilitado para este documento")
+                msg.info(f"[ETL] ETL A2 não habilitado para este documento (enable_etl=False)")
             
             msg.info(f"[CHUNKING] Iniciando chunking para '{document.title}' (ETL={'enabled' if enable_etl else 'disabled'})")
             chunk_task = asyncio.create_task(

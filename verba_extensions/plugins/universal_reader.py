@@ -90,7 +90,8 @@ class UniversalA2Reader(Reader):
                 doc.meta["enable_etl"] = enable_etl
                 doc.meta["language"] = doc.meta.get("language", language_hint)
                 
-                msg.info(f"Documento '{doc.title}' preparado para ETL A2")
+                msg.info(f"[UNIVERSAL-READER] Documento '{doc.title}' preparado - enable_etl={enable_etl}, language={language_hint}")
+                msg.info(f"[UNIVERSAL-READER] Meta configurada: {doc.meta}")
             
             msg.good(f"{len(documents)} documento(s) carregado(s) com ETL habilitado")
             return documents

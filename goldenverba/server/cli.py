@@ -6,18 +6,14 @@ from dotenv import load_dotenv
 # Suppress websockets deprecation warnings from uvicorn
 # This is a known issue: uvicorn uses websockets.legacy API which is deprecated
 # The warning doesn't affect functionality and will be fixed in future uvicorn updates
-warnings.filterwarnings(
-    "ignore",
-    message=".*websockets.legacy.*",
-    category=DeprecationWarning,
-    module="websockets",
-)
-warnings.filterwarnings(
-    "ignore",
-    message=".*remove second argument of ws_handler.*",
-    category=DeprecationWarning,
-    module="websockets",
-)
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn.protocols.websockets")
+warnings.filterwarnings("ignore", message=".*websockets.legacy.*")
+warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
+warnings.filterwarnings("ignore", message=".*WebSocketServerProtocol.*")
+# Also suppress via environment variable for Railway
+if "PYTHONWARNINGS" not in os.environ:
+    os.environ["PYTHONWARNINGS"] = "ignore::DeprecationWarning:websockets"
 
 import uvicorn
 
