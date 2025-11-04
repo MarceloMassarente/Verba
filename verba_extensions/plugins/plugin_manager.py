@@ -45,6 +45,8 @@ class PluginManager:
         # Plugins conhecidos para carregar
         known_plugins = [
             "llm_metadata_extractor",
+            "recursive_document_splitter",
+            "reranker",
         ]
         
         for plugin_name in known_plugins:

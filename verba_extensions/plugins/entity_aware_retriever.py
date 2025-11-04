@@ -210,6 +210,51 @@ class EntityAwareRetriever(Retriever):
             client, chunks, weaviate_manager, embedder, config
         )
         
+        # 6. ✨ RERANKING (se disponível)
+        try:
+            from verba_extensions.plugins.plugin_manager import get_plugin_manager
+            plugin_manager = get_plugin_manager()
+            
+            # Procura plugin Reranker
+            reranker = None
+            for plugin in plugin_manager.plugins:
+                if plugin.name == "Reranker":
+                    reranker = plugin
+                    break
+            
+            if reranker:
+                # Converte chunks Weaviate para Chunk objects para reranking
+                chunk_objects = []
+                for chunk in chunks:
+                    if hasattr(chunk, "properties"):
+                        chunk_obj = Chunk(
+                            content=chunk.properties.get("content", ""),
+                            chunk_id=str(chunk.uuid),
+                            meta=chunk.properties.get("meta", {})
+                        )
+                        chunk_objects.append(chunk_obj)
+                
+                if chunk_objects:
+                    # Rerank usando top_k baseado no limit original
+                    reranked_objects = await reranker.process_chunks(
+                        chunk_objects,
+                        query=query,
+                        config={"top_k": limit}
+                    )
+                    
+                    # Reconstrói chunks Weaviate a partir dos rerankeados
+                    reranked_uuids = {chunk.chunk_id for chunk in reranked_objects}
+                    chunks = [c for c in chunks if str(c.uuid) in reranked_uuids]
+                    
+                    # Reordena conforme reranking
+                    uuid_to_chunk = {str(c.uuid): c for c in chunks}
+                    chunks = [uuid_to_chunk.get(chunk.chunk_id) for chunk in reranked_objects if chunk.chunk_id in uuid_to_chunk]
+                    
+                    msg.good(f"Reranked {len(chunks)} chunks usando {reranker.name}")
+        except Exception as e:
+            msg.warn(f"Reranking falhou (não crítico): {str(e)}")
+            # Continua sem reranking
+        
         return (chunks, message)
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
