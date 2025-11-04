@@ -132,8 +132,52 @@ def apply_patch(file_path: Path, patch_config: Dict) -> bool:
         print_error(f"Erro ao aplicar patch: {str(e)}")
         return False
 
+def get_verba_version() -> str:
+    """Obtém a versão do Verba instalado"""
+    try:
+        import setup
+        if hasattr(setup, 'version'):
+            return setup.version
+        # Tenta pegar do goldenverba
+        import goldenverba
+        if hasattr(goldenverba, '__version__'):
+            return goldenverba.__version__
+        return "unknown"
+    except:
+        return "unknown"
+
 def main():
     """Função principal"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Aplica patches automáticos no Verba',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemplos:
+  python scripts/apply_patches.py --version 2.1.3
+  python scripts/apply_patches.py --dry-run
+  python scripts/apply_patches.py --auto
+        """
+    )
+    parser.add_argument(
+        '--version',
+        type=str,
+        help='Versão do Verba (ex: 2.1.3). Se não especificado, detecta automaticamente.'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Modo simulação - não aplica patches, apenas mostra o que seria feito'
+    )
+    parser.add_argument(
+        '--auto',
+        action='store_true',
+        help='Aplica patches automaticamente sem pedir confirmação'
+    )
+    
+    args = parser.parse_args()
+    
     print_info("🔄 Aplicador de Patches para Verba")
     print_info("=" * 50)
     
@@ -143,43 +187,94 @@ def main():
         print_error("Execute este script na raiz do projeto Verba")
         sys.exit(1)
     
+    # Detecta versão
+    version = args.version or get_verba_version()
+    if version == "unknown":
+        print_warning("Não foi possível detectar versão do Verba")
+        version = input("Digite a versão do Verba (ex: 2.1.3): ").strip()
+        if not version:
+            print_error("Versão é obrigatória")
+            sys.exit(1)
+    
+    print_info(f"Versão do Verba: {version}")
+    
+    # Verifica se há patches para esta versão
+    patches_dir = Path(f"patches/{version}")
+    if patches_dir.exists():
+        print_info(f"📁 Patches encontrados em: patches/{version}/")
+        print_info(f"   Para detalhes, veja: patches/{version}/README.md")
+    else:
+        print_warning(f"⚠️  Diretório de patches não encontrado: patches/{version}/")
+        print_warning("   Usando patches padrão (pode não estar atualizado para esta versão)")
+    
     # Verifica se há backup
-    backup_exists = Path("goldenverba_backup").exists()
-    if not backup_exists:
-        print_warning("Backup não encontrado. Recomendado fazer backup antes!")
-        response = input("Continuar mesmo assim? (s/n): ")
-        if response.lower() != 's':
-            print_info("Operação cancelada")
-            sys.exit(0)
+    if not args.auto and not args.dry_run:
+        backup_exists = Path("goldenverba_backup").exists()
+        if not backup_exists:
+            print_warning("Backup não encontrado. Recomendado fazer backup antes!")
+            response = input("Continuar mesmo assim? (s/n): ")
+            if response.lower() != 's':
+                print_info("Operação cancelada")
+                sys.exit(0)
+    
+    if args.dry_run:
+        print_info("\n🔍 Modo DRY-RUN - Nenhuma mudança será aplicada")
+        print_info("-" * 50)
     
     print_info("\nAplicando patches...")
     print_info("-" * 50)
     
     applied = 0
     failed = 0
+    skipped = 0
     
     for patch_name, patch_config in PATCHES.items():
         file_path = Path(patch_config["file"])
         print_info(f"\nProcessando: {patch_name}")
+        print_info(f"   Arquivo: {patch_config['file']}")
+        print_info(f"   Descrição: {patch_config['description']}")
         
-        if apply_patch(file_path, patch_config):
-            applied += 1
+        if args.dry_run:
+            # Apenas verifica se patch já está aplicado
+            content = file_path.read_text(encoding='utf-8')
+            if patch_config["insert"].strip() in content:
+                print_warning(f"   ⚠️  Patch já aplicado (seria pulado)")
+                skipped += 1
+            else:
+                print_success(f"   ✅ Patch seria aplicado")
+                applied += 1
         else:
-            failed += 1
+            if apply_patch(file_path, patch_config):
+                applied += 1
+            else:
+                failed += 1
     
     print_info("\n" + "=" * 50)
     print_info("Resumo:")
-    print_success(f"Patches aplicados: {applied}")
-    if failed > 0:
-        print_error(f"Patches falharam: {failed}")
+    if args.dry_run:
+        print_success(f"Patches que seriam aplicados: {applied}")
+        print_warning(f"Patches já aplicados: {skipped}")
+    else:
+        print_success(f"Patches aplicados: {applied}")
+        if failed > 0:
+            print_error(f"Patches falharam: {failed}")
     
     print_info("\n⚠️  IMPORTANTE:")
-    print_warning("1. Método connect_to_custom() precisa ser aplicado MANUALMENTE")
-    print_warning("2. Ver PATCH_CONNECT_TO_CUSTOM.md para detalhes")
-    print_warning("3. Teste o sistema após aplicar patches!")
+    print_warning("1. Patches complexos precisam ser aplicados MANUALMENTE:")
+    print_warning("   - connect_to_custom() (managers.py)")
+    print_warning("   - connect_to_cluster() (managers.py)")
+    print_warning("   - CORS middleware (api.py)")
+    print_warning("   - get_models() (OpenAIGenerator.py, AnthropicGenerator.py)")
+    print_warning("2. Veja: patches/{}/README.md para detalhes".format(version))
+    print_warning("3. Veja: GUIA_APLICAR_PATCHES_UPDATE.md para guia completo")
+    print_warning("4. TESTE o sistema após aplicar patches!")
     
-    if failed == 0:
+    if args.dry_run:
+        print_info("\n💡 Execute sem --dry-run para aplicar os patches")
+    elif failed == 0 and applied > 0:
         print_success("\n✅ Todos os patches automáticos foram aplicados!")
+    elif failed == 0 and applied == 0:
+        print_warning("\n⚠️  Todos os patches já estavam aplicados")
     else:
         print_error("\n❌ Alguns patches falharam. Revise manualmente.")
 

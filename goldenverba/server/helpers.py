@@ -18,27 +18,46 @@ class LoggerManager:
     ):
         msg.info(f"{status} | {file_Id} | {message} | {took}")
         if self.socket is not None:
-            payload: StatusReport = {
-                "fileID": file_Id,
-                "status": status,
-                "message": message,
-                "took": took,
-            }
-
-            await self.socket.send_json(payload)
+            try:
+                payload: StatusReport = {
+                    "fileID": file_Id,
+                    "status": status,
+                    "message": message,
+                    "took": took,
+                }
+                await self.socket.send_json(payload)
+            except RuntimeError as e:
+                # WebSocket foi fechado pelo cliente - é normal em imports longos
+                # Client pode ter timeout (~30s) enquanto o servidor ainda está processando (pode ser >150s)
+                if "close message has been sent" in str(e) or "Cannot call" in str(e):
+                    msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
+                else:
+                    msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")
+            except Exception as e:
+                # Outros erros - log apenas para não quebrar o processamento
+                msg.warn(f"[WEBSOCKET] Failed to send report to client: {type(e).__name__}: {str(e)}")
 
     async def create_new_document(
         self, new_file_id: str, document_name: str, original_file_id: str
     ):
         msg.info(f"Creating new file {new_file_id} from {original_file_id}")
         if self.socket is not None:
-            payload: CreateNewDocument = {
-                "new_file_id": new_file_id,
-                "filename": document_name,
-                "original_file_id": original_file_id,
-            }
-
-            await self.socket.send_json(payload)
+            try:
+                payload: CreateNewDocument = {
+                    "new_file_id": new_file_id,
+                    "filename": document_name,
+                    "original_file_id": original_file_id,
+                }
+                await self.socket.send_json(payload)
+            except RuntimeError as e:
+                # WebSocket foi fechado - é normal
+                if "close message has been sent" in str(e) or "Cannot call" in str(e):
+                    msg.info(f"[WEBSOCKET] Client disconnected before receiving document creation: {new_file_id}")
+                else:
+                    msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")
+            except Exception as e:
+                # Outros erros - log apenas
+                msg.warn(f"[WEBSOCKET] Failed to send document creation to client: {type(e).__name__}: {str(e)}")
 
 
 class BatchManager:

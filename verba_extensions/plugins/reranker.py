@@ -33,6 +33,52 @@ class RerankerPlugin:
         self.use_cross_encoder = False  # Requer modelo instalado
         self.use_llm_scoring = False  # Requer API key
         
+    async def process_chunk(
+        self,
+        chunk,
+        config = None
+    ):
+        """
+        Processa um único chunk (compatibilidade com plugin system).
+        Como reranking requer contexto de múltiplos chunks, apenas retorna o chunk.
+        
+        Args:
+            chunk: Chunk a processar
+            config: Configuração opcional
+        
+        Returns:
+            Chunk processado (sem alteração para chunk individual)
+        """
+        # Reranking é melhor feito em batch, então apenas retorna o chunk
+        return chunk
+    
+    async def process_batch(
+        self,
+        chunks,
+        config = None
+    ):
+        """
+        Processa múltiplos chunks em batch (reranking).
+        
+        Args:
+            chunks: Lista de chunks a rerankear
+            config: Configuração opcional (pode incluir 'query')
+        
+        Returns:
+            Chunks rerankeados (ordenados por relevância)
+        """
+        # Extrai query da configuração se disponível
+        query = ""
+        if config and isinstance(config, dict):
+            query = config.get("query", "")
+        
+        # Se não houver query, apenas retorna chunks na ordem original
+        if not query:
+            logger.debug("No query provided for reranking, returning chunks unchanged")
+            return chunks
+        
+        return await self.process_chunks(chunks, query, config)
+    
     async def process_chunks(
         self,
         chunks: List[Chunk],

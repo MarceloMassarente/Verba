@@ -412,6 +412,14 @@ class VerbaManager:
 
     async def load_rag_config(self, client):
         """Check if a Configuration File exists in the database, if yes, check if corrupted. Returns a valid configuration file"""
+        # Garante que todas as coleções de embeddings existem
+        # Isso é necessário para que chunks possam ser vetorizados
+        await self.weaviate_manager.verify_collections(
+            client, 
+            self.environment_variables,
+            self.installed_libraries
+        )
+        
         loaded_config = await self.weaviate_manager.get_config(
             client, self.rag_config_uuid
         )

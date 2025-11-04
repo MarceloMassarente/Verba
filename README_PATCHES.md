@@ -1,149 +1,133 @@
-# Guia Rápido de Patches - Verba Customizado
+# 🔧 Documentação de Patches - Guia Rápido
 
-Este README fornece uma referência rápida para aplicar patches após atualizações do Verba padrão.
+Este é um guia rápido para aplicar patches após atualizar o Verba. Para documentação completa, veja os documentos listados abaixo.
+
+## 🚀 Quick Start
+
+### 1. Identificar Versão do Verba
+
+```bash
+pip show goldenverba | grep Version
+# Ou
+python -c "import setup; print(setup.version)"
+```
+
+### 2. Aplicar Patches Automáticos
+
+```bash
+# Verificar o que será feito (dry-run)
+python scripts/apply_patches.py --version 2.1.3 --dry-run
+
+# Aplicar patches automáticos
+python scripts/apply_patches.py --version 2.1.3
+
+# Aplicar automaticamente sem perguntas
+python scripts/apply_patches.py --version 2.1.3 --auto
+```
+
+### 3. Verificar Patches Aplicados
+
+```bash
+# Verificar todos os patches
+python scripts/verify_patches.py --version 2.1.3
+
+# Verificar um patch específico
+python scripts/verify_patches.py --version 2.1.3 --patch managers_connect_to_custom
+
+# Gerar relatório detalhado
+python scripts/verify_patches.py --version 2.1.3 --report
+```
+
+### 4. Aplicar Patches Manuais
+
+Patches complexos precisam ser aplicados manualmente:
+
+1. **Ver documentação específica:**
+   ```bash
+   cat patches/v2.1.3/README.md
+   ```
+
+2. **Seguir guia completo:**
+   ```bash
+   cat GUIA_APLICAR_PATCHES_UPDATE.md
+   ```
+
+3. **Ver detalhes técnicos:**
+   ```bash
+   cat PATCHES_VERBA_WEAVIATE_V4.md
+   ```
+
+## 📋 Checklist Rápido
+
+- [ ] Backup do código atual
+- [ ] Verificar versão do Verba
+- [ ] Aplicar patches automáticos (`scripts/apply_patches.py`)
+- [ ] Verificar patches aplicados (`scripts/verify_patches.py`)
+- [ ] Aplicar patches manuais (se necessário)
+- [ ] Testar conexão Weaviate
+- [ ] Testar plugins
+- [ ] Testar ETL
 
 ## 📚 Documentação Completa
 
-- **[TODAS_MUDANCAS_VERBA.md](./TODAS_MUDANCAS_VERBA.md)** - Documentação completa de TODAS as mudanças
-- **[PATCHES_VERBA_WEAVIATE_V4.md](./PATCHES_VERBA_WEAVIATE_V4.md)** - Patches específicos do Weaviate v4
-- **[CORRECAO_CONEXAO_WEAVIATE.md](./CORRECAO_CONEXAO_WEAVIATE.md)** - Detalhes da correção de conexão
+### Essencial
+- **[INDICE_DOCUMENTACAO.md](INDICE_DOCUMENTACAO.md)** - Índice centralizado
+- **[LOG_COMPLETO_MUDANCAS.md](LOG_COMPLETO_MUDANCAS.md)** - Lista completa de mudanças
+- **[GUIA_APLICAR_PATCHES_UPDATE.md](GUIA_APLICAR_PATCHES_UPDATE.md)** - Guia passo a passo
+- **[patches/v2.1.3/README.md](patches/v2.1.3/README.md)** - Patches específicos por versão
 
-## 🚀 Processo Rápido
+### Técnica
+- **[PATCHES_VERBA_WEAVIATE_V4.md](PATCHES_VERBA_WEAVIATE_V4.md)** - Detalhes técnicos Weaviate
+- **[ANALISE_COMPARATIVA_VERBA_OFFICIAL_VS_CUSTOM.md](ANALISE_COMPARATIVA_VERBA_OFFICIAL_VS_CUSTOM.md)** - Análise comparativa
 
-### 1. Verificar Status Atual
+### Scripts
+- **[SCRIPTS_README.md](SCRIPTS_README.md)** - Documentação de scripts
+- `scripts/apply_patches.py` - Aplicador de patches
+- `scripts/verify_patches.py` - Verificador de patches
 
-**Windows:**
-```powershell
-.\APLICAR_PATCHES.ps1
-```
+## 🎯 Patches por Complexidade
 
-**Linux/Mac:**
-```bash
-./APLICAR_PATCHES.sh
-```
+### ⭐ Baixa (Automático)
+- ✅ Carregamento de extensões (`api.py`)
+- ✅ SentenceTransformersEmbedder (`managers.py`)
 
-Isso mostrará quais patches já estão aplicados e quais faltam.
+### ⭐⭐ Média (Manual Simples)
+- ⚠️ CORS middleware (`api.py`)
+- ⚠️ `connect_to_cluster()` (`managers.py`)
+- ⚠️ `get_models()` (`OpenAIGenerator.py`, `AnthropicGenerator.py`)
 
-### 2. Aplicar Patches
+### ⭐⭐⭐⭐⭐ Muito Alta (Manual Complexo)
+- 🚨 `connect_to_custom()` (`managers.py`) - ~200 linhas reescritas
 
-Siga a ordem em **[TODAS_MUDANCAS_VERBA.md](./TODAS_MUDANCAS_VERBA.md)**:
+## ⚠️ Troubleshooting
 
-1. **Core Changes** (Chunk, VerbaManager)
-2. **Weaviate v4** (managers.py) - **CRÍTICO**
-3. **Plugins RAG2** (novos arquivos)
-4. **EntityAwareRetriever** (integração)
-
-### 3. Testar
-
-```bash
-# Testes de conexão Weaviate
-python test_weaviate_access.py
-
-# Testes unitários RAG2
-pytest verba_extensions/tests/
-
-# Teste de named vectors
-python test_named_vectors_v4_rest.py
-```
-
-## ⚠️ Mudanças Críticas
-
-### Weaviate v4 (managers.py)
-
-**POR QUE É CRÍTICO:** Sem essas mudanças, conexão Weaviate v4 em PaaS (Railway) falha.
-
-**CHECKLIST:**
-- [ ] Configuração PaaS explícita (`WEAVIATE_HTTP_HOST`, `WEAVIATE_GRPC_HOST`)
-- [ ] Uso de `connect_to_custom` para HTTPS
-- [ ] Remoção de `WeaviateV3HTTPAdapter`
-- [ ] Verificação de `hasattr(client, 'connect')`
-
-**Ver:** [PATCHES_VERBA_WEAVIATE_V4.md](./PATCHES_VERBA_WEAVIATE_V4.md)
-
-### Chunk (chunk_lang, chunk_date)
-
-**POR QUE É IMPORTANTE:** Necessário para filtros RAG2 (bilingual, temporal).
-
-**CHECKLIST:**
-- [ ] Adicionar `chunk_lang` e `chunk_date` no `__init__`
-- [ ] Atualizar `to_json()` e `from_json()`
-
-**Ver:** [TODAS_MUDANCAS_VERBA.md - Seção 1](./TODAS_MUDANCAS_VERBA.md#1-chunk-goldenverbacomponentschunkpy)
-
-## 📦 Dependências
+### Erro: Versão não encontrada
 
 ```bash
-# Weaviate v4
-pip install weaviate-client>=4.0.0
-
-# RAG2 Features
-pip install langdetect cachetools
-
-# Testes (opcional)
-pip install pytest pytest-asyncio httpx
+# Verificar versão manualmente
+python -c "import setup; print(setup.version)"
+# Ou editar setup.py e ver linha: version="..."
 ```
 
-## 🔍 Troubleshooting Rápido
+### Erro: Patch já aplicado
 
-| Erro | Solução |
-|------|---------|
-| `'WeaviateV3HTTPAdapter' object has no attribute 'connect'` | Remover referências ao adapter v3 |
-| `ModuleNotFoundError: No module named 'langdetect'` | `pip install langdetect` |
-| `Meta endpoint! Unexpected status code: 400` | Verificar configuração PaaS (`WEAVIATE_HTTP_HOST`, etc.) |
-| `gRPC health check could not be completed` | Verificar `WEAVIATE_GRPC_HOST` e `WEAVIATE_GRPC_PORT` |
+Isso é normal! O script detecta patches já aplicados e os pula.
 
-## 📝 Estrutura de Arquivos
+### Erro: Conflitos em merge manual
 
-```
-Verba/
-├── goldenverba/
-│   ├── components/
-│   │   ├── chunk.py          # MODIFICADO (chunk_lang, chunk_date)
-│   │   └── managers.py       # MODIFICADO (Weaviate v4)
-│   └── verba_manager.py      # MODIFICADO (detecção de idioma)
-│
-├── verba_extensions/
-│   └── plugins/
-│       ├── bilingual_filter.py       # NOVO
-│       ├── query_rewriter.py         # NOVO
-│       ├── temporal_filter.py       # NOVO
-│       └── entity_aware_retriever.py # MODIFICADO (integração RAG2)
-│
-└── Documentação/
-    ├── TODAS_MUDANCAS_VERBA.md      # Guia completo
-    ├── PATCHES_VERBA_WEAVIATE_V4.md # Patches Weaviate
-    ├── README_PATCHES.md            # Este arquivo
-    ├── APLICAR_PATCHES.ps1          # Script Windows
-    └── APLICAR_PATCHES.sh           # Script Linux/Mac
-```
+1. Ver diferenças entre versão oficial e customizada
+2. Aplicar mudanças incrementalmente
+3. Testar após cada mudança
+4. Ver `GUIA_APLICAR_PATCHES_UPDATE.md` seção "Conflitos Comuns"
 
-## 🎯 Ordem de Aplicação Recomendada
+## 💡 Dicas
 
-1. ✅ **Backup** do código atual
-2. ✅ **Atualizar** Verba padrão (merge/rebase)
-3. ✅ **Verificar** status com script de verificação
-4. ✅ **Aplicar** patches na ordem:
-   - Core (Chunk, VerbaManager)
-   - Weaviate v4 (managers.py) - **CRÍTICO**
-   - Plugins RAG2 (novos arquivos)
-   - EntityAwareRetriever (modificações)
-5. ✅ **Testar** conexão e funcionalidades
-6. ✅ **Commit** patches aplicados
-
-## 📞 Ajuda
-
-Se encontrar problemas:
-
-1. Verifique os logs de erro
-2. Consulte a documentação específica:
-   - Weaviate v4: [PATCHES_VERBA_WEAVIATE_V4.md](./PATCHES_VERBA_WEAVIATE_V4.md)
-   - Todas mudanças: [TODAS_MUDANCAS_VERBA.md](./TODAS_MUDANCAS_VERBA.md)
-3. Execute o script de verificação para diagnóstico
-4. Verifique variáveis de ambiente (PaaS)
+1. **Sempre faça backup** antes de aplicar patches
+2. **Use `--dry-run`** primeiro para ver o que será feito
+3. **Teste incrementalmente** após cada patch
+4. **Documente mudanças** se ajustar algo manualmente
 
 ---
 
 **Última atualização:** 2025-11-04  
-**Versão Verba Base:** (verificar após update)  
-**weaviate-client:** 4.17.0
-
+**Versão atual suportada:** 2.1.3

@@ -142,10 +142,41 @@ embedders = [
 
 ### **4. `goldenverba/components/managers.py`**
 
+**Método `connect_to_cluster()`**: Priorização de configuração PaaS explícita
+
+**Arquivo**: `goldenverba/components/managers.py`
+**Método**: `WeaviateManager.connect_to_cluster()` (linha ~170-258 aprox)
+
+**Mudanças Principais**:
+1. Priorização de configuração PaaS explícita (WEAVIATE_HTTP_HOST/GRPC_HOST)
+2. Suporte a portas HTTP/gRPC separadas para PaaS
+3. Fallback para métodos originais (WCS, URL-based)
+
+**Código Adicionado (no início da função):**
+```python
+# PRIORIDADE 1: Verificar se há configuração PaaS explícita (Railway, etc.)
+http_host = os.getenv("WEAVIATE_HTTP_HOST")
+grpc_host = os.getenv("WEAVIATE_GRPC_HOST")
+
+if http_host and grpc_host:
+    # Configuração PaaS explícita - usar connect_to_custom com portas separadas
+    # ... lógica completa de conexão PaaS ...
+    return client
+# Continua para métodos originais...
+```
+
+**Localização**: Logo após verificação de URL, antes de qualquer outra lógica
+
+**Documentação**: Ver `PATCHES_VERBA_WEAVIATE_V4.md` (linha 13-82) para detalhes completos
+
+---
+
+### **5. `goldenverba/components/managers.py`**
+
 **Método `connect_to_custom()`**: Lógica completa para Railway/Weaviate v3
 
 **Arquivo**: `goldenverba/components/managers.py`
-**Método**: `WeaviateManager.connect_to_custom()` (linha ~240-450 aprox)
+**Método**: `WeaviateManager.connect_to_custom()` (linha ~271-460 aprox)
 
 **Mudanças Principais**:
 1. Detecção de Railway domains (`.railway.app`, `.railway.internal`)
@@ -153,8 +184,34 @@ embedders = [
 3. Suporte a Weaviate v3 via adapter
 4. Fallback automático v4 → v3
 5. Tratamento de HTTPS/HTTP
+6. Priorização de `connect_to_custom()` para HTTPS (mais confiável)
 
-**⚠️ MÉTODO COMPLETO MODIFICADO** - Ver arquivo completo para replicação
+**⚠️ MÉTODO COMPLETO MODIFICADO** (~200 linhas reescritas)
+
+**Documentação**: Ver `PATCHES_VERBA_WEAVIATE_V4.md` (linha 92-246) para detalhes completos
+
+---
+
+### **6. `goldenverba/components/generation/OpenAIGenerator.py`**
+
+**Método `get_models()`**: Filtro melhorado para incluir todos modelos de chat
+
+**Arquivo**: `goldenverba/components/generation/OpenAIGenerator.py`
+**Método**: `OpenAIGenerator.get_models()` (linha ~127-146 aprox)
+
+**Mudança**:
+```python
+# ANTES (código original):
+# Filtro básico que pode excluir modelos de chat
+
+# DEPOIS (nossa mudança):
+# Filtro melhorado que inclui todos modelos de chat disponíveis
+# Verifica se modelo é de chat (gpt-*, o1-*, etc.) e inclui todos
+```
+
+**Localização**: Dentro do método `get_models()`, na lógica de filtro de modelos
+
+**Motivação**: Garantir que todos modelos de chat disponíveis apareçam na UI, não apenas um subset
 
 ---
 
@@ -212,17 +269,18 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 | Arquivo | Linha(s) | Tipo | Descrição |
 |---------|----------|------|-----------|
 | `goldenverba/server/api.py` | ~44-55 | **Adição** | Carregamento de extensões no startup |
-| `goldenverba/server/api.py` | ~72-85 | **Modificação** | CORS middleware para Railway |
+| `goldenverba/server/api.py` | ~72-150 | **Modificação** | CORS middleware para Railway |
 | `goldenverba/components/managers.py` | ~105 | **Adição** | SentenceTransformersEmbedder na lista |
-| `goldenverba/components/managers.py` | ~240-450 | **Modificação Completa** | Método `connect_to_custom()` |
+| `goldenverba/components/managers.py` | ~170-258 | **Modificação** | Método `connect_to_cluster()` - Priorização PaaS explícita |
+| `goldenverba/components/managers.py` | ~271-460 | **Modificação Completa** | Método `connect_to_custom()` - Railway/v3/v4 |
 | `goldenverba/components/generation/OpenAIGenerator.py` | ~127-146 | **Modificação** | Método `get_models()` - Filtro melhorado para incluir todos modelos de chat |
+| `goldenverba/components/generation/AnthropicGenerator.py` | ~24-94 | **Melhoria** | Adicionado método `get_models()` para listar todos modelos Claude disponíveis (incluindo 3.5) ao invés de apenas 1 hardcoded |
 | `verba_extensions/compatibility/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 | `verba_extensions/integration/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 | `verba_extensions/plugins/__init__.py` | **Novo** | **Criação** | Arquivo __init__.py faltando - necessário para Python reconhecer como pacote |
 | `verba_extensions/plugins/entity_aware_retriever.py` | ~47-52 | **Correção** | InputConfig Alpha: mudado de `type="number" value=0.6` para `type="text" value="0.6"` (InputConfig não aceita float) |
 | `verba_extensions/plugins/entity_aware_retriever.py` | ~81-83 | **Correção** | Adicionada conversão de string para float ao usar Alpha value |
 | `verba_extensions/integration/import_hook.py` | ~39-68 | **Melhoria** | Adicionado tratamento de exceções para tentar recuperar doc_uuid mesmo após erro de conexão durante Weaviating |
-| `goldenverba/components/generation/AnthrophicGenerator.py` | ~24-94 | **Melhoria** | Adicionado método `get_models()` para listar todos modelos Claude disponíveis (incluindo 3.5) ao invés de apenas 1 hardcoded |
 
 ---
 
@@ -260,7 +318,10 @@ Este método foi **completamente reescrito** (~200 linhas). Ao atualizar Verba:
 - [ ] Aplicar mudança 1: Carregamento extensões (`api.py`)
 - [ ] Aplicar mudança 2: CORS Railway (`api.py`)
 - [ ] Aplicar mudança 3: SentenceTransformers (`managers.py`)
-- [ ] Aplicar mudança 4: `connect_to_custom()` (`managers.py`)
+- [ ] Aplicar mudança 4: `connect_to_cluster()` - PaaS (`managers.py`)
+- [ ] Aplicar mudança 5: `connect_to_custom()` - Railway/v3 (`managers.py`)
+- [ ] Aplicar mudança 6: `get_models()` OpenAI (`OpenAIGenerator.py`)
+- [ ] Aplicar mudança 7: `get_models()` Anthropic (`AnthropicGenerator.py`)
 - [ ] Copiar `verba_extensions/` completo
 - [ ] Copiar `scripts/` completo
 - [ ] Atualizar `requirements-extensions.txt` se necessário
