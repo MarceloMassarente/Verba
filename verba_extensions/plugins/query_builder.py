@@ -279,6 +279,14 @@ FILTROS HIERÁRQUICOS (se necessário):
   - document_level_entities: ["Q312"]  // Filtrar documentos com Apple
   - entities: ["Q2283"]  // Filtrar chunks com Microsoft dentro desses documentos
 
+FILTROS POR FREQUÊNCIA (se necessário):
+- Se query menciona "entidade dominante", "mais frequente", "principal":
+  - filter_by_frequency: true
+  - min_frequency: 5  // Frequência mínima (opcional)
+  - dominant_only: true  // Apenas entidade dominante (opcional)
+- Se query menciona "mais que X", "aparece mais que Y":
+  - frequency_comparison: {"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}
+
 Retorne JSON válido:
 {{
     "semantic_query": "query expandida para busca semântica",
@@ -288,6 +296,10 @@ Retorne JSON válido:
         "entities": ["Q312", "Q2283"],  // Entity IDs extraídos (se mencionados)
         "entity_property": "entities_local_ids",  // Propriedade a usar (entities_local_ids ou section_entity_ids)
         "document_level_entities": [],  // Entidades para filtrar documentos primeiro (ex: ["Q312"] para Apple)
+        "filter_by_frequency": false,  // Se deve filtrar por frequência de entidade
+        "min_frequency": 0,  // Frequência mínima requerida (0 = qualquer)
+        "dominant_only": false,  // Apenas se entidade for dominante no documento
+        "frequency_comparison": null,  // Comparação de frequência: {{"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}}
         "date_range": {{"start": "2024-01-01", "end": "2024-12-31"}},  // Se mencionar data
         "language": "pt",  // Se detectar idioma
         "labels": [],  // Labels específicos (se mencionados)
@@ -376,6 +388,10 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
                 "entities": [],
                 "entity_property": "entities_local_ids",
                 "document_level_entities": [],  # Entidades para filtrar documentos primeiro
+                "filter_by_frequency": False,  # Filtrar por frequência
+                "min_frequency": 0,  # Frequência mínima
+                "dominant_only": False,  # Apenas entidade dominante
+                "frequency_comparison": None,  # Comparação de frequência
                 "date_range": None,
                 "language": None,
                 "labels": [],

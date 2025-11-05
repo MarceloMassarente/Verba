@@ -392,6 +392,30 @@ class EntityAwareRetriever(Retriever):
                 except Exception as e:
                     msg.warn(f"  Erro ao aplicar filtro temporal (não crítico): {str(e)}")
         
+        # 2.3. FILTRO POR FREQUÊNCIA (se habilitado)
+        frequency_filter = None
+        filter_by_frequency = query_filters_from_builder.get("filter_by_frequency", False)
+        min_frequency = query_filters_from_builder.get("min_frequency", 0)
+        dominant_only = query_filters_from_builder.get("dominant_only", False)
+        frequency_comparison = query_filters_from_builder.get("frequency_comparison")
+        
+        if filter_by_frequency and (min_frequency > 0 or dominant_only or frequency_comparison):
+            try:
+                from verba_extensions.utils.entity_frequency import (
+                    get_entity_hierarchy,
+                    get_dominant_entity,
+                    get_entity_ratio
+                )
+                
+                # Se há document_uuids filtrados, usar eles. Senão, buscar todos documentos do resultado
+                # Por enquanto, aplicamos filtro de frequência após buscar chunks (pós-processamento)
+                # Isso porque precisamos calcular frequência por documento primeiro
+                msg.info(f"  Filtro por frequência ativado: min_frequency={min_frequency}, dominant_only={dominant_only}")
+                # Nota: Filtro de frequência será aplicado após buscar chunks (pós-processamento)
+                # pois requer cálculo de frequência por documento
+            except ImportError:
+                msg.warn("  entity_frequency não disponível, ignorando filtro de frequência")
+        
         # Combinar filtros (entity + language + temporal)
         combined_filter = None
         filters_list = []
@@ -478,6 +502,92 @@ class EntityAwareRetriever(Retriever):
             return ([], "We couldn't find any chunks to the query")
         
         msg.good(f"Encontrados {len(chunks)} chunks")
+        
+        # 4.5. FILTRO POR FREQUÊNCIA (pós-processamento após buscar chunks)
+        if filter_by_frequency and (min_frequency > 0 or dominant_only or frequency_comparison):
+            try:
+                from verba_extensions.utils.entity_frequency import (
+                    get_entity_hierarchy,
+                    get_dominant_entity,
+                    get_entity_ratio
+                )
+                
+                # Normalizar nome da collection
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                # Agrupar chunks por doc_uuid
+                chunks_by_doc = {}
+                for chunk in chunks:
+                    doc_uuid = str(chunk.properties.get("doc_uuid", ""))
+                    if doc_uuid:
+                        if doc_uuid not in chunks_by_doc:
+                            chunks_by_doc[doc_uuid] = []
+                        chunks_by_doc[doc_uuid].append(chunk)
+                
+                # Filtrar documentos baseado em frequência
+                filtered_chunks = []
+                filtered_docs = 0
+                
+                for doc_uuid, doc_chunks in chunks_by_doc.items():
+                    should_include = True
+                    
+                    # Verificar frequência mínima
+                    if min_frequency > 0 and chunk_level_entities:
+                        from verba_extensions.utils.entity_frequency import get_entity_frequency_in_document
+                        freq = await get_entity_frequency_in_document(
+                            client, collection_name, doc_uuid
+                        )
+                        # Verificar se alguma entidade do filtro tem frequência suficiente
+                        has_min_freq = any(
+                            freq.get(eid, 0) >= min_frequency
+                            for eid in chunk_level_entities
+                        )
+                        if not has_min_freq:
+                            should_include = False
+                            continue
+                    
+                    # Verificar entidade dominante
+                    if dominant_only and chunk_level_entities:
+                        dominant_entity, _, _ = await get_dominant_entity(
+                            client, collection_name, doc_uuid
+                        )
+                        # Verificar se alguma entidade do filtro é dominante
+                        if dominant_entity not in chunk_level_entities:
+                            should_include = False
+                            continue
+                    
+                    # Verificar comparação de frequência
+                    if frequency_comparison:
+                        entity_1 = frequency_comparison.get("entity_1")
+                        entity_2 = frequency_comparison.get("entity_2")
+                        min_ratio = frequency_comparison.get("min_ratio", 1.0)
+                        
+                        if entity_1 and entity_2:
+                            ratio, _ = await get_entity_ratio(
+                                client, collection_name, doc_uuid,
+                                entity_1, entity_2
+                            )
+                            if ratio < min_ratio:
+                                should_include = False
+                                continue
+                    
+                    if should_include:
+                        filtered_chunks.extend(doc_chunks)
+                        filtered_docs += 1
+                
+                if filtered_chunks:
+                    chunks = filtered_chunks
+                    msg.good(f"  Filtro de frequência: {len(filtered_chunks)} chunks de {filtered_docs} documentos")
+                else:
+                    msg.warn(f"  Filtro de frequência: nenhum documento passou nos critérios")
+                    return ([], "Nenhum documento atende aos critérios de frequência de entidade")
+                    
+            except ImportError:
+                msg.warn("  entity_frequency não disponível, ignorando filtro de frequência")
+            except Exception as e:
+                msg.warn(f"  Erro ao aplicar filtro de frequência: {str(e)}")
+                # Continua com chunks originais
         
         # 5. PROCESSA CHUNKS (aplicar window)
         chunks, message = await self._process_chunks(
