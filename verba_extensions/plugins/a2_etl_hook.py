@@ -277,8 +277,37 @@ def register_hooks():
         # Pega collection_name se disponível (nome da collection de embedding)
         collection_name = kwargs.get('collection_name', None)
         
+        # Pega logger e file_id para notificação de conclusão
+        logger = kwargs.get('logger', None)
+        file_id = kwargs.get('file_id', None)
+        
         # Roda ETL
-        await run_etl_on_passages(client, passage_uuids, tenant, collection_name)
+        import asyncio
+        start_time = asyncio.get_event_loop().time()
+        result = await run_etl_on_passages(client, passage_uuids, tenant, collection_name)
+        end_time = asyncio.get_event_loop().time()
+        took = round(end_time - start_time, 2)
+        
+        # Envia notificação de conclusão se logger disponível e WebSocket conectado
+        if logger is not None and file_id:
+            try:
+                from goldenverba.server.types import FileStatus
+                patched_count = result.get('patched', 0) if result else 0
+                total_count = result.get('total', len(passage_uuids)) if result else len(passage_uuids)
+                
+                if patched_count > 0:
+                    await logger.send_report(
+                        file_id,
+                        status=FileStatus.INGESTING,  # Usa INGESTING para não sobrescrever DONE
+                        message=f"ETL concluído: {patched_count}/{total_count} chunks processados",
+                        took=took,
+                    )
+                    msg.info(f"[ETL] Notificação enviada: ETL concluído para {patched_count} chunks")
+                else:
+                    msg.info(f"[ETL] ETL concluído mas nenhum chunk foi atualizado (não enviando notificação)")
+            except Exception as notify_error:
+                # Não falha o ETL se notificação falhar
+                msg.warn(f"[ETL] Erro ao enviar notificação de conclusão: {str(notify_error)}")
     
     # Registra hook (precisa ser chamado após o plugin ser carregado)
     global_hooks.register_hook('import.after', after_import_document, priority=100)

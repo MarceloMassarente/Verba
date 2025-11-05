@@ -1,4 +1,5 @@
 from fastapi import WebSocket
+from starlette.websockets import WebSocketState
 from goldenverba.server.types import (
     FileStatus,
     StatusReport,
@@ -18,6 +19,11 @@ class LoggerManager:
     ):
         msg.info(f"{status} | {file_Id} | {message} | {took}")
         if self.socket is not None:
+            # Verifica se WebSocket está conectado antes de tentar enviar
+            if self.socket.application_state != WebSocketState.CONNECTED:
+                msg.info(f"[WEBSOCKET] WebSocket not connected (state: {self.socket.application_state}) - skipping report: {message}")
+                return
+            
             try:
                 payload: StatusReport = {
                     "fileID": file_Id,
@@ -27,9 +33,10 @@ class LoggerManager:
                 }
                 await self.socket.send_json(payload)
             except RuntimeError as e:
+                error_str = str(e).lower()
                 # WebSocket foi fechado pelo cliente - é normal em imports longos
                 # Client pode ter timeout (~30s) enquanto o servidor ainda está processando (pode ser >150s)
-                if "close message has been sent" in str(e) or "Cannot call" in str(e):
+                if "close message has been sent" in error_str or "cannot call" in error_str or "not connected" in error_str or "need to call" in error_str:
                     msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
                 else:
                     msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")
@@ -42,6 +49,11 @@ class LoggerManager:
     ):
         msg.info(f"Creating new file {new_file_id} from {original_file_id}")
         if self.socket is not None:
+            # Verifica se WebSocket está conectado antes de tentar enviar
+            if self.socket.application_state != WebSocketState.CONNECTED:
+                msg.info(f"[WEBSOCKET] WebSocket not connected (state: {self.socket.application_state}) - skipping document creation: {new_file_id}")
+                return
+            
             try:
                 payload: CreateNewDocument = {
                     "new_file_id": new_file_id,
@@ -50,8 +62,9 @@ class LoggerManager:
                 }
                 await self.socket.send_json(payload)
             except RuntimeError as e:
+                error_str = str(e).lower()
                 # WebSocket foi fechado - é normal
-                if "close message has been sent" in str(e) or "Cannot call" in str(e):
+                if "close message has been sent" in error_str or "cannot call" in error_str or "not connected" in error_str or "need to call" in error_str:
                     msg.info(f"[WEBSOCKET] Client disconnected before receiving document creation: {new_file_id}")
                 else:
                     msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")

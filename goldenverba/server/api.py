@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 from wasabi import msg  # type: ignore[import]
 
 from goldenverba import verba_manager
@@ -405,6 +405,33 @@ async def websocket_import_files(websocket: WebSocket):
                 # Log import start
                 msg.info(f"[IMPORT] Starting import for file: {fileConfig.filename} (ID: {fileConfig.fileID})")
                 
+                # Task de keep-alive para manter WebSocket vivo durante import longo
+                async def keep_alive_task():
+                    """Envia pings periódicos para manter WebSocket conectado"""
+                    try:
+                        while True:
+                            await asyncio.sleep(30)  # Ping a cada 30 segundos
+                            if websocket.application_state != WebSocketState.CONNECTED:
+                                break
+                            try:
+                                # Envia status de progresso para manter conexão viva
+                                await logger.send_report(
+                                    fileConfig.fileID,
+                                    status=FileStatus.INGESTING,
+                                    message="Processando...",
+                                    took=0,
+                                )
+                            except Exception:
+                                # Se falhar, para o keep-alive
+                                break
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        msg.info(f"[WEBSOCKET] Keep-alive task ended: {str(e)}")
+                
+                # Cria task de keep-alive
+                keep_alive = asyncio.create_task(keep_alive_task())
+                
                 # Start import task in background - it will continue even if WebSocket closes
                 import_task = asyncio.create_task(
                     manager.import_document(client, fileConfig, logger)
@@ -430,6 +457,13 @@ async def websocket_import_files(websocket: WebSocket):
                         msg.warn(f"[IMPORT] Failed to send error report (WebSocket may be closed): {str(report_error)}")
                     # Don't re-raise - let the loop continue to handle next import
                     # The error is already logged
+                finally:
+                    # Cancela keep-alive após import concluir (sucesso ou erro)
+                    keep_alive.cancel()
+                    try:
+                        await keep_alive
+                    except asyncio.CancelledError:
+                        pass
 
         except WebSocketDisconnect:
             msg.warn("[WEBSOCKET] Import WebSocket connection closed by client (normal during long imports)")

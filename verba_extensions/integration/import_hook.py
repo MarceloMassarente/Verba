@@ -11,11 +11,14 @@ Aplicado via: verba_extensions/startup.py (durante inicialização)
 """
 
 import os
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 from wasabi import msg
 
 # Track ETL executions to prevent duplicates
 _etl_executions_in_progress: Set[str] = set()
+
+# Store logger per doc_uuid for ETL completion notifications
+_logger_registry: Dict[str, any] = {}  # doc_uuid -> LoggerManager
 
 def patch_weaviate_manager():
     """
@@ -38,6 +41,10 @@ def patch_weaviate_manager():
             # Verifica se ETL está habilitado ANTES de importar
             # Padrão: True (ETL sempre ativo por padrão, a menos que explicitamente desabilitado)
             enable_etl = document.meta.get("enable_etl", True) if hasattr(document, 'meta') and document.meta else True
+            
+            # Tenta obter logger do document.meta (passado temporariamente por process_single_document)
+            logger = document.meta.get("_temp_logger") if hasattr(document, 'meta') and document.meta else None
+            file_id = document.meta.get("file_id") if hasattr(document, 'meta') and document.meta else None
             
             # Se não há meta ou não tem enable_etl, assume True (ETL universal)
             if not hasattr(document, 'meta') or not document.meta:
@@ -167,6 +174,11 @@ def patch_weaviate_manager():
                             
                             if not doc_uuid:
                                 msg.warn(f"[ETL-POST] ⚠️ Documento '{document.title}' não encontrado após {max_retries} tentativas - ETL não será executado")
+                            else:
+                                # Armazena logger para uso no hook ETL (já vem do document.meta)
+                                if logger is not None:
+                                    _logger_registry[doc_uuid] = logger
+                                    temp_doc_uuid_for_logger = doc_uuid
                         else:
                             msg.warn("[ETL-POST] Cliente não conectado - não é possível buscar doc_uuid")
                     except Exception as recovery_error:
@@ -266,10 +278,15 @@ def patch_weaviate_manager():
                                             if not hook_client:
                                                 msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
                                                 msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
+                                                # Limpa logger do registry
+                                                if doc_uuid in _logger_registry:
+                                                    del _logger_registry[doc_uuid]
                                                 return
                                             
                                             msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
                                             try:
+                                                # Passa logger via kwargs para o hook poder notificar conclusão
+                                                etl_logger = _logger_registry.get(doc_uuid)
                                                 await global_hooks.execute_hook_async(
                                                     'import.after',
                                                     hook_client,
@@ -277,7 +294,9 @@ def patch_weaviate_manager():
                                                     passage_uuids,
                                                     tenant=tenant,
                                                     enable_etl=True,
-                                                    collection_name=embedder_collection_name  # Passa nome da collection
+                                                    collection_name=embedder_collection_name,  # Passa nome da collection
+                                                    logger=etl_logger,  # Passa logger para notificação
+                                                    file_id=file_id  # Para notificação
                                                 )
                                                 msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
                                             except Exception as etl_error:
@@ -289,6 +308,9 @@ def patch_weaviate_manager():
                                             finally:
                                                 # Remove da lista de execuções em progresso
                                                 _etl_executions_in_progress.discard(doc_uuid)
+                                                # Limpa logger do registry após uso
+                                                if doc_uuid in _logger_registry:
+                                                    del _logger_registry[doc_uuid]
                                         
                                         asyncio.create_task(run_etl_hook())
                                 else:

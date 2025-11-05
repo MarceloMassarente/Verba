@@ -355,6 +355,17 @@ class VerbaManager:
             total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
             msg.info(f"[EMBEDDING] Starting vectorization: embedder={embedder_name}, chunks={total_chunks}, docs={len(chunked_documents)}")
             
+            # Envia status de início do embedding
+            try:
+                await logger.send_report(
+                    currentFileConfig.fileID,
+                    status=FileStatus.EMBEDDING,
+                    message=f"Vectorizando {total_chunks} chunks...",
+                    took=0,
+                )
+            except Exception:
+                pass  # Não falha se WebSocket fechar
+            
             try:
                 embedding_task = asyncio.create_task(
                     self.embedder_manager.vectorize(
@@ -366,6 +377,17 @@ class VerbaManager:
                 )
                 vectorized_documents = await embedding_task
                 msg.info(f"[EMBEDDING] Vectorization completed successfully: {len(vectorized_documents)} documents")
+                
+                # Envia status de conclusão do embedding
+                try:
+                    await logger.send_report(
+                        currentFileConfig.fileID,
+                        status=FileStatus.INGESTING,
+                        message=f"Vectorização concluída - importando no Weaviate...",
+                        took=0,
+                    )
+                except Exception:
+                    pass  # Não falha se WebSocket fechar
             except Exception as e:
                 msg.fail(f"[EMBEDDING] Vectorization failed: {type(e).__name__}: {str(e)}")
                 import traceback
@@ -392,6 +414,12 @@ class VerbaManager:
                         msg.warn("Import teve erro, mas tentando executar ETL: " + str(e))
                         raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
                     raise
+                
+                # Armazena logger e file_id temporariamente no document.meta para uso no hook ETL
+                if not hasattr(document, 'meta') or document.meta is None:
+                    document.meta = {}
+                document.meta['_temp_logger'] = logger
+                document.meta['file_id'] = currentFileConfig.fileID
                 
                 embedder_model = (
                     currentFileConfig.rag_config["Embedder"]
