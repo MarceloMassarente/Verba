@@ -67,13 +67,63 @@ def patch_weaviate_manager():
             
             # Helper para obter novo cliente se necessário
             async def _get_working_client():
-                """Obtém cliente funcionando, verifica se está conectado"""
+                """Obtém cliente funcionando, reconecta automaticamente se necessário"""
                 if _is_client_connected(client):
                     return client
-                # Cliente fechado - não tenta reconectar automaticamente
-                # (reconexão requereria credenciais que não temos acesso no contexto do hook)
-                # O ETL pós-chunking será pulado neste caso, mas chunks já foram importados
-                return None
+                
+                # Cliente fechado - tenta reconectar usando credenciais do ambiente ou manager
+                msg.warn("[ETL-POST] Cliente fechado, tentando reconectar automaticamente...")
+                try:
+                    # Tenta obter credenciais de várias fontes
+                    deployment = os.getenv("DEFAULT_DEPLOYMENT", "Custom")
+                    
+                    # Prioridade: WEAVIATE_HTTP_HOST (Railway interno) > WEAVIATE_URL_VERBA > other
+                    http_host = os.getenv("WEAVIATE_HTTP_HOST")
+                    url = os.getenv("WEAVIATE_URL_VERBA")
+                    
+                    # Se temos WEAVIATE_HTTP_HOST (Railway), usa ele com configuração Custom
+                    if http_host:
+                        url = http_host
+                        deployment = "Custom"
+                        port = os.getenv("WEAVIATE_HTTP_PORT", "8080")
+                    else:
+                        port = os.getenv("WEAVIATE_PORT", "8080")
+                    
+                    key = os.getenv("WEAVIATE_API_KEY_VERBA", "")
+                    
+                    if not url:
+                        msg.warn("[ETL-POST] Não foi possível determinar URL do Weaviate para reconexão")
+                        return None
+                    
+                    # Reconecta usando o manager
+                    from goldenverba.components import managers
+                    weaviate_manager = managers.WeaviateManager()
+                    
+                    # Tenta reconectar baseado no deployment type
+                    if deployment == "Custom":
+                        new_client = await weaviate_manager.connect_to_custom(url, key, port)
+                    elif deployment == "Weaviate":
+                        new_client = await weaviate_manager.connect_to_cluster(url, key)
+                    else:
+                        msg.warn(f"[ETL-POST] Deployment type '{deployment}' não suportado para reconexão automática")
+                        return None
+                    
+                    # Verifica se conectou
+                    if new_client:
+                        # Cliente v4 já está conectado, mas verificamos
+                        try:
+                            if hasattr(new_client, 'connect'):
+                                await new_client.connect()
+                            if await new_client.is_ready():
+                                msg.good("[ETL-POST] ✅ Reconectado automaticamente com sucesso")
+                                return new_client
+                        except Exception as e:
+                            msg.warn(f"[ETL-POST] Cliente reconectado mas não está pronto: {str(e)}")
+                    
+                    return None
+                except Exception as e:
+                    msg.warn(f"[ETL-POST] Erro ao tentar reconectar: {str(e)}")
+                    return None
             
             # Chama método original (NÃO retorna doc_uuid - método original não retorna)
             # Precisamos buscar doc_uuid após o import
@@ -192,9 +242,20 @@ def patch_weaviate_manager():
                                     # Executa em background para não bloquear
                                     async def run_etl_hook():
                                         # Obtém cliente novamente dentro da task (pode ter fechado)
-                                        hook_client = await _get_working_client()
+                                        # Usa retry com reconexão automática
+                                        hook_client = None
+                                        max_retries = 3
+                                        for retry in range(max_retries):
+                                            hook_client = await _get_working_client()
+                                            if hook_client:
+                                                break
+                                            if retry < max_retries - 1:
+                                                await asyncio.sleep(1)  # Aguarda antes de tentar novamente
+                                                msg.info(f"[ETL] Tentando reconectar (tentativa {retry + 2}/{max_retries})...")
+                                        
                                         if not hook_client:
-                                            msg.warn("[ETL] ⚠️ Cliente não disponível para ETL - pulando")
+                                            msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
+                                            msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
                                             return
                                         
                                         msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
