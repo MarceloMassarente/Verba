@@ -234,8 +234,14 @@ async def run_etl_on_passages(
                 if tenant:
                     update_kwargs["tenant"] = tenant
                 
-                coll.data.update(**update_kwargs)
-                changed += 1
+                try:
+                    coll.data.update(**update_kwargs)
+                    changed += 1
+                    if changed % 100 == 0:
+                        msg.info(f"[ETL] Progresso: {changed}/{len(passage_uuids)} chunks atualizados...")
+                except Exception as update_error:
+                    msg.warn(f"[ETL] Erro ao atualizar chunk {uid_str}: {str(update_error)}")
+                    # Continua mesmo se falhar
                 
             except Exception as e:
                 msg.warn(f"Erro ao processar passage {uid_str}: {str(e)}")
