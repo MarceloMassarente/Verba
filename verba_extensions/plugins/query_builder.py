@@ -274,6 +274,11 @@ IMPORTANTE:
 - Gere query semântica expandida com sinônimos e conceitos relacionados
 - Gere query keyword otimizada para BM25
 
+FILTROS HIERÁRQUICOS (se necessário):
+- Se query menciona "documentos que falam sobre X, depois chunks sobre Y":
+  - document_level_entities: ["Q312"]  // Filtrar documentos com Apple
+  - entities: ["Q2283"]  // Filtrar chunks com Microsoft dentro desses documentos
+
 Retorne JSON válido:
 {{
     "semantic_query": "query expandida para busca semântica",
@@ -282,6 +287,7 @@ Retorne JSON válido:
     "filters": {{
         "entities": ["Q312", "Q2283"],  // Entity IDs extraídos (se mencionados)
         "entity_property": "entities_local_ids",  // Propriedade a usar (entities_local_ids ou section_entity_ids)
+        "document_level_entities": [],  // Entidades para filtrar documentos primeiro (ex: ["Q312"] para Apple)
         "date_range": {{"start": "2024-01-01", "end": "2024-12-31"}},  // Se mencionar data
         "language": "pt",  // Se detectar idioma
         "labels": [],  // Labels específicos (se mencionados)
@@ -369,6 +375,7 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
             "filters": {
                 "entities": [],
                 "entity_property": "entities_local_ids",
+                "document_level_entities": [],  # Entidades para filtrar documentos primeiro
                 "date_range": None,
                 "language": None,
                 "labels": [],

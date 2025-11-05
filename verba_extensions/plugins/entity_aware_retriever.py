@@ -271,12 +271,61 @@ class EntityAwareRetriever(Retriever):
         msg.info(f"  Conceitos: {semantic_terms}")
         
         # 2. CONSTRÓI FILTRO DE ENTIDADE (WHERE clause)
+        # Suporte para filtros hierárquicos (documento primeiro, depois chunks)
+        document_level_filter = query_filters_from_builder.get("document_level_entities", [])
+        chunk_level_entities = entity_ids
+        
         entity_filter = None
-        if enable_entity_filter and entity_ids:
-            # Usar propriedade sugerida pelo builder se disponível
-            entity_property = query_filters_from_builder.get("entity_property", "entities_local_ids")
-            entity_filter = Filter.by_property(entity_property).contains_any(entity_ids)
-            msg.good(f"  Aplicando filtro: {entity_property} = {entity_ids}")
+        if enable_entity_filter:
+            # Se há filtro de documento, primeiro filtrar documentos
+            if document_level_filter:
+                try:
+                    from verba_extensions.utils.document_entity_filter import get_documents_by_entity
+                    
+                    # Normalizar nome da collection
+                    normalized = weaviate_manager._normalize_embedder_name(embedder)
+                    collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                    
+                    # Obter documentos que contêm entidade do nível documento
+                    doc_uuids_filtered = []
+                    for doc_entity_id in document_level_filter:
+                        doc_uuids = await get_documents_by_entity(
+                            client,
+                            collection_name,
+                            doc_entity_id
+                        )
+                        doc_uuids_filtered.extend(doc_uuids)
+                    
+                    # Remover duplicatas
+                    doc_uuids_filtered = list(set(doc_uuids_filtered))
+                    
+                    if doc_uuids_filtered:
+                        # Combinar filtro de documento com filtro de chunk
+                        # Restringir busca aos documentos filtrados
+                        if document_uuids:
+                            # Intersecção: documentos filtrados E documentos especificados pelo usuário
+                            document_uuids = list(set(document_uuids) & set(doc_uuids_filtered))
+                        else:
+                            # Usar apenas documentos filtrados
+                            document_uuids = doc_uuids_filtered
+                        
+                        msg.good(f"  Filtro hierárquico: {len(document_uuids)} documentos com entidade(s) {document_level_filter}")
+                    else:
+                        msg.warn(f"  Nenhum documento encontrado com entidade(s) {document_level_filter}")
+                        # Retornar vazio se não há documentos
+                        return []
+                        
+                except ImportError:
+                    msg.warn("  document_entity_filter não disponível, usando filtro de chunk apenas")
+                except Exception as e:
+                    msg.warn(f"  Erro ao aplicar filtro hierárquico: {str(e)}")
+            
+            # Filtro de chunk (entidades no nível do chunk)
+            if chunk_level_entities:
+                # Usar propriedade sugerida pelo builder se disponível
+                entity_property = query_filters_from_builder.get("entity_property", "entities_local_ids")
+                entity_filter = Filter.by_property(entity_property).contains_any(chunk_level_entities)
+                msg.good(f"  Aplicando filtro de chunk: {entity_property} = {chunk_level_entities}")
         
         # 2.1. FILTRO DE IDIOMA (Bilingual Filter)
         enable_lang_filter = config.get("Enable Language Filter", {}).value if isinstance(config.get("Enable Language Filter"), InputConfig) else True
@@ -309,18 +358,39 @@ class EntityAwareRetriever(Retriever):
         
         # 2.2. FILTRO TEMPORAL (Temporal Filter)
         temporal_filter = None
+        # Se QueryBuilder forneceu date_range, usar ele
+        builder_date_range = query_filters_from_builder.get("date_range")
+        
         if enable_temporal_filter:
-            try:
-                from verba_extensions.plugins.temporal_filter import TemporalFilterPlugin
-                temporal_plugin = TemporalFilterPlugin()
-                temporal_filter = temporal_plugin.get_temporal_filter_for_query(query, date_field=date_field_name)
-                if temporal_filter:
-                    date_range = temporal_plugin.extract_date_range(query)
-                    if date_range:
-                        start_date, end_date = date_range
-                        msg.good(f"  Aplicando filtro temporal: {start_date} até {end_date}")
-            except Exception as e:
-                msg.warn(f"  Erro ao aplicar filtro temporal (não crítico): {str(e)}")
+            if builder_date_range:
+                # Usar date_range do builder
+                try:
+                    from verba_extensions.plugins.temporal_filter import TemporalFilterPlugin
+                    temporal_plugin = TemporalFilterPlugin()
+                    start_date = builder_date_range.get("start")
+                    end_date = builder_date_range.get("end")
+                    temporal_filter = temporal_plugin.build_temporal_filter(
+                        start_date=start_date,
+                        end_date=end_date,
+                        date_field=date_field_name
+                    )
+                    if temporal_filter:
+                        msg.good(f"  Query builder: filtro temporal aplicado: {start_date} até {end_date}")
+                except Exception as e:
+                    msg.warn(f"  Erro ao aplicar filtro temporal do builder: {str(e)}")
+            else:
+                # Fallback para detecção automática
+                try:
+                    from verba_extensions.plugins.temporal_filter import TemporalFilterPlugin
+                    temporal_plugin = TemporalFilterPlugin()
+                    temporal_filter = temporal_plugin.get_temporal_filter_for_query(query, date_field=date_field_name)
+                    if temporal_filter:
+                        date_range = temporal_plugin.extract_date_range(query)
+                        if date_range:
+                            start_date, end_date = date_range
+                            msg.good(f"  Aplicando filtro temporal: {start_date} até {end_date}")
+                except Exception as e:
+                    msg.warn(f"  Erro ao aplicar filtro temporal (não crítico): {str(e)}")
         
         # Combinar filtros (entity + language + temporal)
         combined_filter = None
