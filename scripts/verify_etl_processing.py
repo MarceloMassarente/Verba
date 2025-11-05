@@ -32,12 +32,28 @@ except ImportError:
 
 async def connect_to_weaviate():
     """Conecta ao Weaviate usando configurações do ambiente"""
-    url = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+    url = os.getenv("WEAVIATE_URL", "")
     api_key = os.getenv("WEAVIATE_API_KEY_VERBA")
     
     # Verifica se é Railway (rede interna)
     http_host = os.getenv("WEAVIATE_HTTP_HOST")
     grpc_host = os.getenv("WEAVIATE_GRPC_HOST")
+    
+    # Se não tem variáveis Railway, tenta usar WEAVIATE_URL
+    if not http_host and not grpc_host and url:
+        # Tenta extrair host e porta da URL
+        if "://" in url:
+            parts = url.replace("http://", "").replace("https://", "").split(":")
+            if len(parts) >= 2:
+                http_host = parts[0]
+                http_port = int(parts[1].split("/")[0])
+                grpc_host = parts[0]
+                grpc_port = http_port + 1  # Assumir gRPC na porta seguinte
+            else:
+                http_host = parts[0]
+                http_port = 8080
+                grpc_host = parts[0]
+                grpc_port = 50051
     
     if http_host and grpc_host:
         # Railway/Private Network - usar connect_to_custom
