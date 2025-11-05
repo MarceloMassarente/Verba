@@ -102,6 +102,7 @@ Este documento serve como índice centralizado de toda a documentação do proje
   - Troubleshooting de patches
 
 - **[COMO_ETL_FUNCIONA_POR_CHUNKER.md](COMO_ETL_FUNCIONA_POR_CHUNKER.md)** ⭐ NOVO
+- **[SCHEMA_ETL_AWARE_UNIVERSAL.md](SCHEMA_ETL_AWARE_UNIVERSAL.md)** ⭐ NOVO - Schema único para chunks normais E ETL-aware
   - **Como o ETL funciona baseado no chunker escolhido**
   - Diferenças entre chunkers
   - Qual chunker aproveita melhor o ETL pré-chunking
