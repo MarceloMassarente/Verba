@@ -563,3 +563,80 @@ embedding, was_cached = get_cached_embedding(
 
 **Documentação completa:** `SCHEMA_ETL_AWARE_UNIVERSAL.md`
 
+---
+
+### 6. **Tika Integration (Fallback + Reader + Universal Reader)** ⭐ NOVO
+
+**Arquivos:**
+- `verba_extensions/plugins/tika_reader.py` - Reader usando Tika
+- `verba_extensions/integration/tika_fallback_patch.py` - Patch de fallback no BasicReader
+- `verba_extensions/plugins/universal_reader.py` - Integração Tika no Universal Reader
+
+**O que faz:**
+
+**1. Tika Reader Plugin:**
+- Adiciona um Reader que usa Apache Tika para extração
+- Suporta 1000+ formatos (PDF, DOCX, PPTX, ODT, RTF, etc.)
+- Extrai metadados automaticamente (autor, título, data, etc.)
+- Configurável via variável de ambiente `TIKA_SERVER_URL`
+
+**2. Tika Fallback Patch:**
+- Modifica `BasicReader.load_pdf_file()` para usar Tika quando método nativo falha
+- Modifica `BasicReader.load_docx_file()` para usar Tika quando método nativo falha
+- Modifica `BasicReader.load()` para usar Tika quando formato não é suportado
+- Totalmente transparente - tenta método nativo primeiro, depois Tika
+
+**3. Universal Reader Integration:**
+- Universal Reader usa Tika diretamente para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
+- Extrai metadados automaticamente e passa para o ETL
+- Fallback para BasicReader se Tika não disponível ou formato não benéfico
+- Configurável via "Use Tika When Available" na UI
+
+**Impacto:**
+- ✅ **PPTX funciona** (estava listado mas não implementado)
+- ✅ **PDFs complexos** são extraídos corretamente
+- ✅ **Formatos antigos** (DOC, RTF, ODT) passam a funcionar
+- ✅ **Metadados** são extraídos automaticamente e disponíveis para ETL
+- ✅ **Zero breaking changes** - métodos nativos têm prioridade
+- ✅ **Universal Reader melhorado** - usa Tika quando disponível para melhor extração
+
+**Como funciona:**
+```python
+# Fluxo Universal Reader com Tika:
+1. Usuário importa PPTX via Universal Reader
+2. Universal Reader detecta PPTX → usa Tika diretamente
+3. Extrai texto + metadados (36+ campos)
+4. Cria documento com metadados em doc.meta
+5. ETL processa chunks com metadados disponíveis
+
+# Fluxo Fallback (se Universal Reader não usar Tika):
+1. BasicReader tenta método nativo
+2. Se falhar OU formato não suportado → usa Tika automaticamente
+3. Documento extraído com sucesso
+```
+
+**Configuração:**
+```bash
+# Variável de ambiente
+export TIKA_SERVER_URL="http://192.168.1.197:9998"
+```
+
+**Verificação:**
+- Verifica se servidor Tika está acessível em `TIKA_SERVER_URL`
+- Se não disponível, métodos nativos continuam funcionando normalmente
+- Patch só aplica se Tika estiver disponível
+- Universal Reader detecta Tika automaticamente
+
+**Ao atualizar Verba:**
+- ✅ Verificar se `BasicReader.load()`, `load_pdf_file()`, `load_docx_file()` ainda existem
+- ✅ Se assinaturas mudarem, atualizar `tika_fallback_patch.py`
+- ✅ Verificar se `UniversalReader.load()` ainda funciona (pode ter mudado)
+- ✅ Testar com PPTX ou formato não suportado para verificar fallback
+
+**Onde é aplicado:**
+- `verba_extensions/startup.py` linha ~62: Chama `patch_basic_reader_with_tika_fallback()`
+- Monkey patch: `BasicReader.load* = patched_load*`
+- Universal Reader: integração direta no código
+
+**Documentação completa:** `INTEGRACAO_TIKA.md`
+
