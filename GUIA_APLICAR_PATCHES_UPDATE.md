@@ -41,7 +41,34 @@ git clone https://github.com/weaviate/verba.git verba_new
 
 ### **PASSO 3: Aplicar Mudanças Core**
 
-#### **Mudança 0: ETL Pré-Chunking Hook** ⭐ NOVO
+#### **Mudança 0: Schema ETL-Aware (CRÍTICO)** ⭐ MAIS IMPORTANTE
+
+**Arquivo**: `verba_extensions/startup.py`
+
+**Localização**: Na função `initialize_extensions()`, após aplicar hooks de ETL (linha ~55-60)
+
+**Verificar se existe:**
+```python
+# Aplica patch de schema ETL (adiciona propriedades automaticamente)
+try:
+    from verba_extensions.integration.schema_updater import patch_weaviate_manager_verify_collection
+    patch_weaviate_manager_verify_collection()
+except Exception as e:
+    msg.warn(f"Patch de schema ETL não aplicado: {str(e)}")
+```
+
+**Se não existir, ADICIONAR** (é CRÍTICO para collections serem criadas com schema ETL).
+
+**Por que é crítico:**
+- Weaviate v4 não permite adicionar propriedades depois
+- Collections sem schema ETL não podem receber metadados de ETL
+- Schema ETL-aware serve para chunks normais E ETL-aware
+
+**Ver documentação completa:** `SCHEMA_ETL_AWARE_UNIVERSAL.md`
+
+---
+
+#### **Mudança 1: ETL Pré-Chunking Hook** ⭐ NOVO
 
 **Arquivo**: `goldenverba/verba_manager.py`
 
@@ -68,7 +95,7 @@ if enable_etl:
 
 ---
 
-#### **Mudança 1: Carregamento de Extensões**
+#### **Mudança 2: Carregamento de Extensões**
 
 **Arquivo**: `goldenverba/server/api.py`
 
