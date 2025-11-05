@@ -392,9 +392,83 @@ Se após upgrade os patches não funcionarem:
 - ✅ **ETL Pré-Chunking**: Implementado e testado
 - ✅ **Chunker Entity-Aware**: Implementado e testado
 - ✅ **ETL Pós-Chunking**: Mantido (já estava funcionando)
+- ✅ **Componentes RAG2**: Integrados (TelemetryMiddleware, Embeddings Cache, etc.)
 - ✅ **Documentação**: Este arquivo
 
 **Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)
+
+---
+
+## 🆕 Componentes RAG2 Integrados (Não são Patches)
+
+Estes componentes NÃO são patches (não modificam código do Verba), mas sim **extensões independentes** que podem ser usadas opcionalmente:
+
+### **TelemetryMiddleware** ⭐ CRÍTICO
+
+**Arquivo:** `verba_extensions/middleware/telemetry.py`
+
+**Status:** ✅ Implementado e pronto para uso
+
+**O que faz:**
+- Middleware FastAPI para observabilidade de API
+- Registra latência, contagem de requests e erros por endpoint
+- Calcula percentis (p50, p95, p99) automaticamente
+- Log estruturado em JSON
+- SLO checking (verifica se p95 < threshold)
+
+**Como usar:**
+```python
+# Em goldenverba/server/api.py
+from verba_extensions.middleware.telemetry import TelemetryMiddleware
+
+app.add_middleware(TelemetryMiddleware, enable_logging=True)
+```
+
+**Não precisa reaplicar após upgrade:** É código independente, não modifica Verba core.
+
+**Documentação:** `GUIA_INTEGRACAO_RAG2_COMPONENTES.md`
+
+---
+
+### **Embeddings Cache** ⭐ CRÍTICO
+
+**Arquivo:** `verba_extensions/utils/embeddings_cache.py`
+
+**Status:** ✅ Implementado e pronto para uso
+
+**O que faz:**
+- Cache in-memory determinístico de embeddings
+- Evita re-embedding de textos idênticos
+- Reduz custo de APIs e melhora performance
+
+**Como usar:**
+```python
+from verba_extensions.utils.embeddings_cache import get_cached_embedding, get_cache_key
+
+cache_key = get_cache_key(text=chunk.text, doc_uuid=str(doc.uuid))
+embedding, was_cached = get_cached_embedding(
+    text=chunk.text,
+    cache_key=cache_key,
+    embed_fn=lambda t: self._call_embedding_api(t)
+)
+```
+
+**Não precisa reaplicar após upgrade:** É código independente, não modifica Verba core.
+
+**Documentação:** `GUIA_INTEGRACAO_RAG2_COMPONENTES.md`
+
+---
+
+### **Outros Componentes RAG2**
+
+- **Telemetry Collector** (`verba_extensions/utils/telemetry.py`) - Métricas de ETL
+- **UUID Determinístico** (`verba_extensions/utils/uuid.py`) - Idempotência
+- **Text Preprocessing** (`verba_extensions/utils/preprocess.py`) - Normalização de texto
+- **Quality Scoring** (`verba_extensions/utils/quality.py`) - Filtro de qualidade
+
+**Documentação completa:** `ANALISE_RAG2_COMPONENTES_ALTO_VALOR.md` e `GUIA_INTEGRACAO_RAG2_COMPONENTES.md`
+
+**Nota:** Estes componentes são **opcionais** e **não requerem patches**. Eles são utilitários que podem ser usados onde necessário.
 
 ---
 

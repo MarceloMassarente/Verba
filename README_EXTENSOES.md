@@ -160,6 +160,150 @@ curl -X POST http://localhost:8001/ingest/results \
   }'
 ```
 
+---
+
+## 🆕 Componentes RAG2 (Alto Valor, Baixa Complexidade)
+
+Componentes copiados do RAG2 para melhorar observabilidade, performance e qualidade:
+
+### 4. TelemetryMiddleware ⭐ CRÍTICO
+
+**Localização:** `verba_extensions/middleware/telemetry.py`
+
+**Funcionalidade:**
+- Middleware FastAPI para observabilidade de API
+- Registra latência, contagem de requests e erros por endpoint
+- Calcula percentis (p50, p95, p99) automaticamente
+- Log estruturado em JSON
+- SLO checking (verifica se p95 < threshold)
+
+**Integração:**
+```python
+# Em goldenverba/server/api.py
+from verba_extensions.middleware.telemetry import TelemetryMiddleware
+
+app.add_middleware(TelemetryMiddleware, enable_logging=True)
+
+# Endpoint opcional para stats
+@app.get("/api/telemetry/stats")
+async def get_telemetry_stats():
+    return TelemetryMiddleware.get_shared_stats()
+```
+
+**Documentação:** `GUIA_INTEGRACAO_RAG2_COMPONENTES.md`
+
+---
+
+### 5. Embeddings Cache ⭐ CRÍTICO
+
+**Localização:** `verba_extensions/utils/embeddings_cache.py`
+
+**Funcionalidade:**
+- Cache in-memory determinístico de embeddings
+- Evita re-embedding de textos idênticos
+- Estatísticas de hit rate
+- Reduz custo de APIs e melhora performance
+
+**Integração:**
+```python
+from verba_extensions.utils.embeddings_cache import get_cached_embedding, get_cache_key
+
+cache_key = get_cache_key(text=chunk.text, doc_uuid=str(doc.uuid))
+embedding, was_cached = get_cached_embedding(
+    text=chunk.text,
+    cache_key=cache_key,
+    embed_fn=lambda t: self._call_embedding_api(t)
+)
+```
+
+**Documentação:** `GUIA_INTEGRACAO_RAG2_COMPONENTES.md`
+
+---
+
+### 6. Telemetry Collector
+
+**Localização:** `verba_extensions/utils/telemetry.py`
+
+**Funcionalidade:**
+- Coleta métricas de normalização e cobertura
+- Rastreia gaps em mapeamentos
+- Gera relatórios JSON para melhoria contínua
+
+**Uso:**
+```python
+from verba_extensions.utils.telemetry import get_telemetry
+
+telemetry = get_telemetry()
+telemetry.record_title_normalization(method="regex", original_title="CEO")
+telemetry.record_chunk_filtered_by_quality(parent_type="section", score=0.25, reason="LEN_V_SHORT")
+```
+
+---
+
+### 7. UUID Determinístico
+
+**Localização:** `verba_extensions/utils/uuid.py`
+
+**Funcionalidade:**
+- Gera UUIDs determinísticos (UUID v5) para idempotência
+- Permite re-uploads sem duplicatas
+- Upsert seguro
+
+**Uso:**
+```python
+from verba_extensions.utils.uuid import generate_doc_uuid, generate_chunk_uuid
+
+doc_uuid = generate_doc_uuid(source_url=doc.meta.get("source_url"), title=doc.title)
+chunk_uuid = generate_chunk_uuid(doc_uuid=doc_uuid, chunk_id=f"{doc_uuid}:{chunk.chunk_id}")
+```
+
+---
+
+### 8. Text Preprocessing
+
+**Localização:** `verba_extensions/utils/preprocess.py`
+
+**Funcionalidade:**
+- Normaliza texto antes de embedding
+- Garante consistência entre texto armazenado e embeddado
+- Remove unicode invisível e normaliza whitespace
+
+**Uso:**
+```python
+from verba_extensions.utils.preprocess import prepare_for_embedding
+
+text_for_embedding = prepare_for_embedding(chunk.text)
+embedding = embedder.embed(text_for_embedding)
+```
+
+---
+
+### 9. Quality Scoring
+
+**Localização:** `verba_extensions/utils/quality.py`
+
+**Funcionalidade:**
+- Calcula score de qualidade de chunks (0.0-1.0)
+- Filtra conteúdo de baixa qualidade automaticamente
+- Type-aware scoring (diferentes thresholds por tipo)
+
+**Uso:**
+```python
+from verba_extensions.utils.quality import compute_quality_score
+
+score, reason = compute_quality_score(
+    text=chunk.text,
+    parent_type=chunk.meta.get("parent_type"),
+    is_summary=chunk.meta.get("is_summary", False)
+)
+
+if score < 0.3:  # Threshold configurável
+    # Filtrar chunk
+    continue
+```
+
+**Documentação completa:** `GUIA_INTEGRACAO_RAG2_COMPONENTES.md` e `ANALISE_RAG2_COMPONENTES_ALTO_VALOR.md`
+
 ## 🔄 Upgrade Automático
 
 ### Processo
