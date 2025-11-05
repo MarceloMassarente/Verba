@@ -89,6 +89,27 @@ class Document:
     @staticmethod
     def to_json(document) -> dict:
         """Convert the Document object to a JSON dict."""
+        # Limpa meta para garantir que é JSON-serializável
+        # Remove objetos complexos que possam não ser JSON-serializáveis
+        cleaned_meta = {}
+        if hasattr(document, 'meta') and document.meta:
+            for key, value in document.meta.items():
+                # Pula chaves que começam com _ (temporárias/internas)
+                if key.startswith('_'):
+                    continue
+                
+                # Tenta serializar o valor - se falhar, pula
+                try:
+                    json.dumps(value)
+                    cleaned_meta[key] = value
+                except (TypeError, ValueError):
+                    # Se não é JSON-serializável, converte para string
+                    try:
+                        cleaned_meta[key] = str(value)
+                    except Exception:
+                        # Se ainda não conseguir, pula
+                        pass
+        
         doc_dict = {
             "title": document.title,
             "content": document.content,
@@ -96,7 +117,7 @@ class Document:
             "fileSize": document.fileSize,
             "labels": document.labels,
             "source": document.source,
-            "meta": json.dumps(document.meta),
+            "meta": json.dumps(cleaned_meta),
             "metadata": document.metadata,
         }
         return doc_dict
