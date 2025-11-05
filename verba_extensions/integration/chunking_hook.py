@@ -14,6 +14,20 @@ import os
 from typing import List, Dict
 from wasabi import msg
 
+
+def normalize_entity_label(label: str) -> str:
+    """
+    Normaliza labels de entidades entre modelos PT e EN
+    
+    Mapeamentos:
+    - PER (PT) -> PERSON (EN)
+    - Mantém outros labels como estão
+    """
+    label_mapping = {
+        "PER": "PERSON",  # Modelo PT usa PER, modelo EN usa PERSON
+    }
+    return label_mapping.get(label, label)
+
 def extract_entities_pre_chunking(document) -> Dict:
     """
     Extrai entidades do documento completo ANTES do chunking
@@ -54,18 +68,21 @@ def extract_entities_pre_chunking(document) -> Dict:
         if nlp_model:
             doc = nlp_model(text)
             for ent in doc.ents:
-                # Filtra por tipo relevante (ORG, PERSON são mais críticos para entity-aware)
-                # Excluir GPE/LOC para reduzir de 370 para ~50 entidades
-                if ent.label_ in ("ORG", "PERSON"):
+                # Filtra por tipo relevante (ORG, PERSON/PER são mais críticos para entity-aware)
+                # Excluir GPE/LOC/MISC para reduzir de 370 para ~50 entidades e melhorar performance
+                # NOTA: Modelos PT usam "PER", modelos EN usam "PERSON" - normalizamos depois
+                if ent.label_ in ("ORG", "PERSON", "PER"):
                     # Deduplica por span de caracteres (evita múltiplas ocorrências da mesma entidade)
                     span_key = (ent.start_char, ent.end_char, ent.text.lower())
                     if span_key not in seen_spans:
                         seen_spans.add(span_key)
+                        # Normaliza label (PER -> PERSON) para compatibilidade entre modelos
+                        normalized_label = normalize_entity_label(ent.label_)
                         entity_spans.append({
                             "text": ent.text,
                             "start": ent.start_char,
                             "end": ent.end_char,
-                            "label": ent.label_,
+                            "label": normalized_label,  # Normalizado para PERSON
                             "entity_id": None  # Será preenchido depois se normalizado
                         })
         

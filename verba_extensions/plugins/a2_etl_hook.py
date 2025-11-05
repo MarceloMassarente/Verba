@@ -82,7 +82,7 @@ def extract_entities_nlp(text: str) -> List[Dict]:
     return [
         {"text": e.text, "label": e.label_}
         for e in doc.ents
-        if e.label_ in ("ORG", "PERSON", "GPE", "LOC")
+        if e.label_ in ("ORG", "PERSON", "PER", "GPE", "LOC")  # PER para modelos PT
     ]
 
 def normalize_entities(mentions: List[Dict], gaz: Dict) -> List[str]:
