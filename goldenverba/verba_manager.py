@@ -136,9 +136,9 @@ class VerbaManager:
                 reader_name = fileConfig.rag_config["Reader"].selected
             msg.info(f"[IMPORT] Loading file '{fileConfig.filename}' with reader '{reader_name}'")
             try:
-            documents = await self.reader_manager.load(
+                documents = await self.reader_manager.load(
                     reader_name, fileConfig, logger
-            )
+                )
                 msg.good(f"[IMPORT] Successfully loaded {len(documents)} document(s) from '{fileConfig.filename}'")
             except Exception as e:
                 import traceback
