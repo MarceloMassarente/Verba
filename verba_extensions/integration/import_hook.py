@@ -251,44 +251,44 @@ def patch_weaviate_manager():
                                         
                                         # Executa em background para não bloquear
                                         async def run_etl_hook():
-                                        # Obtém cliente novamente dentro da task (pode ter fechado)
-                                        # Usa retry com reconexão automática
-                                        hook_client = None
-                                        max_retries = 3
-                                        for retry in range(max_retries):
-                                            hook_client = await _get_working_client()
-                                            if hook_client:
-                                                break
-                                            if retry < max_retries - 1:
-                                                await asyncio.sleep(1)  # Aguarda antes de tentar novamente
-                                                msg.info(f"[ETL] Tentando reconectar (tentativa {retry + 2}/{max_retries})...")
-                                        
-                                        if not hook_client:
-                                            msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
-                                            msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
-                                            return
-                                        
-                                        msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
-                                        try:
-                                            await global_hooks.execute_hook_async(
-                                                'import.after',
-                                                hook_client,
-                                                doc_uuid,
-                                                passage_uuids,
-                                                tenant=tenant,
-                                                enable_etl=True,
-                                                collection_name=embedder_collection_name  # Passa nome da collection
-                                            )
-                                            msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
-                                        except Exception as etl_error:
-                                            error_str = str(etl_error).lower()
-                                            if "closed" in error_str or "not connected" in error_str:
-                                                msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução")
-                                            else:
-                                                msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
-                                        finally:
-                                            # Remove da lista de execuções em progresso
-                                            _etl_executions_in_progress.discard(doc_uuid)
+                                            # Obtém cliente novamente dentro da task (pode ter fechado)
+                                            # Usa retry com reconexão automática
+                                            hook_client = None
+                                            max_retries = 3
+                                            for retry in range(max_retries):
+                                                hook_client = await _get_working_client()
+                                                if hook_client:
+                                                    break
+                                                if retry < max_retries - 1:
+                                                    await asyncio.sleep(1)  # Aguarda antes de tentar novamente
+                                                    msg.info(f"[ETL] Tentando reconectar (tentativa {retry + 2}/{max_retries})...")
+                                            
+                                            if not hook_client:
+                                                msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
+                                                msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
+                                                return
+                                            
+                                            msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
+                                            try:
+                                                await global_hooks.execute_hook_async(
+                                                    'import.after',
+                                                    hook_client,
+                                                    doc_uuid,
+                                                    passage_uuids,
+                                                    tenant=tenant,
+                                                    enable_etl=True,
+                                                    collection_name=embedder_collection_name  # Passa nome da collection
+                                                )
+                                                msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
+                                            except Exception as etl_error:
+                                                error_str = str(etl_error).lower()
+                                                if "closed" in error_str or "not connected" in error_str:
+                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução")
+                                                else:
+                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
+                                            finally:
+                                                # Remove da lista de execuções em progresso
+                                                _etl_executions_in_progress.discard(doc_uuid)
                                         
                                         asyncio.create_task(run_etl_hook())
                                 else:
