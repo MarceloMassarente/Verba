@@ -59,6 +59,14 @@ def initialize_extensions():
         except Exception as e:
             msg.warn(f"Patch de schema ETL não aplicado: {str(e)}")
         
+        # Aplica patch Tika fallback (integra Tika como fallback no BasicReader)
+        try:
+            from verba_extensions.integration.tika_fallback_patch import patch_basic_reader_with_tika_fallback
+            if patch_basic_reader_with_tika_fallback():
+                msg.info("Tika fallback habilitado - formatos não suportados usarão Tika automaticamente")
+        except Exception as e:
+            msg.warn(f"Patch Tika fallback não aplicado: {str(e)}")
+        
         # Executa registradores de hooks dos plugins
         for plugin_name, plugin_data in plugin_manager.plugins.items():
             if hasattr(plugin_data['module'], 'register_hooks'):
