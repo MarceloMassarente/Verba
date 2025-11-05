@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Test script para validar as 3 soluções implementadas
+- Teste 1: Reranker Plugin
+- Teste 2: WebSocket Error Handling
+- Teste 3: Collection Verification
+"""
+
+import asyncio
+import json
+import requests
+import sys
+import os
+from datetime import datetime
+
+# Fix encoding on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# Configuração
+BASE_URL = "http://localhost:8000"
+HEALTH_CHECK_RETRIES = 5
+
+class APITester:
+    def __init__(self, base_url=BASE_URL):
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.results = []
+    
+    def log(self, level, message):
+        """Log com timestamp"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        prefix = "[OK]" if level == "SUCCESS" else "[XX]" if level == "ERROR" else "[--]"
+        print(f"[{timestamp}] {prefix} {level}: {message}")
+    
+    async def test_health_check(self):
+        """Teste 0: Health Check da API"""
+        self.log("INFO", "Teste 0: Verificando saude da API...")
+        
+        for attempt in range(HEALTH_CHECK_RETRIES):
+            try:
+                response = self.session.get(f"{self.base_url}/api/health")
+                if response.status_code == 200:
+                    self.log("SUCCESS", "API esta saudavel")
+                    return True
+                else:
+                    self.log("ERROR", f"Health check retornou {response.status_code}")
+            except Exception as e:
+                if attempt < HEALTH_CHECK_RETRIES - 1:
+                    self.log("INFO", f"Tentativa {attempt+1}/{HEALTH_CHECK_RETRIES} falhou, aguardando...")
+                    await asyncio.sleep(2)
+                else:
+                    self.log("ERROR", f"API nao esta respondendo: {str(e)}")
+                    return False
+        
+        return False
+    
+    def test_reranker_plugin(self):
+        """Teste 1: Verificar que Reranker Plugin carrega corretamente"""
+        self.log("INFO", "Teste 1: Validando Reranker Plugin...")
+        
+        try:
+            # Importar o plugin diretamente
+            from verba_extensions.plugins.reranker import RerankerPlugin
+            
+            plugin = RerankerPlugin()
+            
+            # Verificar que tem os métodos necessários
+            has_process_chunk = hasattr(plugin, 'process_chunk')
+            has_process_batch = hasattr(plugin, 'process_batch')
+            has_process_chunks = hasattr(plugin, 'process_chunks')
+            
+            if has_process_chunk and has_process_batch and has_process_chunks:
+                self.log("SUCCESS", "RerankerPlugin tem todos os metodos necessarios")
+                self.log("SUCCESS", f"  - process_chunk: {'OK' if has_process_chunk else 'XX'}")
+                self.log("SUCCESS", f"  - process_batch: {'OK' if has_process_batch else 'XX'}")
+                self.log("SUCCESS", f"  - process_chunks: {'OK' if has_process_chunks else 'XX'}")
+                return True
+            else:
+                self.log("ERROR", "Reranker Plugin falta metodos:")
+                self.log("ERROR", f"  - process_chunk: {'OK' if has_process_chunk else 'XX'}")
+                self.log("ERROR", f"  - process_batch: {'OK' if has_process_batch else 'XX'}")
+                self.log("ERROR", f"  - process_chunks: {'OK' if has_process_chunks else 'XX'}")
+                return False
+        
+        except Exception as e:
+            self.log("ERROR", f"Erro ao testar Reranker: {str(e)}")
+            return False
+    
+    def test_websocket_error_handling(self):
+        """Teste 2: Verificar que LoggerManager captura RuntimeError"""
+        self.log("INFO", "Teste 2: Validando WebSocket Error Handling...")
+        
+        try:
+            # Importar o LoggerManager
+            from goldenverba.server.helpers import LoggerManager
+            import inspect
+            
+            logger = LoggerManager()
+            
+            # Verificar que send_report é uma função async
+            send_report_code = inspect.getsource(logger.send_report)
+            create_new_doc_code = inspect.getsource(logger.create_new_document)
+            
+            # Verificar que tem try/except para RuntimeError
+            has_try_catch_send = 'try:' in send_report_code and 'RuntimeError' in send_report_code
+            has_try_catch_create = 'try:' in create_new_doc_code and 'RuntimeError' in create_new_doc_code
+            
+            if has_try_catch_send and has_try_catch_create:
+                self.log("SUCCESS", "LoggerManager tem exception handling para RuntimeError")
+                self.log("SUCCESS", f"  - send_report: {'OK' if has_try_catch_send else 'XX'}")
+                self.log("SUCCESS", f"  - create_new_document: {'OK' if has_try_catch_create else 'XX'}")
+                return True
+            else:
+                self.log("ERROR", "LoggerManager falta exception handling:")
+                self.log("ERROR", f"  - send_report: {'OK' if has_try_catch_send else 'XX'}")
+                self.log("ERROR", f"  - create_new_document: {'OK' if has_try_catch_create else 'XX'}")
+                return False
+        
+        except Exception as e:
+            self.log("ERROR", f"Erro ao testar WebSocket handling: {str(e)}")
+            return False
+    
+    def test_collection_verification(self):
+        """Teste 3: Verificar que load_rag_config chama verify_collections"""
+        self.log("INFO", "Teste 3: Validando Collection Verification...")
+        
+        try:
+            # Importar VerbaManager
+            from goldenverba.verba_manager import VerbaManager
+            import inspect
+            
+            manager = VerbaManager()
+            
+            # Verificar que load_rag_config chama verify_collections
+            load_rag_code = inspect.getsource(manager.load_rag_config)
+            
+            has_verify_call = 'verify_collections' in load_rag_code
+            
+            if has_verify_call:
+                self.log("SUCCESS", "load_rag_config chama verify_collections")
+                self.log("SUCCESS", "  Collections serao criadas automaticamente")
+                return True
+            else:
+                self.log("ERROR", "load_rag_config NAO chama verify_collections")
+                return False
+        
+        except Exception as e:
+            self.log("ERROR", f"Erro ao testar collection verification: {str(e)}")
+            return False
+    
+    async def run_all_tests(self):
+        """Executar todos os testes"""
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "INICIANDO TESTES DAS SOLUCOES")
+        self.log("INFO", "=" * 60)
+        
+        # Teste de saúde
+        health_ok = await self.test_health_check()
+        if not health_ok:
+            self.log("ERROR", "API nao esta rodando. Inicie com: python -m goldenverba.server.api")
+            return False
+        
+        print()
+        
+        # Testes sem API (podem rodar sem servidor)
+        test1 = self.test_reranker_plugin()
+        print()
+        
+        test2 = self.test_websocket_error_handling()
+        print()
+        
+        test3 = self.test_collection_verification()
+        print()
+        
+        # Resumo
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "RESUMO DOS TESTES")
+        self.log("INFO", "=" * 60)
+        
+        tests = [
+            ("Reranker Plugin", test1),
+            ("WebSocket Error Handling", test2),
+            ("Collection Verification", test3)
+        ]
+        
+        passed = sum(1 for _, result in tests if result)
+        total = len(tests)
+        
+        for name, result in tests:
+            status = "[OK] PASSOU" if result else "[XX] FALHOU"
+            self.log("INFO", f"{status}: {name}")
+        
+        print()
+        self.log("INFO", f"Total: {passed}/{total} testes passaram")
+        
+        if passed == total:
+            self.log("SUCCESS", "TODOS OS TESTES PASSARAM!")
+            self.log("SUCCESS", "Pronto para push")
+            return True
+        else:
+            self.log("ERROR", "Alguns testes falharam")
+            return False
+
+async def main():
+    tester = APITester()
+    
+    try:
+        success = await tester.run_all_tests()
+        sys.exit(0 if success else 1)
+    except Exception as e:
+        tester.log("ERROR", f"Erro geral nos testes: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())

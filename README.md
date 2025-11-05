@@ -34,6 +34,32 @@ pip install goldenverba
 - [🚩 Known Issues](#known-issues)
 - [❔FAQ](#faq)
 
+## 📁 Project Structure
+
+This project is organized into the following directories:
+
+- **`docs/`** - All documentation organized by category:
+  - `guides/` - Practical guides and tutorials
+  - `analyses/` - Technical and architectural analyses
+  - `diagnostics/` - Diagnostic reports
+  - `troubleshooting/` - Solutions to common problems
+  - `changelogs/` - Change history and summaries
+  - `comparisons/` - Comparisons and evaluations
+  - `integrations/` - Integration documentation
+  - `assets/` - Static resources (PDFs, images)
+
+- **`scripts/`** - Utility scripts organized by purpose:
+  - `fixes/` - Scripts to fix issues
+  - `diagnostics/` - Diagnostic scripts
+  - `tests/` - Test scripts
+  - `validations/` - Validation scripts
+  - `migrations/` - Schema migration scripts
+  - `utils/` - General utility scripts
+
+- **`tests/`** - Test files and test runners
+
+For more details, see `docs/README.md` and `scripts/README.md`.
+
 ## What Is Verba?
 
 Verba is a fully-customizable personal assistant utilizing [Retrieval Augmented Generation (RAG)](https://weaviate.io/rag#:~:text=RAG%20with%20Weaviate,accuracy%20of%20AI%2Dgenerated%20content.) for querying and interacting with your data, **either locally or deployed via cloud**. Resolve questions around your documents, cross-reference multiple data points or gain insights from existing knowledge bases. Verba combines state-of-the-art RAG techniques with Weaviate's context-aware database. Choose between different RAG frameworks, data types, chunking & retrieving techniques, and LLM providers based on your individual use-case.

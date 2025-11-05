@@ -46,6 +46,11 @@ def patch_weaviate_manager():
             logger = document.meta.get("_temp_logger") if hasattr(document, 'meta') and document.meta else None
             file_id = document.meta.get("file_id") if hasattr(document, 'meta') and document.meta else None
             
+            # Remove logger de document.meta IMEDIATAMENTE após usar para evitar problemas de serialização
+            # (não deve estar presente quando documento for serializado em JSON)
+            if hasattr(document, 'meta') and document.meta:
+                document.meta.pop('_temp_logger', None)
+            
             # Se não há meta ou não tem enable_etl, assume True (ETL universal)
             if not hasattr(document, 'meta') or not document.meta:
                 enable_etl = True

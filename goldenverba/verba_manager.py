@@ -282,6 +282,12 @@ class VerbaManager:
                 )
             )
             chunked_documents = await chunk_task
+            
+            # Remove logger de document.meta para evitar problemas de serialização JSON
+            for doc in chunked_documents:
+                if hasattr(doc, 'meta') and doc.meta:
+                    doc.meta.pop('_temp_logger', None)
+            
             total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
             msg.info(f"[CHUNKING] Chunking concluído: {total_chunks} chunks criados (ETL será executado após import)")
 

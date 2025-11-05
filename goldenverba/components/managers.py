@@ -1102,6 +1102,7 @@ class WeaviateManager:
         limit: int,
         labels: list[str],
         document_uuids: list[str],
+        alpha: float = 0.5,
     ):
         if await self.verify_embedding_collection(client, embedder):
             embedder_collection = client.collections.get(self.embedding_table[embedder])
@@ -1127,7 +1128,7 @@ class WeaviateManager:
                 chunks = await embedder_collection.query.hybrid(
                     query=query,
                     vector=vector,
-                    alpha=0.5,
+                    alpha=alpha,
                     auto_limit=limit,
                     return_metadata=MetadataQuery(score=True, explain_score=False),
                     filters=apply_filters,
@@ -1136,7 +1137,7 @@ class WeaviateManager:
                 chunks = await embedder_collection.query.hybrid(
                     query=query,
                     vector=vector,
-                    alpha=0.5,
+                    alpha=alpha,
                     limit=limit,
                     return_metadata=MetadataQuery(score=True, explain_score=False),
                     filters=apply_filters,

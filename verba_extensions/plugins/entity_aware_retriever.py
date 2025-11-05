@@ -354,7 +354,9 @@ class EntityAwareRetriever(Retriever):
             # Filtro de chunk (entidades no nível do chunk)
             if chunk_level_entities:
                 # Usar propriedade sugerida pelo builder se disponível
-                entity_property = query_filters_from_builder.get("entity_property", "entities_local_ids")
+                # Padrão: section_entity_ids para evitar contaminação entre entidades
+                # (ex: documento fala de 10 empresas, busca por empresa 2 não deve pegar empresa 8)
+                entity_property = query_filters_from_builder.get("entity_property", "section_entity_ids")
                 entity_filter = Filter.by_property(entity_property).contains_any(chunk_level_entities)
                 msg.good(f"  Aplicando filtro de chunk: {entity_property} = {chunk_level_entities}")
         
@@ -522,6 +524,7 @@ class EntityAwareRetriever(Retriever):
                         limit=limit,
                         labels=labels,
                         document_uuids=document_uuids,
+                        alpha=rewritten_alpha,  # ← Alpha também aplicado quando não há filtros
                     )
             except Exception as e:
                 msg.fail(f"Erro na busca híbrida: {str(e)}")

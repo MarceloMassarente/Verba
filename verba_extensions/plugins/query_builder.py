@@ -318,7 +318,7 @@ Retorne JSON válido:
     "intent": "search|comparison|description",
     "filters": {{
         "entities": ["Q312", "Q2283"],  // Entity IDs extraídos (se mencionados)
-        "entity_property": "entities_local_ids",  // Propriedade a usar (entities_local_ids ou section_entity_ids)
+        "entity_property": "section_entity_ids",  // Propriedade a usar: "section_entity_ids" (contexto de seção, evita contaminação) ou "entities_local_ids" (apenas menções explícitas no chunk)
         "document_level_entities": [],  // Entidades para filtrar documentos primeiro (ex: ["Q312"] para Apple)
         "filter_by_frequency": false,  // Se deve filtrar por frequência de entidade
         "min_frequency": 0,  // Frequência mínima requerida (0 = qualquer)
@@ -410,7 +410,7 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
             "intent": "search",
             "filters": {
                 "entities": [],
-                "entity_property": "entities_local_ids",
+                "entity_property": "section_entity_ids",  # Padrão: usa contexto de seção para evitar contaminação
                 "document_level_entities": [],  # Entidades para filtrar documentos primeiro
                 "filter_by_frequency": False,  # Filtrar por frequência
                 "min_frequency": 0,  # Frequência mínima
