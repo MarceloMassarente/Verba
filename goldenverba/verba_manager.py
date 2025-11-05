@@ -425,18 +425,60 @@ class VerbaManager:
                 raise
 
             for document in vectorized_documents:
-                # Check if client is still connected, reconnect if needed
+                # Garantir conexão com o Weaviate antes do import
                 try:
-                    if not await client.is_ready():
-                        msg.warn("Client disconnected during import, attempting to reconnect...")
-                        # Note: In production, we should get the client from client_manager
-                        # For now, we'll raise an exception to be handled by the outer try-catch
-                        raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
-                except Exception as e:
-                    if "closed" in str(e).lower() or "not connected" in str(e).lower():
-                        msg.warn("Import teve erro, mas tentando executar ETL: " + str(e))
-                        raise Exception("The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!")
-                    raise
+                    is_ready = False
+                    try:
+                        is_ready = await client.is_ready()
+                    except Exception:
+                        is_ready = False
+
+                    if not is_ready:
+                        msg.warn("Client disconnected during import, reconnecting...")
+                        # Tenta reconectar o cliente existente
+                        try:
+                            if hasattr(client, "connect"):
+                                await client.connect()
+                                is_ready = await client.is_ready()
+                        except Exception as ce:
+                            msg.warn(f"Reconnect attempt failed: {str(ce)}")
+                            is_ready = False
+
+                    # Fallback: criar um novo cliente a partir das variáveis de ambiente
+                    if not is_ready:
+                        try:
+                            http_host = os.getenv("WEAVIATE_HTTP_HOST")
+                            url = os.getenv("WEAVIATE_URL_VERBA")
+                            key = os.getenv("WEAVIATE_API_KEY_VERBA", "")
+                            if http_host:
+                                # Custom (Railway/private network) com portas separadas
+                                port = os.getenv("WEAVIATE_HTTP_PORT", "8080")
+                                new_client = await self.weaviate_manager.connect_to_custom(http_host, key, port)
+                            elif url:
+                                # Cluster/WCS
+                                new_client = await self.weaviate_manager.connect_to_cluster(url, key)
+                            else:
+                                new_client = None
+
+                            if new_client is not None:
+                                try:
+                                    if hasattr(new_client, "connect"):
+                                        await new_client.connect()
+                                    if await new_client.is_ready():
+                                        client = new_client
+                                        msg.good("Reconnected to Weaviate successfully")
+                                        is_ready = True
+                                except Exception as ne:
+                                    msg.warn(f"New client not ready after reconnect: {str(ne)}")
+                        except Exception as rec_e:
+                            msg.warn(f"Failed to create a new Weaviate client: {str(rec_e)}")
+
+                    if not is_ready:
+                        # Não aborta aqui; deixa o import tentar e o hook lidar com ETL/graceful handling
+                        msg.warn("Weaviate client still not ready; attempting import may fail")
+                except Exception:
+                    # Em caso de erro inesperado, continua para tentar importar e reportar erro exato do cliente
+                    pass
                 
                 # Armazena logger e file_id temporariamente no document.meta para uso no hook ETL
                 if not hasattr(document, 'meta') or document.meta is None:
@@ -517,6 +559,10 @@ class VerbaManager:
         }
 
         embedders = self.embedder_manager.embedders
+        # Preferir SentenceTransformers como padrão quando disponível (evita dependência do Ollama)
+        selected_embedder_name = (
+            "SentenceTransformers" if "SentenceTransformers" in embedders else list(embedders.values())[0].name
+        )
         embedder_config = {
             "components": {
                 embedder: embedders[embedder].get_meta(
@@ -524,7 +570,7 @@ class VerbaManager:
                 )
                 for embedder in embedders
             },
-            "selected": list(embedders.values())[0].name,
+            "selected": selected_embedder_name,
         }
 
         retrievers = self.retriever_manager.retrievers
@@ -994,7 +1040,8 @@ class ClientManager:
     def __init__(self) -> None:
         self.clients: dict[str, dict] = {}
         self.manager: VerbaManager = VerbaManager()
-        self.max_time: int = 10
+        # Keep clients alive longer to support long-running imports/embeddings
+        self.max_time: int = 60
         self.locks: dict[str, asyncio.Lock] = {}
 
     def hash_credentials(self, credentials: Credentials) -> str:
@@ -1027,6 +1074,8 @@ class ClientManager:
         async with lock:
             if cred_hash in self.clients:
                 msg.info("Found existing Client")
+                # Touch last-used timestamp to keep the client from being cleaned up
+                self.clients[cred_hash]["timestamp"] = datetime.now()
                 return self.clients[cred_hash]["client"]
             else:
                 msg.warn("Connecting new Client")
@@ -1055,11 +1104,24 @@ class ClientManager:
 
         for cred_hash, client_data in self.clients.items():
             time_difference = current_time - client_data["timestamp"]
+            client: WeaviateAsyncClient = client_data["client"]
+
+            # Remove only by inactivity threshold; transient readiness issues shouldn't drop active clients
             if time_difference.total_seconds() / 60 > self.max_time:
                 clients_to_remove.append(cred_hash)
-            client: WeaviateAsyncClient = client_data["client"]
-            if not await client.is_ready():
-                clients_to_remove.append(cred_hash)
+            else:
+                # Try to self-heal if the client reports not ready, but do not remove yet
+                try:
+                    is_ready = await client.is_ready()
+                except Exception:
+                    is_ready = False
+                if not is_ready:
+                    msg.warn(f"Client {cred_hash} reported not ready during cleanup; attempting reconnect")
+                    try:
+                        if hasattr(client, "connect"):
+                            await client.connect()
+                    except Exception:
+                        pass
 
         for cred_hash in clients_to_remove:
             await self.manager.disconnect(self.clients[cred_hash]["client"])

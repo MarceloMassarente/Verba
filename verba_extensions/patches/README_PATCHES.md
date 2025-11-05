@@ -290,6 +290,76 @@ original_method = managers.WeaviateManager.import_document
 
 ---
 
+### 4.1. **Client Cleanup Fix (Prevenção de "Client Closed" Durante Import)** ⭐ NOVO - CRÍTICO
+
+**Arquivo:** `goldenverba/verba_manager.py` (modificação no core do Verba)
+
+**Status:** ✅ Implementado e testado
+
+**O que faz:**
+- **Corrige falha crítica**: Previne remoção prematura de clientes Weaviate durante imports longos
+- **Cleanup seguro**: Cleanup não remove clientes ativos, apenas por timeout de inatividade
+- **Auto-healing**: Tenta reconectar clientes que reportam não estar prontos, ao invés de removê-los
+- **Reconexão automática**: Import tenta reconectar automaticamente se cliente fechar durante operação
+
+**Problema resolvido:**
+- **Antes**: Health check (`/api/health`) executava cleanup que removia clientes ativos durante embedding longo
+- **Erro**: "The `WeaviateClient` is closed. Run `client.connect()` to (re)connect!" após embedding bem-sucedido
+- **Sintoma**: Import falhava imediatamente após embedding completar (677 chunks gerados, mas import falhava)
+
+**Mudanças implementadas:**
+
+1. **Cleanup Mais Conservador** (`ClientManager.clean_up()`):
+   - ✅ Timeout aumentado: 10 → 60 minutos de inatividade
+   - ✅ Não remove por `is_ready() = False`: Apenas por timeout
+   - ✅ Auto-healing: Tenta reconectar antes de remover
+   - ✅ Touch timestamp: Atualiza timestamp ao reutilizar cliente
+
+2. **Reconexão Automática no Import** (`VerbaManager.process_single_document()`):
+   - ✅ Verifica se cliente está pronto antes de importar
+   - ✅ Tenta reconectar cliente existente primeiro
+   - ✅ Se falhar, cria novo cliente a partir de variáveis de ambiente
+   - ✅ Continua com import ao invés de abortar imediatamente
+
+3. **Default Embedder Seguro** (`VerbaManager.create_config()`):
+   - ✅ Prefere `SentenceTransformers` como padrão quando disponível
+   - ✅ Evita dependência de Ollama que pode não estar rodando
+
+**Como verificar após upgrade:**
+```python
+from goldenverba import verba_manager
+
+# Verificar timeout de cleanup
+client_manager = verba_manager.ClientManager()
+print(f"Cleanup timeout: {client_manager.max_time} minutos")  # Deve ser 60
+
+# Verificar default embedder
+vm = verba_manager.VerbaManager()
+config = vm.create_config()
+print(f"Default embedder: {config['Embedder']['selected']}")  # Deve ser SentenceTransformers se disponível
+```
+
+**Logs esperados (após fix):**
+```
+ℹ Cleaning Clients Cache
+ℹ Client <hash> reported not ready during cleanup; attempting reconnect
+✔ Reconnected to Weaviate successfully
+ℹ 1 clients connected
+✔ Import for <document> completed successfully
+```
+
+**Se precisar reaplicar:**
+- Este é uma modificação no core do Verba (`goldenverba/verba_manager.py`)
+- Não é um patch/monkey patch, é modificação direta
+- Se atualizar Verba, pode precisar reaplicar estas mudanças
+- Verificar se métodos `ClientManager.clean_up()` e `VerbaManager.process_single_document()` ainda existem
+
+**Referências:**
+- Documentação detalhada: `docs/troubleshooting/SOLUCAO_CLIENT_CLOSED_DURANTE_IMPORT.md`
+- Data da correção: 2025-11-05
+
+---
+
 ### 5. **ETL A2 Hook (NER + Section Scope)** ✅
 
 **Arquivo:** `verba_extensions/plugins/a2_etl_hook.py`
@@ -623,11 +693,15 @@ Se após upgrade os patches não funcionarem:
   - Chunker híbrido: seções + entidades + semântica
   - Ideal para artigos/URLs com múltiplas empresas
   - Plugin registrado automaticamente
+- ✅ **Client Cleanup Fix**: ⭐ NOVO - Previne "Client Closed" durante imports longos
+  - Cleanup seguro (60 min timeout, auto-healing)
+  - Reconexão automática durante import
+  - Default embedder seguro (SentenceTransformers)
 - ✅ **ETL Pós-Chunking**: Mantido (já estava funcionando)
 - ✅ **Componentes RAG2**: Integrados (TelemetryMiddleware, Embeddings Cache, etc.)
 - ✅ **Documentação**: Este arquivo
 
-**Última atualização:** Janeiro 2025
+**Última atualização:** Novembro 2025
 **Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)
 
 ---
