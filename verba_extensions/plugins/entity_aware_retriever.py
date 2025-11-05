@@ -173,59 +173,139 @@ class EntityAwareRetriever(Retriever):
         enable_temporal_filter = config.get("Enable Temporal Filter", {}).value if isinstance(config.get("Enable Temporal Filter"), InputConfig) else True
         date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
         
-        # 0. QUERY REWRITING (antes de parsing)
+        # 0. QUERY BUILDING (antes de parsing) - QueryBuilder inteligente com schema
         rewritten_query = query
         rewritten_alpha = alpha
-        if enable_query_rewriting:
-            try:
-                from verba_extensions.plugins.query_rewriter import QueryRewriterPlugin
-                rewriter = QueryRewriterPlugin(cache_ttl_seconds=cache_ttl)
-                strategy = await rewriter.rewrite_query(query, use_cache=True)
-                
-                # Usar semantic_query para busca vetorial
-                rewritten_query = strategy.get("semantic_query", query)
-                
-                # Aplicar alpha sugerido
-                suggested_alpha = strategy.get("alpha")
-                if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
-                    rewritten_alpha = float(suggested_alpha)
-                    msg.info(f"  Query rewriting: alpha ajustado para {rewritten_alpha}")
-                
-                # Log intent se disponível
-                intent = strategy.get("intent", "search")
-                msg.info(f"  Query rewriting: intent={intent}")
-                
-            except Exception as e:
-                msg.warn(f"  Erro no query rewriting (não crítico): {str(e)}")
-                # Continua com query original
+        query_filters_from_builder = {}
+        
+        # Tentar QueryBuilder primeiro (mais inteligente, conhece schema)
+        try:
+            from verba_extensions.plugins.query_builder import QueryBuilderPlugin
+            builder = QueryBuilderPlugin(cache_ttl_seconds=cache_ttl)
+            
+            # Obter collection name
+            normalized = weaviate_manager._normalize_embedder_name(embedder)
+            collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+            
+            # Construir query conhecendo schema
+            strategy = await builder.build_query(
+                user_query=query,
+                client=client,
+                collection_name=collection_name,
+                use_cache=True,
+                validate=False  # Não precisa validar aqui, já está executando
+            )
+            
+            # Usar semantic_query para busca vetorial
+            rewritten_query = strategy.get("semantic_query", query)
+            
+            # Aplicar alpha sugerido
+            suggested_alpha = strategy.get("alpha")
+            if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
+                rewritten_alpha = float(suggested_alpha)
+                msg.info(f"  Query builder: alpha ajustado para {rewritten_alpha}")
+            
+            # Extrair filtros do builder (se houver)
+            query_filters_from_builder = strategy.get("filters", {})
+            builder_entities = query_filters_from_builder.get("entities", [])
+            if builder_entities:
+                msg.info(f"  Query builder: entidades detectadas: {builder_entities}")
+            
+            # Log explanation
+            explanation = strategy.get("explanation", "")
+            if explanation:
+                msg.info(f"  Query builder: {explanation}")
+            
+        except ImportError:
+            # Fallback para QueryRewriter (mais simples, não conhece schema)
+            if enable_query_rewriting:
+                try:
+                    from verba_extensions.plugins.query_rewriter import QueryRewriterPlugin
+                    rewriter = QueryRewriterPlugin(cache_ttl_seconds=cache_ttl)
+                    strategy = await rewriter.rewrite_query(query, use_cache=True)
+                    
+                    # Usar semantic_query para busca vetorial
+                    rewritten_query = strategy.get("semantic_query", query)
+                    
+                    # Aplicar alpha sugerido
+                    suggested_alpha = strategy.get("alpha")
+                    if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
+                        rewritten_alpha = float(suggested_alpha)
+                        msg.info(f"  Query rewriting: alpha ajustado para {rewritten_alpha}")
+                    
+                    # Log intent se disponível
+                    intent = strategy.get("intent", "search")
+                    msg.info(f"  Query rewriting: intent={intent}")
+                    
+                except Exception as e:
+                    msg.warn(f"  Erro no query rewriting (não crítico): {str(e)}")
+                    # Continua com query original
+        except Exception as e:
+            msg.warn(f"  Erro no query builder (não crítico): {str(e)}")
+            # Fallback para QueryRewriter se disponível
+            if enable_query_rewriting:
+                try:
+                    from verba_extensions.plugins.query_rewriter import QueryRewriterPlugin
+                    rewriter = QueryRewriterPlugin(cache_ttl_seconds=cache_ttl)
+                    strategy = await rewriter.rewrite_query(query, use_cache=True)
+                    rewritten_query = strategy.get("semantic_query", query)
+                    suggested_alpha = strategy.get("alpha")
+                    if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
+                        rewritten_alpha = float(suggested_alpha)
+                except:
+                    pass
         
         # 1. PARSE QUERY (usar rewritten_query se disponível)
-        parse_query_text = rewritten_query if enable_query_rewriting else query
+        # Se QueryBuilder forneceu entidades, usar elas primeiro
+        builder_entities = query_filters_from_builder.get("entities", [])
+        
+        parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
         parsed = parse_query(parse_query_text)
-        entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
+        parsed_entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
         semantic_terms = parsed["semantic_concepts"]
         
-        msg.info(f"  Entidades: {entity_ids}")
+        # Combinar entidades do builder e do parser (priorizar builder)
+        entity_ids = builder_entities if builder_entities else parsed_entity_ids
+        
+        msg.info(f"  Entidades: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
         msg.info(f"  Conceitos: {semantic_terms}")
         
         # 2. CONSTRÓI FILTRO DE ENTIDADE (WHERE clause)
         entity_filter = None
         if enable_entity_filter and entity_ids:
-            entity_filter = Filter.by_property("entities_local_ids").contains_any(entity_ids)
-            msg.good(f"  Aplicando filtro: entities = {entity_ids}")
+            # Usar propriedade sugerida pelo builder se disponível
+            entity_property = query_filters_from_builder.get("entity_property", "entities_local_ids")
+            entity_filter = Filter.by_property(entity_property).contains_any(entity_ids)
+            msg.good(f"  Aplicando filtro: {entity_property} = {entity_ids}")
         
         # 2.1. FILTRO DE IDIOMA (Bilingual Filter)
         enable_lang_filter = config.get("Enable Language Filter", {}).value if isinstance(config.get("Enable Language Filter"), InputConfig) else True
         lang_filter = None
+        
+        # Se QueryBuilder forneceu language, usar ele
+        builder_language = query_filters_from_builder.get("language")
+        
         if enable_lang_filter:
-            try:
-                from verba_extensions.plugins.bilingual_filter import BilingualFilterPlugin
-                bilingual_plugin = BilingualFilterPlugin()
-                lang_filter = bilingual_plugin.get_language_filter_for_query(query)
-                if lang_filter:
-                    msg.good(f"  Aplicando filtro de idioma: {bilingual_plugin.detect_query_language(query)}")
-            except Exception as e:
-                msg.warn(f"  Erro ao aplicar filtro de idioma (não crítico): {str(e)}")
+            if builder_language:
+                # Usar language do builder
+                try:
+                    from verba_extensions.plugins.bilingual_filter import BilingualFilterPlugin
+                    bilingual_plugin = BilingualFilterPlugin()
+                    lang_filter = bilingual_plugin.build_language_filter(builder_language)
+                    if lang_filter:
+                        msg.good(f"  Query builder: filtro de idioma aplicado: {builder_language}")
+                except Exception as e:
+                    msg.warn(f"  Erro ao aplicar filtro de idioma do builder: {str(e)}")
+            else:
+                # Fallback para detecção automática
+                try:
+                    from verba_extensions.plugins.bilingual_filter import BilingualFilterPlugin
+                    bilingual_plugin = BilingualFilterPlugin()
+                    lang_filter = bilingual_plugin.get_language_filter_for_query(query)
+                    if lang_filter:
+                        msg.good(f"  Aplicando filtro de idioma: {bilingual_plugin.detect_query_language(query)}")
+                except Exception as e:
+                    msg.warn(f"  Erro ao aplicar filtro de idioma (não crítico): {str(e)}")
         
         # 2.2. FILTRO TEMPORAL (Temporal Filter)
         temporal_filter = None

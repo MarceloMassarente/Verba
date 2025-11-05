@@ -684,6 +684,97 @@ async def query(payload: QueryPayload):
             content={"error": "", "documents": documents, "context": context}
         )
     except Exception as e:
+        msg.fail(f"Query failed: {str(e)}")
+        return JSONResponse(
+            content={"error": str(e), "documents": [], "context": ""}
+        )
+
+
+@app.post("/api/query/validate")
+async def validate_query(payload: QueryPayload):
+    """
+    Valida query usando QueryBuilder antes de executar.
+    Retorna query estruturada para validação do usuário.
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        
+        # Obter collection name do embedder
+        embedder_name = payload.RAG.get("Embedder", {}).get("selected", "")
+        if not embedder_name:
+            return JSONResponse(
+                content={
+                    "error": "Embedder não especificado",
+                    "query_plan": None
+                }
+            )
+        
+        # Normalizar nome da collection
+        from goldenverba.components.managers import WeaviateManager
+        weaviate_manager = WeaviateManager()
+        normalized = weaviate_manager._normalize_embedder_name(embedder_name)
+        collection_name = f"VERBA_Embedding_{normalized}"
+        
+        # Usar QueryBuilder
+        try:
+            from verba_extensions.plugins.query_builder import QueryBuilderPlugin
+            builder = QueryBuilderPlugin()
+            
+            query_plan = await builder.build_query(
+                user_query=payload.query,
+                client=client,
+                collection_name=collection_name,
+                use_cache=True,
+                validate=True  # Modo validação
+            )
+            
+            return JSONResponse(
+                content={
+                    "error": "",
+                    "query_plan": query_plan,
+                    "requires_validation": query_plan.get("requires_validation", False)
+                }
+            )
+        except ImportError:
+            return JSONResponse(
+                content={
+                    "error": "QueryBuilder não disponível",
+                    "query_plan": None
+                }
+            )
+        
+    except Exception as e:
+        msg.warn(f"Erro ao validar query: {str(e)}")
+        return JSONResponse(
+            content={
+                "error": str(e),
+                "query_plan": None
+            }
+        )
+
+
+@app.post("/api/query/execute")
+async def execute_validated_query(payload: QueryPayload):
+    """
+    Executa query já validada pelo usuário.
+    Aceita query_plan opcional para usar filtros customizados.
+    """
+    msg.good(f"Executing validated query: {payload.query}")
+    try:
+        client = await client_manager.connect(payload.credentials)
+        documents_uuid = [document.uuid for document in payload.documentFilter]
+        
+        # Se query_plan fornecido, usar filtros customizados
+        # (Isso pode ser expandido no futuro)
+        
+        documents, context = await manager.retrieve_chunks(
+            client, payload.query, payload.RAG, payload.labels, documents_uuid
+        )
+
+        return JSONResponse(
+            content={"error": "", "documents": documents, "context": context}
+        )
+    except Exception as e:
         msg.warn(f"Query failed: {str(e)}")
         return JSONResponse(
             content={"error": f"Query failed: {str(e)}", "documents": [], "context": ""}
