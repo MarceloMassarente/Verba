@@ -529,8 +529,8 @@ class VerbaManager:
             if set(a.keys()) != set(b.keys()):
                 msg.warn(
                     f"Config Validation: Component type mismatch. Expected: {set(a.keys())}, Got: {set(b.keys())}"
-                    )
-                    return False
+                )
+                return False
 
             for component_key in a.keys():
                 a_component = a[component_key]["components"]
