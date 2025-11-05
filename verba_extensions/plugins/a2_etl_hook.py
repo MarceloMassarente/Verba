@@ -139,7 +139,7 @@ async def run_etl_on_passages(
             if tenant:
                 fetch_kwargs["tenant"] = tenant
             
-            res = coll.query.fetch_objects(**fetch_kwargs)
+            res = await coll.query.fetch_objects(**fetch_kwargs)
             objs = {o.uuid: o for o in res.objects if str(o.uuid) in passage_uuids}
         except Exception as e:
             msg.warn(f"Erro ao buscar passages para ETL: {str(e)}")

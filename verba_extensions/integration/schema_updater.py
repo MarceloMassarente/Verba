@@ -116,7 +116,7 @@ async def check_collection_has_etl_properties(client, collection_name: str) -> b
             return False
         
         collection = client.collections.get(collection_name)
-        config = collection.config.get()
+        config = await collection.config.get()
         
         # Verifica se tem pelo menos uma propriedade de ETL
         etl_prop_names = [p.name for p in get_etl_properties()]
