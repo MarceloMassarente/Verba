@@ -223,8 +223,18 @@ def patch_weaviate_manager_verify_collection():
         async def patched_verify_collection(self, client, collection_name: str):
             """Verifica collection e cria com propriedades ETL-aware se necessário"""
             
+            # Collections que não precisam de schema ETL-aware (apenas metadados)
+            # Não devem gerar avisos
+            metadata_collections = ["VERBA_DOCUMENTS", "VERBA_CONFIGURATION", "VERBA_SUGGESTIONS"]
+            
             # Se collection já existe, verifica se tem propriedades de ETL
             if await client.collections.exists(collection_name):
+                # Para collections de metadados, não verifica schema ETL (não precisam)
+                if collection_name in metadata_collections:
+                    # Usa método original sem verificar ETL
+                    return await original_verify(self, client, collection_name)
+                
+                # Para collections de embedding, verifica se tem schema ETL
                 has_etl = await check_collection_has_etl_properties(client, collection_name)
                 if has_etl:
                     msg.info(f"✅ Collection {collection_name} já tem schema ETL-aware")
@@ -273,7 +283,8 @@ def patch_weaviate_manager_verify_collection():
                     # Fallback para método original
                     return await original_verify(self, client, collection_name)
             
-            # Para collections não-embedding, usa método original
+            # Para collections não-embedding (metadados), usa método original sem avisos
+            # Essas collections não precisam de schema ETL-aware
             return await original_verify(self, client, collection_name)
         
         # Substitui método
