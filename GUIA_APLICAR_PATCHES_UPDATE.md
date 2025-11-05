@@ -269,6 +269,13 @@ from goldenverba.components import managers
 # Verificar se método ainda existe
 if hasattr(managers.WeaviateManager, 'import_document'):
     print('✅ WeaviateManager.import_document existe - patch pode ser aplicado')
+    # Verificar se reconexão automática está presente
+    import inspect
+    source = inspect.getsource(patch_weaviate_manager)
+    if '_get_working_client' in source and 'reconectar' in source.lower():
+        print('✅ Reconexão automática presente no patch')
+    else:
+        print('⚠️ Reconexão automática não encontrada - verificar código')
 else:
     print('⚠️ WeaviateManager.import_document não encontrado - verificar estrutura')
 "

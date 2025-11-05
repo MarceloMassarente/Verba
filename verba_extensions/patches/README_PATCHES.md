@@ -163,7 +163,7 @@ from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
 
 ---
 
-### 4. **Import Hook (ETL Pós-Chunking)** ✅
+### 4. **Import Hook (ETL Pós-Chunking + Reconexão Automática)** ✅
 
 **Arquivo:** `verba_extensions/integration/import_hook.py`
 
@@ -171,10 +171,40 @@ from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
 - Patch em `WeaviateManager.import_document()` para capturar `passage_uuids`
 - Dispara ETL A2 após importação dos chunks
 - Mantém ETL pós-chunking para section scope refinado
+- **⭐ NOVO:** Reconexão automática do cliente Weaviate se fechado durante import longo
+
+**Funcionalidades:**
+
+1. **ETL Pós-Chunking:**
+   - Captura `doc_uuid` após import
+   - Busca chunks importados por `doc_uuid`
+   - Executa ETL A2 (NER + Section Scope) em background
+   - Não bloqueia o processo de import
+
+2. **Reconexão Automática (NOVO):**
+   - Detecta quando cliente Weaviate está fechado após import longo
+   - Reconecta automaticamente usando credenciais do ambiente
+   - Suporta Railway (WEAVIATE_HTTP_HOST) e outras configurações
+   - Retry até 3 vezes antes de desistir
+   - Garante que ETL pós-chunking seja executado mesmo após desconexões
+
+**Variáveis de ambiente usadas para reconexão:**
+- `WEAVIATE_HTTP_HOST` (prioritário para Railway)
+- `WEAVIATE_URL_VERBA` (fallback)
+- `WEAVIATE_API_KEY_VERBA`
+- `WEAVIATE_PORT` ou `WEAVIATE_HTTP_PORT`
+- `DEFAULT_DEPLOYMENT` (Custom, Weaviate, etc.)
 
 **Como é aplicado:**
 - Chamado em `verba_extensions/startup.py` durante inicialização
 - Monkey patch: `managers.WeaviateManager.import_document = patched_import_document`
+
+**Comportamento:**
+1. Durante import: Usa cliente normalmente
+2. Após import: Verifica se cliente está conectado
+3. Se fechado: Tenta reconectar automaticamente
+4. Se reconectar: Executa ETL pós-chunking normalmente
+5. Se falhar: Informa que chunks foram importados, mas ETL será pulado
 
 **Como verificar após upgrade:**
 ```python
@@ -182,6 +212,11 @@ from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
 from goldenverba.components import managers
 original_method = managers.WeaviateManager.import_document
 # Se existir, patch pode ser reaplicado
+
+# Verificar se reconexão funciona:
+# 1. Importar documento grande (embedding longo)
+# 2. Verificar logs: "[ETL-POST] ✅ Reconectado automaticamente com sucesso"
+# 3. Verificar se ETL pós-chunking foi executado
 ```
 
 ---
