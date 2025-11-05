@@ -273,10 +273,23 @@ class VerbaManager:
             total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
             msg.info(f"[CHUNKING] Chunking concluído: {total_chunks} chunks criados (ETL será executado após import)")
 
-            # Add chunk_lang to chunks (language detection)
+            # Add chunk_lang to chunks (language detection) + Quality Scoring (RAG2)
             from goldenverba.components.document import detect_language
             for doc in chunked_documents:
+                # Quality Scoring (RAG2) - filtrar chunks de baixa qualidade
+                try:
+                    from verba_extensions.utils.quality import compute_quality_score
+                    from verba_extensions.utils.telemetry import get_telemetry
+                    use_quality_filter = True
+                    quality_threshold = 0.3  # Configurável via env se necessário
+                except ImportError:
+                    use_quality_filter = False
+                
+                filtered_chunks = []
+                quality_filtered_count = 0
+                
                 for chunk in doc.chunks:
+                    # Language detection
                     if not chunk.chunk_lang:
                         # Detect language from chunk content
                         detected_lang = detect_language(chunk.content)
@@ -288,6 +301,38 @@ class VerbaManager:
                         else:
                             # Default to document language or empty
                             chunk.chunk_lang = detected_lang if detected_lang != "unknown" else ""
+                    
+                    # Quality Scoring (RAG2) - filtrar chunks de baixa qualidade
+                    if use_quality_filter:
+                        parent_type = chunk.meta.get("parent_type") if hasattr(chunk, 'meta') and chunk.meta else None
+                        is_summary = chunk.meta.get("is_summary", False) if hasattr(chunk, 'meta') and chunk.meta else False
+                        
+                        score, reason = compute_quality_score(
+                            text=chunk.content,
+                            parent_type=parent_type,
+                            is_summary=is_summary
+                        )
+                        
+                        # Filtrar chunks de baixa qualidade
+                        if score < quality_threshold:
+                            quality_filtered_count += 1
+                            try:
+                                telemetry = get_telemetry()
+                                telemetry.record_chunk_filtered_by_quality(
+                                    parent_type=parent_type or "unknown",
+                                    score=score,
+                                    reason=reason
+                                )
+                            except:
+                                pass  # Telemetria opcional
+                            continue  # Pula chunk de baixa qualidade
+                    
+                    filtered_chunks.append(chunk)
+                
+                # Atualizar chunks do documento (remover os filtrados)
+                if use_quality_filter and quality_filtered_count > 0:
+                    doc.chunks = filtered_chunks
+                    msg.info(f"[QUALITY] Filtrados {quality_filtered_count} chunks de baixa qualidade (threshold: {quality_threshold})")
             
             # Apply plugin enrichment (e.g., LLMMetadataExtractor)
             if PLUGINS_AVAILABLE:

@@ -92,6 +92,19 @@ async def lifespan(app: FastAPI):
 # FastAPI App
 app = FastAPI(lifespan=lifespan)
 
+# TelemetryMiddleware para observabilidade (RAG2)
+try:
+    from verba_extensions.middleware.telemetry import TelemetryMiddleware
+    app.add_middleware(
+        TelemetryMiddleware,
+        enable_logging=True
+    )
+    msg.good("TelemetryMiddleware integrado - observabilidade ativada")
+except ImportError:
+    msg.info("TelemetryMiddleware não disponível (continuando sem telemetria)")
+except Exception as e:
+    msg.warn(f"Erro ao integrar TelemetryMiddleware: {str(e)} (continuando sem telemetria)")
+
 # Allow requests only from the same origin
 app.add_middleware(
     CORSMiddleware,
@@ -519,6 +532,56 @@ async def retrieve_user_config(payload: Credentials):
                 "user_config": {},
                 "error": f"Could not retrieve rag configuration: {str(e)}",
             },
+        )
+
+
+# Telemetry endpoints (RAG2)
+@app.get("/api/telemetry/stats")
+async def get_telemetry_stats():
+    """Retorna estatísticas de telemetria da API"""
+    try:
+        from verba_extensions.middleware.telemetry import TelemetryMiddleware
+        stats = TelemetryMiddleware.get_shared_stats()
+        return JSONResponse(
+            status_code=200,
+            content={"stats": stats, "error": ""}
+        )
+    except ImportError:
+        return JSONResponse(
+            status_code=200,
+            content={"stats": {}, "error": "TelemetryMiddleware não disponível"}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"stats": {}, "error": f"Erro ao obter stats: {str(e)}"}
+        )
+
+
+@app.get("/api/telemetry/slo")
+async def check_slo(threshold_ms: float = 350.0):
+    """Verifica se SLO está sendo atendido (p95 < threshold_ms)"""
+    try:
+        from verba_extensions.middleware.telemetry import TelemetryMiddleware
+        is_ok, details = TelemetryMiddleware.check_shared_slo(threshold_ms)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "is_ok": is_ok,
+                "threshold_ms": threshold_ms,
+                **details,
+                "error": ""
+            }
+        )
+    except ImportError:
+        return JSONResponse(
+            status_code=200,
+            content={"is_ok": False, "error": "TelemetryMiddleware não disponível"}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"is_ok": False, "error": f"Erro ao verificar SLO: {str(e)}"}
         )
 
 

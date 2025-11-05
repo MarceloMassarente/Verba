@@ -63,7 +63,7 @@ class OpenAIEmbedder(Embedding):
             )
 
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
-        """Vectorize the input content using OpenAI's API."""
+        """Vectorize the input content using OpenAI's API with caching."""
         model = config.get("Model", {"value": "text-embedding-ada-002"}).value
         key_name = (
             "OPENAI_EMBED_API_KEY"
@@ -84,9 +84,51 @@ class OpenAIEmbedder(Embedding):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
-        payload = {"input": content, "model": model}
 
-        # Convert payload to BytesIO object
+        # Embeddings Cache (RAG2) - integrado
+        try:
+            from verba_extensions.utils.embeddings_cache import (
+                get_cached_embedding,
+                get_cache_key
+            )
+            use_cache = True
+        except ImportError:
+            use_cache = False
+        
+        # Se cache disponível e apenas 1 item (query), usar cache
+        if use_cache and len(content) == 1:
+            text = content[0]
+            cache_key = get_cache_key(text=text, doc_uuid="", parent_type="query")
+            
+            async def _embed_single(t: str) -> List[float]:
+                single_payload = {"input": [t], "model": model}
+                payload_bytes = json.dumps(single_payload).encode("utf-8")
+                payload_io = io.BytesIO(payload_bytes)
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{base_url}/embeddings",
+                        headers=headers,
+                        data=payload_io,
+                        timeout=30,
+                    ) as response:
+                        response.raise_for_status()
+                        data = await response.json()
+                        if "data" not in data or not data["data"]:
+                            raise ValueError(f"Unexpected API response: {data}")
+                        return data["data"][0]["embedding"]
+            
+            # Obter embedding com cache
+            embedding, was_cached = get_cached_embedding(
+                text=text,
+                cache_key=cache_key,
+                embed_fn=lambda t: _embed_single(t),
+                enable_cache=True
+            )
+            return [embedding]
+        
+        # Para batches, processar normalmente (mais eficiente)
+        payload = {"input": content, "model": model}
         payload_bytes = json.dumps(payload).encode("utf-8")
         payload_io = io.BytesIO(payload_bytes)
 

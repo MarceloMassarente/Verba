@@ -35,7 +35,38 @@ class SentenceTransformersEmbedder(Embedding):
 
     async def vectorize(self, config: dict, content: list[str]) -> list[float]:
         try:
+            # Embeddings Cache (RAG2) - integrado para queries únicas
+            use_cache = False
+            if len(content) == 1:
+                try:
+                    from verba_extensions.utils.embeddings_cache import (
+                        get_cached_embedding,
+                        get_cache_key
+                    )
+                    use_cache = True
+                except ImportError:
+                    pass
+            
             model_name = config.get("Model").value
+            
+            # Se cache disponível e apenas 1 item (query), usar cache
+            if use_cache:
+                text = content[0]
+                cache_key = get_cache_key(text=text, doc_uuid="", parent_type="query")
+                
+                def _embed_single(t: str) -> list[float]:
+                    model = SentenceTransformer(model_name)
+                    return model.encode([t])[0].tolist()
+                
+                embedding, was_cached = get_cached_embedding(
+                    text=text,
+                    cache_key=cache_key,
+                    embed_fn=_embed_single,
+                    enable_cache=True
+                )
+                return [embedding]
+            
+            # Para batches, processar normalmente
             model = SentenceTransformer(model_name)
             embeddings = model.encode(content).tolist()
             return embeddings
