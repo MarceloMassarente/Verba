@@ -50,6 +50,31 @@ def patch_weaviate_manager():
                 # Fallback para v3 - usa estrutura de filtro v3
                 Filter = None
             
+            # Helper para verificar se cliente está conectado
+            def _is_client_connected(client):
+                """Verifica se cliente está conectado de forma segura"""
+                try:
+                    # Tenta acessar uma propriedade que só existe se conectado
+                    # Se o cliente está fechado, isso lançará uma exceção
+                    _ = client.collections
+                    return True
+                except (AttributeError, RuntimeError, Exception) as e:
+                    error_str = str(e).lower()
+                    if "closed" in error_str or "not connected" in error_str or "disconnect" in error_str:
+                        return False
+                    # Outros erros podem indicar problema diferente, mas assumimos desconectado
+                    return False
+            
+            # Helper para obter novo cliente se necessário
+            async def _get_working_client():
+                """Obtém cliente funcionando, verifica se está conectado"""
+                if _is_client_connected(client):
+                    return client
+                # Cliente fechado - não tenta reconectar automaticamente
+                # (reconexão requereria credenciais que não temos acesso no contexto do hook)
+                # O ETL pós-chunking será pulado neste caso, mas chunks já foram importados
+                return None
+            
             # Chama método original (NÃO retorna doc_uuid - método original não retorna)
             # Precisamos buscar doc_uuid após o import
             doc_uuid = None
@@ -59,54 +84,71 @@ def patch_weaviate_manager():
                 if Filter is not None:
                     try:
                         import asyncio
-                        # Tenta buscar doc_uuid com retry (pode levar um pouco para o Weaviate commit)
-                        document_collection = client.collections.get(self.document_collection_name)
-                        doc_uuid = None
-                        max_retries = 3
-                        for attempt in range(max_retries):
-                            if attempt > 0:
-                                await asyncio.sleep(0.2)  # Delay entre tentativas
-                            
-                            results = await document_collection.query.fetch_objects(
-                                filters=Filter.by_property("title").equal(document.title),
-                                limit=1
-                            )
-                            if results.objects:
-                                doc_uuid = str(results.objects[0].uuid)
-                                msg.info(f"[ETL-POST] ✅ doc_uuid obtido após import (tentativa {attempt + 1}): {doc_uuid[:50]}...")
-                                break
+                        # Verifica se cliente ainda está conectado após import
+                        if not _is_client_connected(client):
+                            msg.warn("[ETL-POST] Cliente fechado após import - tentando reconectar...")
+                            working_client = await _get_working_client()
+                            if not working_client:
+                                msg.warn("[ETL-POST] Não foi possível reconectar - doc_uuid não será obtido")
+                                doc_uuid = None
+                            else:
+                                client = working_client
                         
-                        if not doc_uuid:
-                            msg.warn(f"[ETL-POST] ⚠️ Documento '{document.title}' não encontrado após {max_retries} tentativas - ETL não será executado")
+                        if _is_client_connected(client):
+                            # Tenta buscar doc_uuid com retry (pode levar um pouco para o Weaviate commit)
+                            document_collection = client.collections.get(self.document_collection_name)
+                            doc_uuid = None
+                            max_retries = 3
+                            for attempt in range(max_retries):
+                                if attempt > 0:
+                                    await asyncio.sleep(0.2)  # Delay entre tentativas
+                                
+                                results = await document_collection.query.fetch_objects(
+                                    filters=Filter.by_property("title").equal(document.title),
+                                    limit=1
+                                )
+                                if results.objects:
+                                    doc_uuid = str(results.objects[0].uuid)
+                                    msg.info(f"[ETL-POST] ✅ doc_uuid obtido após import (tentativa {attempt + 1}): {doc_uuid[:50]}...")
+                                    break
+                            
+                            if not doc_uuid:
+                                msg.warn(f"[ETL-POST] ⚠️ Documento '{document.title}' não encontrado após {max_retries} tentativas - ETL não será executado")
+                        else:
+                            msg.warn("[ETL-POST] Cliente não conectado - não é possível buscar doc_uuid")
                     except Exception as recovery_error:
-                        msg.warn(f"[ETL-POST] ⚠️ Erro ao buscar doc_uuid após import: {str(recovery_error)}")
+                        error_str = str(recovery_error).lower()
+                        if "closed" in error_str or "not connected" in error_str:
+                            msg.warn("[ETL-POST] ⚠️ Cliente fechado durante busca de doc_uuid - ETL não será executado")
+                        else:
+                            msg.warn(f"[ETL-POST] ⚠️ Erro ao buscar doc_uuid após import: {str(recovery_error)}")
             except Exception as import_error:
                 # Se falhar, tenta recuperar doc_uuid pela busca do documento
                 # (alguns chunks podem ter sido inseridos mesmo com erro)
-                msg.warn(f"[ETL-POST] Import teve erro, mas tentando recuperar doc_uuid: {str(import_error)}")
+                error_str = str(import_error).lower()
+                msg.warn(f"[ETL-POST] Import teve erro: {str(import_error)[:100]}")
                 
                 # Verifica se o cliente está conectado antes de tentar recuperar
-                if Filter is not None:
+                if Filter is not None and _is_client_connected(client):
                     try:
-                        # Verifica se cliente está conectado
-                        if not await client.is_ready():
-                            msg.warn("Cliente não está conectado, não é possível recuperar doc_uuid")
-                        else:
-                            # Tenta buscar documento pelo nome para recuperar doc_uuid
-                            document_collection = client.collections.get(self.document_collection_name)
-                            results = await document_collection.query.fetch_objects(
-                                filters=Filter.by_property("title").equal(document.title),
-                                limit=1
-                            )
-                            if results.objects:
-                                doc_uuid = str(results.objects[0].uuid)
-                                msg.info(f"[ETL-POST] Recuperado doc_uuid após erro: {doc_uuid[:50]}...")
+                        # Tenta buscar documento pelo nome para recuperar doc_uuid
+                        document_collection = client.collections.get(self.document_collection_name)
+                        results = await document_collection.query.fetch_objects(
+                            filters=Filter.by_property("title").equal(document.title),
+                            limit=1
+                        )
+                        if results.objects:
+                            doc_uuid = str(results.objects[0].uuid)
+                            msg.info(f"[ETL-POST] Recuperado doc_uuid após erro: {doc_uuid[:50]}...")
                     except Exception as recovery_error:
                         # Se o erro for de cliente fechado, não tenta recuperar
-                        if "closed" in str(recovery_error).lower() or "not connected" in str(recovery_error).lower():
-                            msg.warn("Cliente fechado durante recuperação, não foi possível recuperar doc_uuid")
+                        recovery_str = str(recovery_error).lower()
+                        if "closed" in recovery_str or "not connected" in recovery_str:
+                            msg.warn("[ETL-POST] Cliente fechado durante recuperação, não foi possível recuperar doc_uuid")
                         else:
-                            msg.warn(f"Não foi possível recuperar doc_uuid: {str(recovery_error)}")
+                            msg.warn(f"[ETL-POST] Não foi possível recuperar doc_uuid: {str(recovery_error)}")
+                elif not _is_client_connected(client):
+                    msg.warn("[ETL-POST] Cliente não está conectado, não é possível recuperar doc_uuid")
                 # Re-raise para não mascarar o erro original
                 raise import_error
             
@@ -116,55 +158,83 @@ def patch_weaviate_manager():
                 try:
                     import asyncio
                     
-                    msg.info(f"[ETL-POST] ETL A2 habilitado - buscando chunks importados para doc_uuid: {doc_uuid[:50]}...")
-                    embedder_collection_name = self.embedding_table.get(embedder)
-                    if embedder_collection_name:
-                        embedder_collection = client.collections.get(embedder_collection_name)
-                        
-                        # Pequeno delay para garantir que chunks foram inseridos
-                        await asyncio.sleep(0.2)
-                        
-                        # Busca passages por doc_uuid
-                        msg.info(f"[ETL] Buscando passages no Weaviate após import...")
-                        passages = await embedder_collection.query.fetch_objects(
-                            filters=Filter.by_property("doc_uuid").equal(doc_uuid),
-                            limit=10000
-                        )
-                        
-                        passage_uuids = [str(p.uuid) for p in passages.objects]
-                        
-                        if passage_uuids:
-                            msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")
-                            # Dispara ETL via hook (async, não bloqueia import)
-                            from verba_extensions.hooks import global_hooks
-                            tenant = os.getenv("WEAVIATE_TENANT")
-                            
-                            # Executa em background para não bloquear
-                            async def run_etl_hook():
-                                msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
-                                try:
-                                    await global_hooks.execute_hook_async(
-                                        'import.after',
-                                        client,
-                                        doc_uuid,
-                                        passage_uuids,
-                                        tenant=tenant,
-                                        enable_etl=True,
-                                        collection_name=embedder_collection_name  # Passa nome da collection
-                                    )
-                                    msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
-                                except Exception as etl_error:
-                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
-                            
-                            asyncio.create_task(run_etl_hook())
-                        else:
-                            msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
+                    # Verifica se cliente está conectado antes de tentar ETL
+                    working_client = await _get_working_client()
+                    if not working_client:
+                        msg.warn("[ETL-POST] Cliente não conectado - ETL pós-chunking será pulado (chunks já foram importados)")
+                        msg.warn("[ETL-POST] ETL pode ser executado manualmente mais tarde ou após reconexão")
+                    else:
+                        client = working_client
+                        msg.info(f"[ETL-POST] ETL A2 habilitado - buscando chunks importados para doc_uuid: {doc_uuid[:50]}...")
+                        embedder_collection_name = self.embedding_table.get(embedder)
+                        if embedder_collection_name:
+                            try:
+                                embedder_collection = client.collections.get(embedder_collection_name)
+                                
+                                # Pequeno delay para garantir que chunks foram inseridos
+                                await asyncio.sleep(0.2)
+                                
+                                # Busca passages por doc_uuid
+                                msg.info(f"[ETL] Buscando passages no Weaviate após import...")
+                                passages = await embedder_collection.query.fetch_objects(
+                                    filters=Filter.by_property("doc_uuid").equal(doc_uuid),
+                                    limit=10000
+                                )
+                                
+                                passage_uuids = [str(p.uuid) for p in passages.objects]
+                                
+                                if passage_uuids:
+                                    msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")
+                                    # Dispara ETL via hook (async, não bloqueia import)
+                                    from verba_extensions.hooks import global_hooks
+                                    tenant = os.getenv("WEAVIATE_TENANT")
+                                    
+                                    # Executa em background para não bloquear
+                                    async def run_etl_hook():
+                                        # Obtém cliente novamente dentro da task (pode ter fechado)
+                                        hook_client = await _get_working_client()
+                                        if not hook_client:
+                                            msg.warn("[ETL] ⚠️ Cliente não disponível para ETL - pulando")
+                                            return
+                                        
+                                        msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
+                                        try:
+                                            await global_hooks.execute_hook_async(
+                                                'import.after',
+                                                hook_client,
+                                                doc_uuid,
+                                                passage_uuids,
+                                                tenant=tenant,
+                                                enable_etl=True,
+                                                collection_name=embedder_collection_name  # Passa nome da collection
+                                            )
+                                            msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
+                                        except Exception as etl_error:
+                                            error_str = str(etl_error).lower()
+                                            if "closed" in error_str or "not connected" in error_str:
+                                                msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução")
+                                            else:
+                                                msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
+                                    
+                                    asyncio.create_task(run_etl_hook())
+                                else:
+                                    msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
+                            except Exception as collection_error:
+                                error_str = str(collection_error).lower()
+                                if "closed" in error_str or "not connected" in error_str:
+                                    msg.warn("[ETL-POST] Cliente fechado durante busca de chunks - ETL não será executado")
+                                else:
+                                    raise
                                 
                 except Exception as e:
                     # Não falha o import se ETL der erro
                     import traceback
-                    msg.warn(f"[ETL-POST] ETL A2 não executado (não crítico): {type(e).__name__}: {str(e)}")
-                    msg.warn(f"[ETL-POST] Traceback: {traceback.format_exc()}")
+                    error_str = str(e).lower()
+                    if "closed" in error_str or "not connected" in error_str:
+                        msg.warn("[ETL-POST] Cliente desconectado - ETL pós-chunking não executado (não crítico)")
+                    else:
+                        msg.warn(f"[ETL-POST] ETL A2 não executado (não crítico): {type(e).__name__}: {str(e)}")
+                        msg.warn(f"[ETL-POST] Traceback: {traceback.format_exc()}")
             else:
                 if not enable_etl:
                     msg.info(f"[ETL-POST] ETL pós-chunking não habilitado (enable_etl=False)")
