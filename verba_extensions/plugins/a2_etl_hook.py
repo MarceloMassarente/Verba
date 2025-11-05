@@ -235,7 +235,7 @@ async def run_etl_on_passages(
                     update_kwargs["tenant"] = tenant
                 
                 try:
-                    coll.data.update(**update_kwargs)
+                    await coll.data.update(**update_kwargs)
                     changed += 1
                     if changed % 100 == 0:
                         msg.info(f"[ETL] Progresso: {changed}/{len(passage_uuids)} chunks atualizados...")
