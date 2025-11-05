@@ -41,8 +41,31 @@ async def connect_to_weaviate():
     
     # Se não tem variáveis Railway, tenta usar WEAVIATE_URL
     if not http_host and not grpc_host and url:
+        # Para URLs Railway públicas, usa connect_to_weaviate_cloud
+        if url.startswith("http://") or url.startswith("https://"):
+            auth_creds = AuthApiKey(api_key) if api_key else None
+            msg.info(f"🔗 Conectando via URL Railway: {url}")
+            try:
+                from weaviate.classes.init import AdditionalConfig, Timeout
+                client = await weaviate.connect_to_weaviate_cloud(
+                    cluster_url=url.rstrip("/"),
+                    auth_credentials=auth_creds,
+                    additional_config=AdditionalConfig(
+                        timeout=Timeout(init=10),
+                        skip_init_checks=True  # Ignora health check gRPC se não disponível
+                    )
+                )
+                return client
+            except Exception as e:
+                # Se falhar, tenta sem config adicional
+                msg.warn(f"Tentando conexão sem verificação de health check...")
+                client = await weaviate.connect_to_weaviate_cloud(
+                    cluster_url=url.rstrip("/"),
+                    auth_credentials=auth_creds,
+                )
+                return client
         # Tenta extrair host e porta da URL
-        if "://" in url:
+        elif "://" in url:
             parts = url.replace("http://", "").replace("https://", "").split(":")
             if len(parts) >= 2:
                 http_host = parts[0]
@@ -74,19 +97,19 @@ async def connect_to_weaviate():
             grpc_secure=grpc_secure,
             auth_credentials=auth_creds,
         )
-    elif url.startswith("http://") or url.startswith("https://"):
-        # URL padrão (WCS ou local)
+    elif url and (url.startswith("http://") or url.startswith("https://")):
+        # URL padrão (WCS ou Railway público)
         auth_creds = AuthApiKey(api_key) if api_key else None
         msg.info(f"🔗 Conectando via URL: {url}")
         client = await weaviate.connect_to_weaviate_cloud(
-            cluster_url=url,
+            cluster_url=url.rstrip("/"),
             auth_credentials=auth_creds,
         )
     else:
         # Local
-        msg.info(f"🔗 Conectando localmente: {url}")
+        msg.info(f"🔗 Conectando localmente: {url or 'localhost:8080'}")
         client = await weaviate.connect_to_local(
-            host=url,
+            host=url or "localhost:8080",
         )
     
     return client

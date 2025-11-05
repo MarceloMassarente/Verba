@@ -221,6 +221,55 @@ original_method = managers.WeaviateManager.import_document
 
 ---
 
+### 5. **ETL A2 Hook (NER + Section Scope)** ✅
+
+**Arquivo:** `verba_extensions/plugins/a2_etl_hook.py`
+
+**O que faz:**
+- Executa ETL pós-chunking: extrai entidades (NER) e determina section scope para cada chunk
+- Atualiza chunks no Weaviate com propriedades ETL (`entities_local_ids`, `section_entity_ids`, etc.)
+- Função principal: `run_etl_on_passages()` - chamada pelo import hook após importação
+
+**Funcionalidades:**
+1. **NER (Named Entity Recognition):**
+   - Extrai entidades do texto de cada chunk usando spaCy
+   - Normaliza entidades usando gazetteer (se disponível)
+   - Armazena em `entities_local_ids`
+
+2. **Section Scope:**
+   - Determina entidades relacionadas à seção baseado em título, primeiro parágrafo e entidades pai
+   - Armazena em `section_entity_ids` com nível de confiança
+
+**Correções críticas:**
+- ⚠️ **CRÍTICO:** `coll.data.update()` é assíncrono e DEVE ser aguardado com `await`
+- Sem `await`, gera `RuntimeWarning: coroutine '_DataCollectionAsync.update' was never awaited`
+- Chunks não são atualizados se `await` não for usado (linha 238)
+
+**Como é chamado:**
+- Via hook `import.after` registrado em `verba_extensions/hooks.py`
+- Disparado automaticamente após `WeaviateManager.import_document()` (via import hook)
+- Executa em background (não bloqueia import)
+
+**Como verificar após upgrade:**
+```python
+# Verificar se função ainda existe:
+from verba_extensions.plugins.a2_etl_hook import run_etl_on_passages
+# Se importar sem erro, está OK
+
+# Verificar se await está presente:
+# Linha ~238 deve ter: await coll.data.update(**update_kwargs)
+# NÃO deve ter apenas: coll.data.update(**update_kwargs)
+```
+
+**Erros comuns:**
+- `RuntimeWarning: coroutine '_DataCollectionAsync.update' was never awaited`
+  - **Solução:** Adicionar `await` antes de `coll.data.update()`
+- Chunks não têm propriedades ETL após import
+  - **Verificar:** Logs mostram "[ETL] Progresso: X/Y chunks atualizados..."
+  - **Verificar:** `await` está presente na linha 238
+
+---
+
 ## 🔄 Processo de Reaplicação Após Upgrade
 
 ### **Passo 1: Verificar Compatibilidade**

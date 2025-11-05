@@ -280,6 +280,18 @@ def verify_etl_processing(weaviate_url: str, doc_title: str = None):
     
     msg.info(f"\nCollections de embedding encontradas: {len(embedding_collections)}")
     
+    # Verifica cada collection - primeiro verifica quais têm chunks
+    collections_with_chunks = []
+    for collection_name in embedding_collections:
+        chunks_check = get_chunks_for_document(weaviate_url, collection_name, doc_uuid, limit=1)
+        if chunks_check:
+            collections_with_chunks.append((collection_name, len(chunks_check)))
+    
+    if collections_with_chunks:
+        msg.info(f"\nCollections com chunks encontradas: {len(collections_with_chunks)}")
+        for col_name, count in collections_with_chunks:
+            msg.info(f"   - {col_name}: {count} chunk(s) (amostra)")
+    
     # Verifica cada collection
     for collection_name in embedding_collections:
         msg.info(f"\n{'=' * 70}")

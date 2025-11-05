@@ -188,3 +188,4 @@ def patch_verba_manager():
     # Placeholder para futuras extensões
     pass
 
+

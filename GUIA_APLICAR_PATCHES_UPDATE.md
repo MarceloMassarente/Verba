@@ -285,9 +285,26 @@ python -c "
 from verba_extensions.plugins.section_aware_chunker import SectionAwareChunker
 print('✅ SectionAwareChunker OK')
 "
+
+# 4. Verificar se ETL A2 Hook tem await no update (CRÍTICO)
+python -c "
+import inspect
+from verba_extensions.plugins.a2_etl_hook import run_etl_on_passages
+source = inspect.getsource(run_etl_on_passages)
+# Verificar se await está presente antes de coll.data.update
+if 'await coll.data.update' in source:
+    print('✅ ETL A2 Hook: await presente no update (correto)')
+elif 'coll.data.update' in source and 'await' not in source.split('coll.data.update')[0][-20:]:
+    print('⚠️ ETL A2 Hook: await NÃO encontrado antes de coll.data.update - CORREÇÃO CRÍTICA NECESSÁRIA')
+    print('   Linha ~238 deve ter: await coll.data.update(**update_kwargs)')
+else:
+    print('✅ ETL A2 Hook: função encontrada')
+"
 ```
 
 **Se algum verificar falhar, ver:** `verba_extensions/patches/README_PATCHES.md`
+
+**⚠️ IMPORTANTE:** Se a verificação 4 mostrar que `await` não está presente, o ETL pós-chunking não funcionará corretamente. Chunks não serão atualizados com propriedades ETL. Corrigir imediatamente adicionando `await` antes de `coll.data.update()` na linha 238 de `a2_etl_hook.py`.
 
 ---
 

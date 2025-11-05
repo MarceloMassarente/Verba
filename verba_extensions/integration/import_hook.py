@@ -11,8 +11,11 @@ Aplicado via: verba_extensions/startup.py (durante inicialização)
 """
 
 import os
-from typing import List, Dict
+from typing import List, Dict, Set
 from wasabi import msg
+
+# Track ETL executions to prevent duplicates
+_etl_executions_in_progress: Set[str] = set()
 
 def patch_weaviate_manager():
     """
@@ -234,13 +237,20 @@ def patch_weaviate_manager():
                                 passage_uuids = [str(p.uuid) for p in passages.objects]
                                 
                                 if passage_uuids:
-                                    msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")
-                                    # Dispara ETL via hook (async, não bloqueia import)
-                                    from verba_extensions.hooks import global_hooks
-                                    tenant = os.getenv("WEAVIATE_TENANT")
-                                    
-                                    # Executa em background para não bloquear
-                                    async def run_etl_hook():
+                                    # Verifica se ETL já está em execução para este doc_uuid
+                                    if doc_uuid in _etl_executions_in_progress:
+                                        msg.warn(f"[ETL-POST] ⚠️ ETL já está em execução para doc_uuid {doc_uuid[:50]}... - pulando execução duplicada")
+                                    else:
+                                        # Marca como em execução
+                                        _etl_executions_in_progress.add(doc_uuid)
+                                        
+                                        msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")
+                                        # Dispara ETL via hook (async, não bloqueia import)
+                                        from verba_extensions.hooks import global_hooks
+                                        tenant = os.getenv("WEAVIATE_TENANT")
+                                        
+                                        # Executa em background para não bloquear
+                                        async def run_etl_hook():
                                         # Obtém cliente novamente dentro da task (pode ter fechado)
                                         # Usa retry com reconexão automática
                                         hook_client = None
@@ -276,8 +286,11 @@ def patch_weaviate_manager():
                                                 msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução")
                                             else:
                                                 msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
-                                    
-                                    asyncio.create_task(run_etl_hook())
+                                        finally:
+                                            # Remove da lista de execuções em progresso
+                                            _etl_executions_in_progress.discard(doc_uuid)
+                                        
+                                        asyncio.create_task(run_etl_hook())
                                 else:
                                     msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
                             except Exception as collection_error:

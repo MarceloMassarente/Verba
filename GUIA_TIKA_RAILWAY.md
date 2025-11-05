@@ -217,3 +217,4 @@ ENABLE_ETL_A2=true
 
 **Última atualização:** 2025-11-05
 
+
