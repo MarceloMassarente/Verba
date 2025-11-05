@@ -502,6 +502,10 @@ class VerbaManager:
         }
 
         chunkers = self.chunker_manager.chunkers
+        # Preferir nosso chunker híbrido se disponível; caso contrário, usar o primeiro
+        selected_chunker_name = (
+            "Entity-Semantic" if "Entity-Semantic" in chunkers else list(chunkers.values())[0].name
+        )
         chunkers_config = {
             "components": {
                 chunker: chunkers[chunker].get_meta(
@@ -509,7 +513,7 @@ class VerbaManager:
                 )
                 for chunker in chunkers
             },
-            "selected": list(chunkers.values())[0].name,
+            "selected": selected_chunker_name,
         }
 
         embedders = self.embedder_manager.embedders

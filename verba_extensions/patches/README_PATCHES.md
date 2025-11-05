@@ -163,6 +163,75 @@ from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
 
 ---
 
+### 3.1. **Entity-Semantic Chunker** ⭐ NOVO - RECOMENDADO
+
+**Arquivo:** `verba_extensions/plugins/entity_semantic_chunker.py`
+
+**Status:** ✅ Plugin registrado automaticamente via PluginManager
+
+**O que faz:**
+- **Chunker híbrido** que combina:
+  1. **Section-aware**: Delimita por seções (títulos/primeiro parágrafo) para evitar contaminação entre assuntos
+  2. **Entity guardrails**: Usa `entity_spans` do ETL-PRE para não cortar entidades no meio
+  3. **Semantic breakpoints**: Quebras semânticas intra-seção (reaproveita configs do SemanticChunker)
+- **Ideal para artigos/URLs** que falam de múltiplas empresas
+- **Configuração padrão**: Usa "Entity-Semantic" como chunker padrão quando disponível
+
+**Características:**
+- ✅ **Reaproveita configs do SemanticChunker**: Breakpoint Percentile Threshold (80), Max Sentences Per Chunk (20)
+- ✅ **Overlap configurável**: Em sentenças (padrão: 0)
+- ✅ **Fallback inteligente**: Se numpy/sklearn não disponíveis, usa cap por tamanho máximo
+- ✅ **Compatível com ETL**: Usa `entity_spans` do ETL-PRE automaticamente
+
+**Como funciona:**
+1. Detecta seções no documento (usa `detect_sections()` do SectionAwareChunker)
+2. Para cada seção:
+   - Filtra sentenças dentro da seção
+   - Gera embeddings das sentenças (se disponível)
+   - Calcula breakpoints semânticos (cosine similarity drop)
+   - Ajusta breakpoints para não cortar entidades (usando `entity_spans`)
+   - Aplica cap por tamanho máximo (fallback)
+3. Cria chunks respeitando limites de seção + guard-rails de entidade + breakpoints semânticos
+
+**Como é registrado:**
+- Plugin carregado automaticamente via `verba_extensions/startup.py`
+- Registrado via `register()` que retorna `{'chunkers': [EntitySemanticChunker()]}`
+- Adicionado aos chunkers disponíveis via `PluginManager._hook_chunkers()`
+
+**Como verificar após upgrade:**
+```python
+# 1. Verificar se plugin está carregado:
+from verba_extensions.plugin_manager import get_plugin_manager
+pm = get_plugin_manager()
+if 'entity_semantic_chunker' in pm.plugins:
+    print('✅ Entity-Semantic Chunker carregado')
+
+# 2. Verificar se está disponível no ChunkerManager:
+from goldenverba.components import managers
+if 'Entity-Semantic' in managers.chunkers:
+    print('✅ Entity-Semantic disponível')
+
+# 3. Verificar se é padrão:
+from goldenverba.verba_manager import VerbaManager
+vm = VerbaManager()
+config = vm.create_config()
+if config['Chunker']['selected'] == 'Entity-Semantic':
+    print('✅ Entity-Semantic é padrão')
+```
+
+**Se precisar reaplicar:**
+- Plugin é carregado automaticamente via `startup.py`
+- Se não aparecer, verificar se `verba_extensions/plugins/entity_semantic_chunker.py` existe
+- Verificar se `register()` retorna estrutura correta
+- Verificar se `PluginManager._hook_chunkers()` está sendo chamado
+
+**Recomendação:**
+- ⭐ **Use Entity-Semantic Chunker** para artigos/URLs com múltiplas empresas
+- Combina o melhor dos três mundos: seções + entidades + semântica
+- Evita contaminação entre empresas mantendo chunks semânticamente coerentes
+
+---
+
 ### 4. **Import Hook (ETL Pós-Chunking + Reconexão Automática)** ✅
 
 **Arquivo:** `verba_extensions/integration/import_hook.py`
@@ -310,9 +379,11 @@ Se algum patch falhar, verifique:
    - Verificar se `WeaviateManager.import_document()` ainda existe
    - Verificar assinatura do método (parâmetros mudaram?)
 
-4. **Chunker:**
+4. **Chunkers:**
    - Verificar se `SectionAwareChunker` ainda funciona
+   - Verificar se `EntitySemanticChunker` plugin está carregado
    - Verificar se `document.meta` ainda é acessível
+   - Verificar se `detect_sections()` está disponível (usado por EntitySemanticChunker)
 
 ### **Passo 3: Testar**
 
@@ -457,6 +528,7 @@ if hasattr(document, 'meta') and document.meta:
 - `verba_extensions/integration/chunking_hook.py` - ETL pré-chunking
 - `verba_extensions/integration/import_hook.py` - ETL pós-chunking
 - `verba_extensions/plugins/section_aware_chunker.py` - Chunker entity-aware
+- `verba_extensions/plugins/entity_semantic_chunker.py` - **Chunker híbrido (RECOMENDADO)** ⭐ NOVO
 - `verba_extensions/plugins/a2_etl_hook.py` - Funções de NER (usado por ambos)
 
 ### **Startup:**
@@ -546,7 +618,11 @@ Se após upgrade os patches não funcionarem:
   - Serve para chunks normais E ETL-aware
   - Verificação automática na inicialização
 - ✅ **ETL Pré-Chunking**: Implementado e testado
-- ✅ **Chunker Entity-Aware**: Implementado e testado
+- ✅ **Section-Aware Chunker Entity-Aware**: Implementado e testado
+- ✅ **Entity-Semantic Chunker**: ⭐ NOVO - Implementado e configurado como padrão
+  - Chunker híbrido: seções + entidades + semântica
+  - Ideal para artigos/URLs com múltiplas empresas
+  - Plugin registrado automaticamente
 - ✅ **ETL Pós-Chunking**: Mantido (já estava funcionando)
 - ✅ **Componentes RAG2**: Integrados (TelemetryMiddleware, Embeddings Cache, etc.)
 - ✅ **Documentação**: Este arquivo

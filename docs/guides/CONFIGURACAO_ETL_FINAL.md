@@ -9,8 +9,11 @@
 
 ### ✅ **Entity-Aware Chunking: HABILITADO**
 - **Status**: `use_entity_aware = True`
-- **Arquivo**: `verba_extensions/plugins/section_aware_chunker.py` (linha 148)
+- **Arquivos**: 
+  - `verba_extensions/plugins/section_aware_chunker.py` (linha 148)
+  - `verba_extensions/plugins/entity_semantic_chunker.py` ⭐ NOVO - RECOMENDADO
 - **Propósito**: Evita cortar entidades no meio durante chunking
+- **Recomendação**: Use **Entity-Semantic Chunker** para artigos/URLs (híbrido: seções + entidades + semântica)
 
 ---
 

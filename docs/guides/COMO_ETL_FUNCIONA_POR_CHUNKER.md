@@ -4,7 +4,7 @@
 
 **ETL Pré-Chunking:** Executado **ANTES** do chunking, **independente** do chunker escolhido  
 **ETL Pós-Chunking:** Executado **DEPOIS** do embedding, **independente** do chunker escolhido  
-**Aproveitamento de Entity-Spans:** Apenas o **Section-Aware Chunker** usa `entity_spans` para chunking entity-aware
+**Aproveitamento de Entity-Spans:** O **Section-Aware Chunker** e o **Entity-Semantic Chunker** usam `entity_spans` para chunking entity-aware
 
 ---
 
@@ -19,6 +19,7 @@
    ↓
 3. Chunking (qualquer chunker)
    - Section-Aware: USA entity_spans (entity-aware)
+   - Entity-Semantic: USA entity_spans + quebras semânticas intra-seção
    - Outros: IGNORAM entity_spans (mas ETL pré ainda foi executado)
    ↓
 4. Embedding
@@ -46,12 +47,39 @@
 
 ### Chunkers Customizados:
 9. **Section-Aware Chunker** - Respeita seções e entidades (usa `entity_spans`)
+10. **Entity-Semantic Chunker** ⭐ NOVO - Híbrido: seções + entidades + semântica (RECOMENDADO)
 
 ---
 
 ## 🎯 Como Cada Chunker Interage com ETL
 
-### ✅ Section-Aware Chunker (RECOMENDADO para ETL)
+### ✅ Entity-Semantic Chunker ⭐ NOVO - RECOMENDADO
+
+**ETL Pré-Chunking:**
+- ✅ **Usa** `entity_spans` para evitar cortar entidades no meio
+- ✅ Chunking **entity-aware**: Tenta manter entidades completas no mesmo chunk
+- ✅ **Section-aware**: Delimita por seções para evitar contaminação entre assuntos
+- ✅ **Semantic breakpoints**: Quebras semânticas intra-seção (reaproveita configs do SemanticChunker)
+- ✅ Logs: `[ENTITY-AWARE] ✅ Usando X entidades pré-extraídas`
+
+**ETL Pós-Chunking:**
+- ✅ Executado normalmente (independente do chunker)
+
+**Resultado:**
+- ✅ **Melhor qualidade de chunks** (entidades não cortadas + semântica coerente)
+- ✅ **Evita contaminação** entre empresas/assuntos (delimita por seções)
+- ✅ **Ideal para artigos/URLs** com múltiplas empresas
+- ✅ **Configuração padrão** quando disponível
+
+**Configuração:**
+- Reaproveita configs do SemanticChunker:
+  - Breakpoint Percentile Threshold: 80 (padrão)
+  - Max Sentences Per Chunk: 20 (padrão)
+- Overlap: 0 sentenças (padrão, configurável)
+
+---
+
+### ✅ Section-Aware Chunker (Alternativa)
 
 **ETL Pré-Chunking:**
 - ✅ **Usa** `entity_spans` para evitar cortar entidades no meio
@@ -203,6 +231,7 @@ if entity_spans:
 
 | Chunker | ETL Pré Executado? | Usa Entity-Spans? | ETL Pós Executado? | Qualidade |
 |---------|-------------------|-------------------|-------------------|-----------|
+| **Entity-Semantic** ⭐ | ✅ Sim | ✅ Sim | ✅ Sim | ⭐⭐⭐⭐⭐ |
 | **Section-Aware** | ✅ Sim | ✅ Sim | ✅ Sim | ⭐⭐⭐⭐⭐ |
 | Token | ✅ Sim | ❌ Não | ✅ Sim | ⭐⭐⭐ |
 | Sentence | ✅ Sim | ❌ Não | ✅ Sim | ⭐⭐⭐ |
@@ -228,7 +257,11 @@ if entity_spans:
 - ✅ Independente do chunker escolhido
 
 **Recomendação:**
-- 🎯 Use **Section-Aware Chunker** para melhor aproveitamento do ETL pré-chunking
+- 🎯 **Use Entity-Semantic Chunker** para melhor aproveitamento do ETL pré-chunking (RECOMENDADO)
+  - Ideal para artigos/URLs com múltiplas empresas
+  - Combina seções + entidades + semântica
+  - Configurado como padrão quando disponível
+- 🎯 **Section-Aware Chunker** como alternativa (também usa entity_spans)
 - 🎯 Outros chunkers funcionam, mas não aproveitam `entity_spans` no chunking
 
 ---
