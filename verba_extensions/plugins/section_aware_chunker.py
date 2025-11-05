@@ -14,6 +14,7 @@ Dependências:
 
 import re
 import asyncio
+import bisect
 from typing import List
 from goldenverba.components.chunk import Chunk
 from goldenverba.components.interfaces import Chunker
@@ -142,14 +143,15 @@ class SectionAwareChunker(Chunker):
             text = document.content
             
             # Pega entidades pré-extraídas (se disponível via ETL pré-chunking)
-            # ⚠️ DESABILITADO POR PADRÃO: entity-aware chunking é muito lento com muitas entidades
-            # Manter desabilitado para performance. Pode ser re-habilitado se necessário com feature flag
+            # ✅ REABILITADO COM OTIMIZAÇÃO: usa binary search para O(log n) lookup
             entity_spans = []
-            use_entity_aware = False  # Desabilitado por padrão para performance
+            use_entity_aware = True  # ✅ Re-habilitado com binary search para eficiência
             if use_entity_aware and hasattr(document, 'meta') and document.meta:
                 entity_spans = document.meta.get("entity_spans", [])
                 if entity_spans:
-                    msg.info(f"[ENTITY-AWARE] Usando {len(entity_spans)} entidades pré-extraídas para chunking entity-aware")
+                    # Ordena por start para binary search
+                    entity_spans = sorted(entity_spans, key=lambda e: e["start"])
+                    msg.info(f"[ENTITY-AWARE] ✅ Usando {len(entity_spans)} entidades pré-extraídas (otimizado com binary search)")
             
             # Detecta seções
             sections = detect_sections(text)
@@ -199,11 +201,14 @@ class SectionAwareChunker(Chunker):
                     # Seção grande: divide respeitando parágrafos E entidades
                     paragraphs = section_text.split('\n\n')
                     
-                    # Filtra entidades que estão nesta seção
-                    section_entities = [
-                        e for e in entity_spans
-                        if section["start"] <= e["start"] < section["end"]
-                    ] if entity_spans else []
+                    # Filtra entidades que estão nesta seção usando binary search (O(log n))
+                    if entity_spans:
+                        # Binary search para encontrar entidades nesta seção
+                        start_idx = bisect.bisect_left(entity_spans, section["start"], key=lambda e: e["start"])
+                        end_idx = bisect.bisect_right(entity_spans, section["end"], key=lambda e: e["start"])
+                        section_entities = entity_spans[start_idx:end_idx]
+                    else:
+                        section_entities = []
                     
                     current_chunk_parts = []
                     current_chunk_words = 0
@@ -218,11 +223,11 @@ class SectionAwareChunker(Chunker):
                         para_start = char_offset
                         para_end = char_offset + len(para)
                         
-                        # Verifica se este parágrafo contém entidades que não devem ser cortadas
-                        para_entities = [
-                            e for e in section_entities
-                            if para_start <= e["start"] < para_end or para_start <= e["end"] < para_end
-                        ]
+                        # Filtra entidades que sobrepõem este parágrafo usando binary search (O(log n))
+                        # Em vez de verificar cada entidade (O(n)), usa binary search para encontrar range
+                        para_start_idx = bisect.bisect_left(section_entities, para_start, key=lambda e: e["end"])
+                        para_end_idx = bisect.bisect_right(section_entities, para_end, key=lambda e: e["start"])
+                        para_entities = section_entities[para_start_idx:para_end_idx]
                         
                         # Se próximo chunk ultrapassaria tamanho E tem entidades no meio, tenta evitar cortar
                         would_exceed = current_chunk_words + para_words > chunk_size

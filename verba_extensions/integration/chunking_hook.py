@@ -49,18 +49,25 @@ def extract_entities_pre_chunking(document) -> Dict:
         # Extrai spans (posições) para o chunker usar
         nlp_model = get_nlp()
         entity_spans = []
+        seen_spans = set()  # Deduplica entidades por posição para evitar O(n) complexity
         
         if nlp_model:
             doc = nlp_model(text)
             for ent in doc.ents:
-                if ent.label_ in ("ORG", "PERSON", "GPE", "LOC"):
-                    entity_spans.append({
-                        "text": ent.text,
-                        "start": ent.start_char,
-                        "end": ent.end_char,
-                        "label": ent.label_,
-                        "entity_id": None  # Será preenchido depois se normalizado
-                    })
+                # Filtra por tipo relevante (ORG, PERSON são mais críticos para entity-aware)
+                # Excluir GPE/LOC para reduzir de 370 para ~50 entidades
+                if ent.label_ in ("ORG", "PERSON"):
+                    # Deduplica por span de caracteres (evita múltiplas ocorrências da mesma entidade)
+                    span_key = (ent.start_char, ent.end_char, ent.text.lower())
+                    if span_key not in seen_spans:
+                        seen_spans.add(span_key)
+                        entity_spans.append({
+                            "text": ent.text,
+                            "start": ent.start_char,
+                            "end": ent.end_char,
+                            "label": ent.label_,
+                            "entity_id": None  # Será preenchido depois se normalizado
+                        })
         
         # Mapeia spans para entity_ids quando possível
         for span in entity_spans:
