@@ -78,6 +78,26 @@ export TIKA_SERVER_URL="http://192.168.1.197:9998"
 
 **Padrão:** `http://localhost:9998`
 
+### **Configuração no Railway**
+
+No Railway → **Verba** → Settings → Variables:
+
+```bash
+TIKA_SERVER_URL=http://192.168.1.197:9998
+```
+
+**OU** se Tika estiver em outro serviço Railway:
+
+```bash
+# Mesmo projeto (acesso interno)
+TIKA_SERVER_URL=http://tika.railway.internal:9998
+
+# Projeto separado (URL pública)
+TIKA_SERVER_URL=https://tika-production-xxxx.up.railway.app
+```
+
+**Ver guia completo:** `GUIA_TIKA_RAILWAY.md`
+
 ### **Configuração no Dockerfile**
 
 ```dockerfile

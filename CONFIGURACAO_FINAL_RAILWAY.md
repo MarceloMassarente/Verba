@@ -25,6 +25,9 @@ ALLOWED_ORIGINS=https://verba-production-c347.up.railway.app
 # Extensões
 ENABLE_EXTENSIONS=true
 ENABLE_ETL_A2=true
+
+# Tika (opcional mas recomendado para PPTX, DOC, RTF, etc.)
+TIKA_SERVER_URL=http://192.168.1.197:9998
 ```
 
 ---
