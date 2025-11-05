@@ -193,8 +193,39 @@ class EntityAwareRetriever(Retriever):
                 client=client,
                 collection_name=collection_name,
                 use_cache=True,
-                validate=False  # Não precisa validar aqui, já está executando
+                validate=False,  # Não precisa validar aqui, já está executando
+                auto_detect_aggregation=True  # NOVO: detecta agregações automaticamente
             )
+            
+            # NOVO: Verificar se é agregação e executar se for
+            if strategy.get("is_aggregation", False):
+                msg.info("  Query builder: detectou agregação, executando via GraphQL")
+                
+                aggregation_info = strategy.get("aggregation_info")
+                if aggregation_info and "error" not in aggregation_info:
+                    try:
+                        import json
+                        
+                        # Executar agregação
+                        raw_results = await aggregation_info["execute"]()
+                        
+                        # Parsear resultados
+                        parsed_results = aggregation_info["parse"](raw_results)
+                        
+                        # Formatar resultados para retorno
+                        # Retornar lista vazia de chunks e contexto com resultados de agregação
+                        context = f"Resultados de agregação:\n{json.dumps(parsed_results, indent=2, ensure_ascii=False)}"
+                        
+                        msg.good(f"  Agregação executada com sucesso: {aggregation_info.get('aggregation_type', 'unknown')}")
+                        
+                        # Retornar chunks vazios e contexto com resultados
+                        return ([], context)
+                        
+                    except Exception as e:
+                        msg.warn(f"  Erro ao executar agregação: {str(e)}")
+                        # Continua com query normal como fallback
+                        import traceback
+                        traceback.print_exc()
             
             # Usar semantic_query para busca vetorial
             rewritten_query = strategy.get("semantic_query", query)

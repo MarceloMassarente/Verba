@@ -158,7 +158,8 @@ class QueryBuilderPlugin:
         client,
         collection_name: str,
         use_cache: bool = True,
-        validate: bool = False
+        validate: bool = False,
+        auto_detect_aggregation: bool = True
     ) -> Dict[str, Any]:
         """
         Constrói query complexa conhecendo o schema.
@@ -169,28 +170,47 @@ class QueryBuilderPlugin:
             collection_name: Nome da collection
             use_cache: Se deve usar cache
             validate: Se deve retornar query para validação (não executar ainda)
+            auto_detect_aggregation: Se deve detectar automaticamente queries de agregação
             
         Returns:
             Dict com query estruturada:
             {
                 "semantic_query": "query expandida",
                 "keyword_query": "query para BM25",
-                "intent": "search|comparison|description",
-                "filters": {
-                    "entities": ["Q312"],  # Entity IDs extraídos
-                    "entity_property": "entities_local_ids",  # Propriedade a usar
-                    "date_range": {"start": "2024-01-01", "end": "2024-12-31"},
-                    "language": "pt",
-                    "labels": [],
-                    "section_title": ""
-                },
+                "intent": "search|comparison|description|aggregation",
+                "filters": {...},
                 "alpha": 0.6,
                 "explanation": "Explicação da query gerada",
-                "requires_validation": True/False
+                "requires_validation": True/False,
+                "is_aggregation": True/False,  # NOVO: indica se é agregação
+                "aggregation_info": {...}  # NOVO: info de agregação se aplicável
             }
         """
         if not user_query or not user_query.strip():
             return self._fallback_response(user_query)
+        
+        # NOVO: Detectar se precisa de agregação
+        if auto_detect_aggregation and self._needs_aggregation(user_query):
+            msg.info(f"  Query builder: detectou necessidade de agregação")
+            try:
+                # Tentar construir query de agregação
+                aggregation_info = await self._build_aggregation_from_query(
+                    user_query, client, collection_name
+                )
+                if aggregation_info and "error" not in aggregation_info:
+                    return {
+                        "semantic_query": user_query,
+                        "keyword_query": user_query,
+                        "intent": "aggregation",
+                        "filters": {},
+                        "alpha": 0.6,
+                        "explanation": f"Query de agregação detectada: {aggregation_info.get('aggregation_type', 'unknown')}",
+                        "requires_validation": validate,
+                        "is_aggregation": True,
+                        "aggregation_info": aggregation_info
+                    }
+            except Exception as e:
+                msg.warn(f"  Query builder: erro ao construir agregação ({str(e)}), continuando com query normal")
         
         # Verificar cache
         if use_cache:
@@ -217,6 +237,10 @@ class QueryBuilderPlugin:
             if not self._validate_strategy(strategy):
                 msg.warn("  Query builder: resposta inválida do LLM, usando fallback")
                 return self._fallback_response(user_query)
+            
+            # Adicionar flag de agregação
+            strategy["is_aggregation"] = False
+            strategy["aggregation_info"] = None
             
             # Cache
             if use_cache:
@@ -534,4 +558,69 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
         
         query_lower = user_query.lower()
         return any(keyword in query_lower for keyword in aggregation_keywords)
+    
+    async def _build_aggregation_from_query(
+        self,
+        user_query: str,
+        client,
+        collection_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Tenta construir query de agregação a partir da query do usuário.
+        
+        Args:
+            user_query: Query do usuário
+            client: Cliente Weaviate
+            collection_name: Nome da collection
+            
+        Returns:
+            Dict com informações de agregação ou None se não conseguir determinar
+        """
+        try:
+            query_lower = user_query.lower()
+            
+            # Detectar tipo de agregação
+            aggregation_type = "entity_stats"  # Default
+            
+            # Detectar se é estatísticas por documento
+            if any(word in query_lower for word in ["por documento", "por doc", "documentos", "docs"]):
+                aggregation_type = "document_stats"
+            
+            # Extrair filtros básicos (se houver)
+            filters = None
+            group_by = None
+            
+            # Tentar extrair entidades mencionadas (se houver)
+            # Isso pode ser melhorado com NER/LLM no futuro
+            if any(word in query_lower for word in ["apple", "microsoft", "google", "meta"]):
+                # Por enquanto, não tentamos extrair entity IDs automaticamente
+                # Seria necessário NER + Gazetteer
+                pass
+            
+            # Detectar groupBy
+            if "agrupar" in query_lower or "group by" in query_lower:
+                if "por documento" in query_lower or "por doc" in query_lower:
+                    group_by = ["doc_uuid"]
+                elif "por entidade" in query_lower:
+                    group_by = ["entities_local_ids"]
+                elif "por data" in query_lower or "por date" in query_lower:
+                    group_by = ["chunk_date"]
+            
+            # Construir query de agregação
+            query_info = await self.build_aggregation_query(
+                aggregation_type=aggregation_type,
+                client=client,
+                collection_name=collection_name,
+                filters=filters,
+                group_by=group_by
+            )
+            
+            if "error" in query_info:
+                return None
+            
+            return query_info
+            
+        except Exception as e:
+            msg.warn(f"Erro ao construir agregação: {str(e)}")
+            return None
 

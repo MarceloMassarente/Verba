@@ -781,6 +781,109 @@ async def execute_validated_query(payload: QueryPayload):
         )
 
 
+@app.post("/api/query/aggregate")
+async def aggregate_query(payload: QueryPayload):
+    """
+    Executa query de agregação usando GraphQL Builder.
+    
+    Payload:
+    {
+        "query": "quantos chunks têm Apple vs Microsoft",
+        "RAG": {
+            "Embedder": {"selected": "SentenceTransformers"},
+            "Aggregation": {
+                "type": "entity_stats",  # entity_stats, document_stats, multi_collection, complex_filter
+                "filters": {"entities_local_ids": ["Q312"]},  # Opcional
+                "group_by": ["doc_uuid"],  # Opcional
+                "top_occurrences_limit": 10  # Opcional
+            }
+        },
+        "credentials": {...}
+    }
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        
+        # Obter collection name do embedder
+        embedder_name = payload.RAG.get("Embedder", {}).get("selected", "")
+        if not embedder_name:
+            return JSONResponse(
+                content={
+                    "error": "Embedder não especificado",
+                    "results": None
+                }
+            )
+        
+        # Normalizar nome da collection
+        from goldenverba.components.managers import WeaviateManager
+        weaviate_manager = WeaviateManager()
+        normalized = weaviate_manager._normalize_embedder_name(embedder_name)
+        collection_name = weaviate_manager.embedding_table.get(embedder_name, f"VERBA_Embedding_{normalized}")
+        
+        # Extrair parâmetros de agregação do payload
+        aggregation_config = payload.RAG.get("Aggregation", {})
+        aggregation_type = aggregation_config.get("type", "entity_stats")
+        filters = aggregation_config.get("filters")
+        group_by = aggregation_config.get("group_by")
+        top_occurrences_limit = aggregation_config.get("top_occurrences_limit", 10)
+        
+        # Usar QueryBuilder para construir query de agregação
+        try:
+            from verba_extensions.plugins.query_builder import QueryBuilderPlugin
+            builder = QueryBuilderPlugin()
+            
+            query_info = await builder.build_aggregation_query(
+                aggregation_type=aggregation_type,
+                client=client,
+                collection_name=collection_name,
+                filters=filters,
+                group_by=group_by,
+                top_occurrences_limit=top_occurrences_limit
+            )
+            
+            if "error" in query_info:
+                return JSONResponse(
+                    content={
+                        "error": query_info["error"],
+                        "results": None
+                    }
+                )
+            
+            # Executar query
+            raw_results = await query_info["execute"]()
+            
+            # Parsear resultados
+            parsed_results = query_info["parse"](raw_results)
+            
+            return JSONResponse(
+                content={
+                    "error": "",
+                    "query": query_info["query"],
+                    "results": parsed_results,
+                    "raw_results": raw_results  # Para debug
+                }
+            )
+            
+        except ImportError:
+            return JSONResponse(
+                content={
+                    "error": "QueryBuilder não disponível",
+                    "results": None
+                }
+            )
+        
+    except Exception as e:
+        msg.warn(f"Erro ao executar agregação: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            content={
+                "error": str(e),
+                "results": None
+            }
+        )
+
+
 ### DOCUMENT ENDPOINTS
 
 
