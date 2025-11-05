@@ -10,6 +10,12 @@ def get_verba_standard_properties():
     """
     Retorna lista de propriedades padrão do Verba (baseadas em chunk.to_json())
     
+    OTIMIZAÇÃO FASE 1: Adicionados indexFilterable aos fields críticos para performance
+    - doc_uuid: usado em hierarchical filtering
+    - labels: usado em document filtering
+    - chunk_lang: usado em bilingual filtering
+    - chunk_date: usado em temporal filtering
+    
     Returns:
         Lista de Property objects do Weaviate
     """
@@ -18,17 +24,37 @@ def get_verba_standard_properties():
     return [
         Property(name="chunk_id", data_type=DataType.NUMBER, description="ID único do chunk"),
         Property(name="end_i", data_type=DataType.NUMBER, description="Índice final no documento"),
-        Property(name="chunk_date", data_type=DataType.TEXT, description="Data do chunk (ISO format)"),
+        Property(
+            name="chunk_date", 
+            data_type=DataType.TEXT, 
+            description="Data do chunk (ISO format)",
+            index_filterable=True  # ⚡ Otimização: usado em temporal filtering
+        ),
         Property(name="meta", data_type=DataType.TEXT, description="Metadados serializados em JSON"),
         Property(name="content", data_type=DataType.TEXT, description="Conteúdo do chunk"),
         Property(name="uuid", data_type=DataType.TEXT, description="UUID do chunk"),
-        Property(name="doc_uuid", data_type=DataType.UUID, description="UUID do documento pai"),
+        Property(
+            name="doc_uuid", 
+            data_type=DataType.UUID, 
+            description="UUID do documento pai",
+            index_filterable=True  # ⚡ Otimização: crítico para hierarchical filtering
+        ),
         Property(name="content_without_overlap", data_type=DataType.TEXT, description="Conteúdo sem overlap"),
         Property(name="pca", data_type=DataType.NUMBER_ARRAY, description="Coordenadas PCA para visualização 3D"),
-        Property(name="labels", data_type=DataType.TEXT_ARRAY, description="Labels do chunk"),
+        Property(
+            name="labels", 
+            data_type=DataType.TEXT_ARRAY, 
+            description="Labels do chunk",
+            index_filterable=True  # ⚡ Otimização: usado em document filtering
+        ),
         Property(name="title", data_type=DataType.TEXT, description="Título do documento"),
         Property(name="start_i", data_type=DataType.NUMBER, description="Índice inicial no documento"),
-        Property(name="chunk_lang", data_type=DataType.TEXT, description="Código de idioma (pt, en, etc.)"),
+        Property(
+            name="chunk_lang", 
+            data_type=DataType.TEXT, 
+            description="Código de idioma (pt, en, etc.)",
+            index_filterable=True  # ⚡ Otimização: usado em bilingual filtering
+        ),
     ]
 
 
@@ -38,6 +64,10 @@ def get_etl_properties():
     
     NOTA: Essas propriedades são OPCIONAIS - chunks normais podem deixá-las vazias.
     Schema ETL-aware serve para AMBOS os casos (chunks normais e ETL-aware).
+    
+    OTIMIZAÇÃO FASE 1: Adicionados indexFilterable aos fields críticos
+    - entities_local_ids: usado em entity filtering e agregações
+    - primary_entity_id: usado em entity filtering
     
     Returns:
         Lista de Property objects do Weaviate
@@ -50,6 +80,7 @@ def get_etl_properties():
             name="entities_local_ids",
             data_type=DataType.TEXT_ARRAY,
             description="Entity IDs localizadas no chunk (ETL pré-chunking) - opcional",
+            index_filterable=True  # ⚡ Otimização: crítico para entity filtering e agregações
         ),
         
         # ETL pós-chunking
@@ -72,6 +103,7 @@ def get_etl_properties():
             name="primary_entity_id",
             data_type=DataType.TEXT,
             description="Entity ID primária do chunk - opcional",
+            index_filterable=True  # ⚡ Otimização: usado em entity filtering
         ),
         Property(
             name="entity_focus_score",

@@ -39,16 +39,23 @@ class GraphQLBuilder:
         collection_name: str,
         filters: Optional[Dict[str, Any]] = None,
         group_by: Optional[List[str]] = None,
-        top_occurrences_limit: int = 10
+        top_occurrences_limit: int = 10,
+        entity_source: str = "local"
     ) -> str:
         """
         Constrói query GraphQL para agregação de entidades.
+        
+        OTIMIZAÇÃO FASE 2: Parametrizado entity_source para remover redundância
+        - entity_source="local": apenas entities_local_ids (pré-chunking ETL)
+        - entity_source="section": apenas section_entity_ids (pós-chunking ETL)
+        - entity_source="both": ambas (útil para análise completa)
         
         Args:
             collection_name: Nome da collection
             filters: Filtros opcionais (ex: {"entities_local_ids": ["Q312"]})
             group_by: Campos para agrupar (ex: ["doc_uuid", "chunk_date"])
             top_occurrences_limit: Limite para top occurrences
+            entity_source: Qual fonte de entidades usar ("local", "section", "both")
             
         Returns:
             Query GraphQL como string
@@ -57,20 +64,36 @@ class GraphQLBuilder:
             query = builder.build_entity_aggregation(
                 collection_name="VERBA_Embedding_all_MiniLM_L6_v2",
                 filters={"entities_local_ids": ["Q312", "Q2283"]},
-                group_by=["doc_uuid"]
+                group_by=["doc_uuid"],
+                entity_source="local"  # Usar apenas pré-chunking
             )
         """
         where_clause = self._build_where_clause(filters) if filters else ""
         
-        # Agregação básica
-        if not group_by:
-            query = f"""
-{{
-  Aggregate {{
-    {collection_name}(
-      {where_clause}
-    ) {{
-      entities_local_ids {{
+        # Validar entity_source
+        if entity_source not in ("local", "section", "both"):
+            entity_source = "local"
+        
+        # Construir campos de entidades baseado em entity_source
+        entity_fields = ""
+        if entity_source == "local":
+            entity_fields = f"""entities_local_ids {{
+        count
+        topOccurrences(limit: {top_occurrences_limit}) {{
+          occurs
+          value
+        }}
+      }}"""
+        elif entity_source == "section":
+            entity_fields = f"""section_entity_ids {{
+        count
+        topOccurrences(limit: {top_occurrences_limit}) {{
+          occurs
+          value
+        }}
+      }}"""
+        else:  # "both"
+            entity_fields = f"""entities_local_ids {{
         count
         topOccurrences(limit: {top_occurrences_limit}) {{
           occurs
@@ -83,7 +106,17 @@ class GraphQLBuilder:
           occurs
           value
         }}
-      }}
+      }}"""
+        
+        # Agregação básica
+        if not group_by:
+            query = f"""
+{{
+  Aggregate {{
+    {collection_name}(
+      {where_clause}
+    ) {{
+      {entity_fields}
       chunk_date {{
         count
         date {{
@@ -117,13 +150,7 @@ class GraphQLBuilder:
         groups {{
           count
           {group_by_fields}
-          entities_local_ids {{
-            count
-            topOccurrences(limit: {top_occurrences_limit}) {{
-              occurs
-              value
-            }}
-          }}
+          {entity_fields}
         }}
       }}
     }}
@@ -467,6 +494,11 @@ class GraphQLBuilder:
         """
         Parseia resultados de agregação GraphQL para formato mais útil.
         
+        OTIMIZAÇÃO FASE 1: Auto-detecta tipo de query e aplica parsing específico
+        - Entity frequency → chamada parse_entity_frequency()
+        - Document stats → chamada parse_document_stats()
+        - Genérico → retorna estrutura simples
+        
         Args:
             results: Resultado da query GraphQL
             
@@ -484,23 +516,275 @@ class GraphQLBuilder:
             collection_name = list(aggregate.keys())[0]
             collection_data = aggregate[collection_name]
             
-            # Verificar se é groupedBy ou agregação simples
+            # OTIMIZAÇÃO FASE 1: Auto-detectar tipo de query e aplicar parsing específico
             if "groupedBy" in collection_data:
-                # Agregação com groupBy
                 groups = collection_data["groupedBy"]["groups"]
+                
+                # Detectar se é entity frequency (tem entities_local_ids nos groups)
+                if groups and "entities_local_ids" in groups[0]:
+                    return self.parse_entity_frequency(results)
+                
+                # Detectar se é document stats (agrupado por doc_uuid)
+                group_by = collection_data.get("groupedBy", {}).get("path", [])
+                if group_by and group_by[0] == "doc_uuid":
+                    return self.parse_document_stats(results)
+                
+                # Genérico: agregação com groupBy
                 return {
                     "type": "grouped",
                     "groups": groups,
-                    "total_groups": len(groups)
+                    "total_groups": len(groups),
+                    "statistics": {"type": "grouped"}
                 }
             else:
                 # Agregação simples
                 return {
                     "type": "simple",
-                    "data": collection_data
+                    "data": collection_data,
+                    "statistics": {"type": "simple"}
                 }
                 
         except Exception as e:
             msg.warn(f"Erro ao parsear resultados: {str(e)}")
             return {"error": str(e), "raw_results": results}
+    
+    def parse_entity_frequency(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        OTIMIZAÇÃO FASE 1: Parser otimizado para entity frequency queries.
+        
+        Transforma estrutura aninhada do GraphQL em formato plano e acessível.
+        
+        Args:
+            results: Resultado GraphQL com entities_local_ids
+            
+        Returns:
+            {
+                "type": "entity_frequency",
+                "entities": [
+                    {"id": "Q312", "count": 60, "percentage": 0.58},
+                    {"id": "Q2283", "count": 40, "percentage": 0.39}
+                ],
+                "total": 103,
+                "unique_entities": 2
+            }
+        """
+        try:
+            aggregate = results.get("data", {}).get("Aggregate", {})
+            collection_name = list(aggregate.keys())[0]
+            collection_data = aggregate[collection_name]
+            
+            # Extrair dados planos
+            entities = []
+            total_count = 0
+            
+            # Se é groupedBy, pegar primeiro group (ou agregar todos)
+            if "groupedBy" in collection_data:
+                groups = collection_data["groupedBy"]["groups"]
+                if groups and "entities_local_ids" in groups[0]:
+                    entity_data = groups[0]["entities_local_ids"]
+                else:
+                    return {"error": "Formato inesperado para entity frequency"}
+            else:
+                # Agregação simples
+                entity_data = collection_data.get("entities_local_ids", {})
+            
+            # Processar topOccurrences
+            if "topOccurrences" in entity_data:
+                for occ in entity_data["topOccurrences"]:
+                    count = occ.get("occurs", 0)
+                    entity_id = occ.get("value", "unknown")
+                    total_count += count
+                    entities.append({
+                        "id": entity_id,
+                        "count": count
+                    })
+            
+            # Calcular percentages
+            for entity in entities:
+                entity["percentage"] = round(entity["count"] / total_count, 4) if total_count > 0 else 0.0
+            
+            # Ordenar por frequência (descendente)
+            entities.sort(key=lambda x: x["count"], reverse=True)
+            
+            return {
+                "type": "entity_frequency",
+                "entities": entities,
+                "total": total_count,
+                "unique_entities": len(entities),
+                "statistics": {
+                    "top_entity": entities[0] if entities else None,
+                    "concentration": round(entities[0]["count"] / total_count, 4) if entities and total_count > 0 else 0.0
+                }
+            }
+            
+        except Exception as e:
+            msg.warn(f"Erro ao parsear entity frequency: {str(e)}")
+            return {"error": str(e), "type": "entity_frequency"}
+    
+    def parse_document_stats(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        OTIMIZAÇÃO FASE 1: Parser otimizado para document statistics queries.
+        
+        Transforma resultados groupedBy em estatísticas por documento.
+        
+        Args:
+            results: Resultado GraphQL agrupado por doc_uuid
+            
+        Returns:
+            {
+                "type": "document_stats",
+                "documents": [
+                    {
+                        "doc_uuid": "...",
+                        "chunk_count": 45,
+                        "entity_count": 120,
+                        "top_entities": [...],
+                        "date_range": {"min": "...", "max": "..."}
+                    }
+                ],
+                "total_documents": 3,
+                "statistics": {...}
+            }
+        """
+        try:
+            aggregate = results.get("data", {}).get("Aggregate", {})
+            collection_name = list(aggregate.keys())[0]
+            collection_data = aggregate[collection_name]
+            
+            documents = []
+            total_chunks = 0
+            
+            if "groupedBy" in collection_data:
+                groups = collection_data["groupedBy"]["groups"]
+                
+                for group in groups:
+                    # Extrair contagem de chunks deste documento
+                    chunk_count = group.get("count", 0)
+                    total_chunks += chunk_count
+                    
+                    # Extrair entidades
+                    entity_data = group.get("entities_local_ids", {})
+                    entity_count = entity_data.get("count", 0)
+                    top_entities = []
+                    
+                    if "topOccurrences" in entity_data:
+                        top_entities = [
+                            {"id": occ.get("value"), "count": occ.get("occurs")}
+                            for occ in entity_data["topOccurrences"][:5]  # Top 5
+                        ]
+                    
+                    # Extrair date range
+                    date_range = {"min": None, "max": None}
+                    if "chunk_date" in group:
+                        date_data = group["chunk_date"].get("date", {})
+                        date_range = {
+                            "min": date_data.get("minimum"),
+                            "max": date_data.get("maximum")
+                        }
+                    
+                    documents.append({
+                        "chunk_count": chunk_count,
+                        "entity_count": entity_count,
+                        "top_entities": top_entities,
+                        "date_range": date_range
+                    })
+            
+            return {
+                "type": "document_stats",
+                "documents": documents,
+                "total_documents": len(documents),
+                "total_chunks": total_chunks,
+                "statistics": {
+                    "avg_chunks_per_doc": round(total_chunks / len(documents), 2) if documents else 0,
+                    "avg_entities_per_doc": round(sum(d.get("entity_count", 0) for d in documents) / len(documents), 2) if documents else 0
+                }
+            }
+            
+        except Exception as e:
+            msg.warn(f"Erro ao parsear document stats: {str(e)}")
+            return {"error": str(e), "type": "document_stats"}
+    
+    def aggregate_entity_frequencies(
+        self,
+        entities_local: Optional[Dict[str, int]] = None,
+        entities_section: Optional[Dict[str, int]] = None,
+        weight_local: float = 1.0,
+        weight_section: float = 0.5
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        OTIMIZAÇÃO FASE 2: Agregar frequências de entidades de múltiplas fontes.
+        
+        Combina entities_local_ids e section_entity_ids com pesos para dar
+        uma visão única e unificada das entidades.
+        
+        Args:
+            entities_local: Dict {entity_id: count} de entities_local_ids
+            entities_section: Dict {entity_id: count} de section_entity_ids
+            weight_local: Peso para local entities (default: 1.0)
+            weight_section: Peso para section entities (default: 0.5)
+            
+        Returns:
+            {
+                "Q312": {
+                    "local": 60,
+                    "section": 5,
+                    "total": 62.5,
+                    "percentage": 0.61,
+                    "source_primary": "local"
+                },
+                ...
+            }
+            
+        Exemplo:
+            entities_local = {"Q312": 60, "Q2283": 40}
+            entities_section = {"Q312": 5}
+            
+            aggregated = builder.aggregate_entity_frequencies(
+                entities_local=entities_local,
+                entities_section=entities_section
+            )
+            # Retorna: {"Q312": {local: 60, section: 5, total: 62.5, ...}}
+        """
+        aggregated = {}
+        
+        # Processar entidades locais
+        if entities_local:
+            for entity_id, count in entities_local.items():
+                if entity_id not in aggregated:
+                    aggregated[entity_id] = {"local": 0, "section": 0}
+                aggregated[entity_id]["local"] = count * weight_local
+        
+        # Processar entidades de seção
+        if entities_section:
+            for entity_id, count in entities_section.items():
+                if entity_id not in aggregated:
+                    aggregated[entity_id] = {"local": 0, "section": 0}
+                aggregated[entity_id]["section"] = count * weight_section
+        
+        # Calcular totais e percentages
+        total_sum = sum(
+            e["local"] + e["section"] 
+            for e in aggregated.values()
+        )
+        
+        for entity_id, data in aggregated.items():
+            data["total"] = data["local"] + data["section"]
+            data["percentage"] = round(data["total"] / total_sum, 4) if total_sum > 0 else 0.0
+            
+            # Definir fonte primária
+            if data["local"] > 0 and data["local"] >= data["section"]:
+                data["source_primary"] = "local"
+            elif data["section"] > 0:
+                data["source_primary"] = "section"
+            else:
+                data["source_primary"] = "unknown"
+        
+        # Ordenar por total (descendente)
+        sorted_entities = dict(sorted(
+            aggregated.items(),
+            key=lambda x: x[1]["total"],
+            reverse=True
+        ))
+        
+        return sorted_entities
 
