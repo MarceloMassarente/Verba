@@ -4,11 +4,14 @@
 
 | Tipo de Arquivo | Ingestor Recomendado | Motivo |
 |----------------|---------------------|--------|
-| **PDF único** | `Default` ou `Upstage Parser` | Extrai texto de PDFs automaticamente |
-| **PDF com vários artigos** | `Default` ou `Upstage Parser` | Mesmo processo |
+| **PDF único** | `Universal A2` ✅ ou `Default` | ETL automático + Tika para melhor extração |
+| **PDF com vários artigos** | `Universal A2` ✅ ou `Default` | ETL automático + Tika para melhor extração |
+| **PPTX, PPT** | `Universal A2` ✅ ou `Tika Reader` | Tika é necessário (não suportado nativamente) |
+| **DOC, RTF, ODT** | `Universal A2` ✅ ou `Tika Reader` | Tika é necessário (não suportado nativamente) |
+| **DOCX** | `Universal A2` ✅ ou `Default` | ETL automático + Tika como fallback |
 | **URLs** | `A2 URL Ingestor` ✅ | Extrai de URLs e aplica ETL |
 | **JSON com conteúdo já extraído** | `A2 Results Ingestor` ✅ | Processa results com ETL |
-| **JSON genérico** | `Default` | Leitura básica |
+| **JSON genérico** | `Universal A2` ✅ ou `Default` | Leitura básica |
 
 ---
 

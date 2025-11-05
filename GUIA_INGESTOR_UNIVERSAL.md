@@ -3,9 +3,10 @@
 ## 🎯 O que é?
 
 Um **Reader único e universal** que:
-- ✅ Aceita **qualquer formato** (PDF, DOCX, TXT, JSON, CSV, Excel, HTML)
+- ✅ Aceita **qualquer formato** (PDF, DOCX, TXT, JSON, CSV, Excel, HTML, PPTX, ODT, RTF, etc.)
 - ✅ Aplica **ETL A2 automaticamente** em todos os documentos
 - ✅ Usa **SpaCy para extrair entidades por chunk**
+- ✅ **Integração Tika** - usa Apache Tika quando disponível para melhor extração e metadados
 - ✅ Não precisa de flags ou conversões
 
 ---
@@ -22,16 +23,21 @@ Na UI do Verba → **Import Data** → Escolha:
 
 Faça upload de **qualquer arquivo**:
 - ✅ PDF (um ou múltiplos artigos)
-- ✅ DOCX
+- ✅ DOCX, DOC (Word antigo)
+- ✅ PPTX, PPT (PowerPoint) - **funciona com Tika!**
 - ✅ TXT
 - ✅ JSON
 - ✅ CSV
 - ✅ Excel
+- ✅ ODT, RTF, EPUB (com Tika)
 
 ### Passo 3: Configurar (Opcional)
 
 - **Enable ETL**: Sempre ativo (recomendado manter)
 - **Language Hint**: Idioma para NER (padrão: "pt")
+- **Use Tika When Available**: Usar Tika quando disponível (padrão: True)
+  - Se True: usa Tika para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
+  - Se False: usa apenas BasicReader (que ainda tem fallback Tika se necessário)
 
 ### Passo 4: Importar
 
@@ -70,7 +76,8 @@ Para **cada chunk** criado, o ETL:
 
 | Ingestor | Formatos | ETL Automático | Quando Usar |
 |----------|----------|----------------|-------------|
-| **Universal A2** ✅ | Todos (PDF, DOCX, TXT, etc.) | ✅ Sim | **Sempre que quiser ETL** |
+| **Universal A2** ✅ | Todos (PDF, DOCX, PPTX, TXT, etc.) | ✅ Sim | **Sempre que quiser ETL** |
+| **Tika Reader** | 1000+ formatos | ✅ Sim (com metadados) | Para formatos exóticos ou quando precisa de metadados |
 | Default | Todos | ❌ Não | Quando não precisa ETL |
 | A2 URL Ingestor | URLs apenas | ✅ Sim | Para URLs web |
 | A2 Results Ingestor | JSON específico | ✅ Sim | Para conteúdo pré-extraído |
@@ -140,21 +147,28 @@ SPACY_MODEL=pt_core_news_sm
 ```
 1. Upload de arquivo
    ↓
-2. Universal A2 Reader carrega via Default Reader
+2. Universal A2 Reader:
+   - Se formato benéfico (PPTX, DOC, etc.) + Tika disponível → usa Tika diretamente
+   - Se não → usa BasicReader (que tem fallback Tika se necessário)
    ↓
-3. Documento processado (chunking normal)
+3. Extração de texto + metadados (se usar Tika):
+   - Texto extraído
+   - Metadados (título, autor, data, etc.) adicionados a doc.meta
    ↓
-4. Import no Weaviate
+4. Documento processado (chunking normal)
    ↓
-5. Hook detecta documentos com enable_etl=True
+5. Import no Weaviate
    ↓
-6. ETL executa em background:
+6. Hook detecta documentos com enable_etl=True
+   ↓
+7. ETL executa em background:
    - Extrai entidades por chunk (SpaCy)
    - Normaliza via Gazetteer
    - Detecta seções
+   - Usa metadados do Tika se disponíveis
    - Atualiza metadados no Weaviate
    ↓
-7. ✅ Documentos no Weaviate com metadados de entidades!
+8. ✅ Documentos no Weaviate com metadados de entidades + metadados do Tika!
 ```
 
 ---
@@ -195,6 +209,10 @@ O Universal A2 Reader já está incluído nas extensões. Certifique-se de que:
 1. ✅ Extensões estão carregadas (ver logs do Railway)
 2. ✅ SpaCy está instalado: `pip install spacy`
 3. ✅ Modelo SpaCy está instalado: `python -m spacy download pt_core_news_sm`
+4. ✅ **Tika (opcional mas recomendado):**
+   - Servidor Tika rodando em `TIKA_SERVER_URL` (padrão: `http://localhost:9998`)
+   - Ou configurar via variável de ambiente: `export TIKA_SERVER_URL="http://192.168.1.197:9998"`
+   - Se não disponível, Universal Reader funciona normalmente com BasicReader
 
 ---
 

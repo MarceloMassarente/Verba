@@ -284,6 +284,42 @@ print('✅ SectionAwareChunker OK')
 
 ---
 
+### **PASSO 7: Verificar Tika Integration** ⭐ NOVO
+
+Após copiar arquivos, verificar se integração Tika está funcionando:
+
+```bash
+# 1. Verificar se patch Tika fallback está sendo aplicado
+python -c "
+from verba_extensions.integration.tika_fallback_patch import patch_basic_reader_with_tika_fallback
+from goldenverba.components.reader.BasicReader import BasicReader
+# Verificar se métodos ainda existem
+if hasattr(BasicReader, 'load') and hasattr(BasicReader, 'load_pdf_file'):
+    print('✅ BasicReader métodos OK - patch Tika pode ser aplicado')
+else:
+    print('⚠️ BasicReader métodos não encontrados - verificar estrutura')
+"
+
+# 2. Verificar se Universal Reader tem integração Tika
+python -c "
+from verba_extensions.plugins.universal_reader import UniversalA2Reader
+reader = UniversalA2Reader()
+if hasattr(reader, '_check_tika_available') and hasattr(reader, '_extract_with_tika'):
+    print('✅ Universal Reader tem integração Tika')
+else:
+    print('⚠️ Universal Reader não tem métodos Tika - verificar código')
+"
+
+# 3. Testar com arquivo PPTX (se disponível)
+# O Universal Reader deve usar Tika automaticamente para PPTX
+```
+
+**Se algum verificar falhar, ver:** `INTEGRACAO_TIKA.md`
+
+**Nota:** Tika é opcional. Se não disponível, sistema continua funcionando normalmente com métodos nativos.
+
+---
+
 ### **PASSO 5: Verificar Dependências**
 
 ```bash
@@ -385,6 +421,12 @@ Após aplicar todos os patches:
 - [ ] Mudança 2 aplicada (CORS)
 - [ ] Mudança 3 aplicada (SentenceTransformers)
 - [ ] Mudança 4 aplicada (connect_to_custom)
+- [ ] ⭐ PASSO 7: Tika Integration verificada ⭐ NOVO
+  - [ ] `tika_fallback_patch.py` presente e funcionando
+  - [ ] `tika_reader.py` plugin carregado
+  - [ ] `universal_reader.py` tem integração Tika
+  - [ ] `TIKA_SERVER_URL` configurado (se usar Tika)
+  - [ ] Teste com PPTX funciona
 - [ ] Arquivos novos copiados
 - [ ] Patches de ETL verificados (PASSO 4.5) ⭐ NOVO
 - [ ] Dependências atualizadas
