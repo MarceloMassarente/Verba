@@ -52,6 +52,13 @@ def initialize_extensions():
         except Exception as e:
             msg.warn(f"Hook de integração ETL não aplicado: {str(e)}")
         
+        # Aplica patch de schema ETL (adiciona propriedades automaticamente)
+        try:
+            from verba_extensions.integration.schema_updater import patch_weaviate_manager_verify_collection
+            patch_weaviate_manager_verify_collection()
+        except Exception as e:
+            msg.warn(f"Patch de schema ETL não aplicado: {str(e)}")
+        
         # Executa registradores de hooks dos plugins
         for plugin_name, plugin_data in plugin_manager.plugins.items():
             if hasattr(plugin_data['module'], 'register_hooks'):

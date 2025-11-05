@@ -101,6 +101,11 @@ Este documento serve como índice centralizado de toda a documentação do proje
   - Guia de reaplicação após upgrade
   - Troubleshooting de patches
 
+- **[COMO_ETL_FUNCIONA_POR_CHUNKER.md](COMO_ETL_FUNCIONA_POR_CHUNKER.md)** ⭐ NOVO
+  - **Como o ETL funciona baseado no chunker escolhido**
+  - Diferenças entre chunkers
+  - Qual chunker aproveita melhor o ETL pré-chunking
+
 ### 🗄️ **Weaviate e Conexão**
 - **[PATCHES_VERBA_WEAVIATE_V4.md](PATCHES_VERBA_WEAVIATE_V4.md)** ⭐ ESSENCIAL
   - Patches para Weaviate v4
@@ -297,6 +302,7 @@ Este documento serve como índice centralizado de toda a documentação do proje
 - `ANALISE_ETL_ENTITIES.md`
 - `ANALISE_ETL_ANTES_CHUNKING.md` ⭐ NOVO
 - `verba_extensions/patches/README_PATCHES.md` ⭐ NOVO
+- `COMO_ETL_FUNCIONA_POR_CHUNKER.md` ⭐ NOVO
 
 ## 📖 Guias de Leitura
 

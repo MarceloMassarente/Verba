@@ -165,7 +165,50 @@ class BasicReader(Reader):
             raise ImportError("pypdf is not installed. Cannot process PDF files.")
         pdf_bytes = io.BytesIO(decoded_bytes)
         reader = PdfReader(pdf_bytes)
-        return "\n\n".join(page.extract_text() for page in reader.pages)
+        
+        # Tenta extrair com layout preservation primeiro (melhor para multi-coluna)
+        text_parts = []
+        for page in reader.pages:
+            try:
+                # Tenta extrair com layout_strip (preserva ordem espacial)
+                text = page.extract_text(layout_mode=True)
+                if not text or len(text.strip()) == 0:
+                    # Fallback para método padrão
+                    text = page.extract_text()
+                
+                # Remove linhas duplicadas consecutivas (causa comum de fragmentação)
+                lines = text.split('\n')
+                cleaned_lines = []
+                prev_line = None
+                for line in lines:
+                    line_stripped = line.strip()
+                    # Ignora linhas vazias ou muito curtas que são fragmentos
+                    if line_stripped and len(line_stripped) > 3:
+                        # Não adiciona se for fragmento da linha anterior
+                        if prev_line and line_stripped in prev_line:
+                            continue
+                        # Não adiciona se linha anterior for fragmento desta
+                        if prev_line and prev_line in line_stripped:
+                            cleaned_lines.pop() if cleaned_lines else None
+                        cleaned_lines.append(line)
+                        prev_line = line_stripped
+                    elif line_stripped:  # Linhas não vazias mas curtas
+                        cleaned_lines.append(line)
+                
+                cleaned_text = '\n'.join(cleaned_lines)
+                if cleaned_text.strip():
+                    text_parts.append(cleaned_text)
+            except Exception as e:
+                # Fallback para método padrão se layout_mode falhar
+                try:
+                    text = page.extract_text()
+                    if text.strip():
+                        text_parts.append(text)
+                except Exception:
+                    msg.warn(f"Failed to extract text from page: {str(e)}")
+                    continue
+        
+        return "\n\n".join(text_parts)
 
     async def load_docx_file(self, decoded_bytes: bytes) -> str:
         """Load and extract text from a DOCX file."""

@@ -136,9 +136,9 @@ class VerbaManager:
                 reader_name = fileConfig.rag_config["Reader"].selected
             msg.info(f"[IMPORT] Loading file '{fileConfig.filename}' with reader '{reader_name}'")
             try:
-                documents = await self.reader_manager.load(
+            documents = await self.reader_manager.load(
                     reader_name, fileConfig, logger
-                )
+            )
                 msg.good(f"[IMPORT] Successfully loaded {len(documents)} document(s) from '{fileConfig.filename}'")
             except Exception as e:
                 import traceback
@@ -529,9 +529,9 @@ class VerbaManager:
             if set(a.keys()) != set(b.keys()):
                 msg.warn(
                     f"Config Validation: Component type mismatch. Expected: {set(a.keys())}, Got: {set(b.keys())}"
-                )
-                return False
-            
+                    )
+                    return False
+
             for component_key in a.keys():
                 a_component = a[component_key]["components"]
                 b_component = b[component_key]["components"]

@@ -73,7 +73,7 @@ class BatchManager:
                 payload.isLastChunk or 
                 payload.order == payload.total - 1
             )
-            
+
             if payload.fileID not in self.batches:
                 self.batches[payload.fileID] = {
                     "fileID": payload.fileID,
@@ -81,7 +81,7 @@ class BatchManager:
                     "chunks": {},
                 }
                 msg.info(f"[BATCH] Started collection for {payload.fileID[:50]}... ({payload.total} chunks)")
-            
+
             self.batches[payload.fileID]["chunks"][payload.order] = payload.chunk
             
             if should_log:

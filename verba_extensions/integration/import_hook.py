@@ -50,14 +50,40 @@ def patch_weaviate_manager():
                 # Fallback para v3 - usa estrutura de filtro v3
                 Filter = None
             
-            # Chama método original (retorna doc_uuid)
+            # Chama método original (NÃO retorna doc_uuid - método original não retorna)
+            # Precisamos buscar doc_uuid após o import
             doc_uuid = None
             try:
-                doc_uuid = await original_import(self, client, document, embedder)
+                await original_import(self, client, document, embedder)
+                # Método original não retorna doc_uuid, então buscamos pelo título
+                if Filter is not None:
+                    try:
+                        import asyncio
+                        # Tenta buscar doc_uuid com retry (pode levar um pouco para o Weaviate commit)
+                        document_collection = client.collections.get(self.document_collection_name)
+                        doc_uuid = None
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            if attempt > 0:
+                                await asyncio.sleep(0.2)  # Delay entre tentativas
+                            
+                            results = await document_collection.query.fetch_objects(
+                                filters=Filter.by_property("title").equal(document.title),
+                                limit=1
+                            )
+                            if results.objects:
+                                doc_uuid = str(results.objects[0].uuid)
+                                msg.info(f"[ETL-POST] ✅ doc_uuid obtido após import (tentativa {attempt + 1}): {doc_uuid[:50]}...")
+                                break
+                        
+                        if not doc_uuid:
+                            msg.warn(f"[ETL-POST] ⚠️ Documento '{document.title}' não encontrado após {max_retries} tentativas - ETL não será executado")
+                    except Exception as recovery_error:
+                        msg.warn(f"[ETL-POST] ⚠️ Erro ao buscar doc_uuid após import: {str(recovery_error)}")
             except Exception as import_error:
                 # Se falhar, tenta recuperar doc_uuid pela busca do documento
                 # (alguns chunks podem ter sido inseridos mesmo com erro)
-                msg.warn(f"Import teve erro, mas tentando executar ETL: {str(import_error)}")
+                msg.warn(f"[ETL-POST] Import teve erro, mas tentando recuperar doc_uuid: {str(import_error)}")
                 
                 # Verifica se o cliente está conectado antes de tentar recuperar
                 if Filter is not None:
@@ -74,7 +100,7 @@ def patch_weaviate_manager():
                             )
                             if results.objects:
                                 doc_uuid = str(results.objects[0].uuid)
-                                msg.info(f"Recuperado doc_uuid após erro: {doc_uuid}")
+                                msg.info(f"[ETL-POST] Recuperado doc_uuid após erro: {doc_uuid[:50]}...")
                     except Exception as recovery_error:
                         # Se o erro for de cliente fechado, não tenta recuperar
                         if "closed" in str(recovery_error).lower() or "not connected" in str(recovery_error).lower():
