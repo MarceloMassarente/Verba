@@ -423,4 +423,115 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
             "cache_ttl_seconds": self.cache_ttl,
             "schema_cached": self._schema_cache is not None
         }
+    
+    async def build_aggregation_query(
+        self,
+        aggregation_type: str,
+        client,
+        collection_name: str,
+        filters: Optional[Dict[str, Any]] = None,
+        group_by: Optional[List[str]] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Constrói query de agregação usando GraphQL Builder.
+        
+        Args:
+            aggregation_type: Tipo de agregação ("entity_stats", "document_stats", "custom")
+            client: Cliente Weaviate
+            collection_name: Nome da collection
+            filters: Filtros opcionais
+            group_by: Campos para agrupar
+            **kwargs: Parâmetros adicionais
+            
+        Returns:
+            Dict com query GraphQL e método para executar
+            
+        Exemplo:
+            query_info = await builder.build_aggregation_query(
+                aggregation_type="entity_stats",
+                client=client,
+                collection_name="VERBA_Embedding_all_MiniLM_L6_v2",
+                filters={"entities_local_ids": ["Q312"]}
+            )
+            
+            # Executar query
+            results = await query_info["execute"]()
+            stats = query_info["parse"](results)
+        """
+        try:
+            from verba_extensions.utils.graphql_builder import GraphQLBuilder
+            graphql_builder = GraphQLBuilder()
+        except ImportError:
+            msg.warn("GraphQLBuilder não disponível, usando fallback")
+            return {
+                "error": "GraphQLBuilder não disponível",
+                "query": None,
+                "execute": None,
+                "parse": None
+            }
+        
+        # Construir query baseada no tipo
+        if aggregation_type == "entity_stats":
+            query = graphql_builder.build_entity_aggregation(
+                collection_name=collection_name,
+                filters=filters,
+                group_by=group_by,
+                top_occurrences_limit=kwargs.get("top_occurrences_limit", 10)
+            )
+        elif aggregation_type == "document_stats":
+            query = graphql_builder.build_document_stats_query(
+                collection_name=collection_name,
+                filters=filters
+            )
+        elif aggregation_type == "multi_collection":
+            queries = kwargs.get("queries", [])
+            if not queries:
+                return {"error": "queries é obrigatório para multi_collection"}
+            query = graphql_builder.build_multi_collection_query(queries)
+        elif aggregation_type == "complex_filter":
+            filter_logic = kwargs.get("filter_logic")
+            if not filter_logic:
+                return {"error": "filter_logic é obrigatório para complex_filter"}
+            query = graphql_builder.build_complex_filter_query(
+                collection_name=collection_name,
+                filter_logic=filter_logic,
+                limit=kwargs.get("limit", 50),
+                fields=kwargs.get("fields")
+            )
+        else:
+            return {"error": f"Tipo de agregação desconhecido: {aggregation_type}"}
+        
+        # Retornar query e métodos para executar e parsear
+        return {
+            "query": query,
+            "aggregation_type": aggregation_type,
+            "execute": lambda: graphql_builder.execute(client, query),
+            "parse": lambda results: graphql_builder.parse_aggregation_results(results)
+        }
+    
+    def _needs_aggregation(self, user_query: str) -> bool:
+        """
+        Detecta se a query do usuário precisa de agregação.
+        
+        Args:
+            user_query: Query do usuário
+            
+        Returns:
+            True se precisa de agregação
+        """
+        # Palavras-chave que indicam necessidade de agregação
+        aggregation_keywords = [
+            "quantos", "quantas", "contar", "contagem",
+            "estatísticas", "estatistica", "stats",
+            "distribuição", "distribuicao",
+            "agrupar", "agrupado", "por documento", "por entidade",
+            "top", "mais frequente", "mais citado",
+            "quantidade", "número de", "numero de",
+            "how many", "count", "statistics", "stats",
+            "distribution", "group by", "aggregate"
+        ]
+        
+        query_lower = user_query.lower()
+        return any(keyword in query_lower for keyword in aggregation_keywords)
 
