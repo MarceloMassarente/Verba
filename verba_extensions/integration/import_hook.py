@@ -149,7 +149,8 @@ def patch_weaviate_manager():
                                         doc_uuid,
                                         passage_uuids,
                                         tenant=tenant,
-                                        enable_etl=True
+                                        enable_etl=True,
+                                        collection_name=embedder_collection_name  # Passa nome da collection
                                     )
                                     msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
                                 except Exception as etl_error:

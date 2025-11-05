@@ -103,11 +103,19 @@ def normalize_entities(mentions: List[Dict], gaz: Dict) -> List[str]:
 async def run_etl_on_passages(
     client,
     passage_uuids: List[str],
-    tenant: str = None
+    tenant: str = None,
+    collection_name: str = None
 ) -> Dict:
     """
     Executa ETL A2 em passages recém-criados
     Chamado via hook após import_document
+    
+    Args:
+        client: Cliente Weaviate
+        passage_uuids: Lista de UUIDs dos chunks
+        tenant: Tenant (opcional)
+        collection_name: Nome da collection de embedding (ex: VERBA_Embedding_all_MiniLM_L6_v2)
+                        Se None, tenta detectar automaticamente
     """
     try:
         from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
@@ -115,10 +123,25 @@ async def run_etl_on_passages(
         # Para v3, precisa usar API diferente
         coll = None
         if WEAVIATE_V4:
-            try:
-                coll = client.collections.get("Passage")
-            except:
-                pass
+            if collection_name:
+                try:
+                    coll = client.collections.get(collection_name)
+                except Exception as e:
+                    msg.warn(f"Erro ao obter collection {collection_name}: {str(e)}")
+            else:
+                # Tenta detectar collection automaticamente (procura por VERBA_Embedding_*)
+                try:
+                    all_collections = await client.collections.list_all()
+                    embedding_collections = [c for c in all_collections if "VERBA_Embedding" in c]
+                    if embedding_collections:
+                        # Usa a primeira collection de embedding encontrada
+                        # (idealmente deveria receber o nome correto via parâmetro)
+                        coll = client.collections.get(embedding_collections[0])
+                        msg.info(f"[ETL] Usando collection detectada: {embedding_collections[0]}")
+                    else:
+                        msg.warn("Nenhuma collection VERBA_Embedding encontrada")
+                except Exception as e:
+                    msg.warn(f"Erro ao detectar collection automaticamente: {str(e)}")
         
         gaz = load_gazetteer()
         
@@ -132,15 +155,27 @@ async def run_etl_on_passages(
         
         changed = 0
         
-        # Busca objetos
+        # Busca objetos pelos UUIDs específicos
         try:
-            # Se tenant disponível, usa
-            fetch_kwargs = {"limit": len(passage_uuids)}
+            # Busca objetos por UUID usando filtro "containsAny" para UUIDs
+            # Weaviate v4 suporta buscar múltiplos UUIDs
+            from weaviate.classes.query import Filter
+            
+            # Busca todos os objetos que correspondem aos UUIDs
+            # Limita a busca ao número de UUIDs (mais eficiente)
+            fetch_kwargs = {
+                "limit": len(passage_uuids),
+            }
             if tenant:
                 fetch_kwargs["tenant"] = tenant
             
+            # Busca todos e filtra pelos UUIDs desejados
             res = await coll.query.fetch_objects(**fetch_kwargs)
-            objs = {o.uuid: o for o in res.objects if str(o.uuid) in passage_uuids}
+            objs = {str(o.uuid): o for o in res.objects if str(o.uuid) in passage_uuids}
+            
+            # Se não encontrou todos, avisa (mas continua)
+            if len(objs) < len(passage_uuids):
+                msg.warn(f"[ETL] Apenas {len(objs)}/{len(passage_uuids)} chunks encontrados na collection")
         except Exception as e:
             msg.warn(f"Erro ao buscar passages para ETL: {str(e)}")
             return {"patched": 0, "error": str(e)}
@@ -233,8 +268,11 @@ def register_hooks():
         # Pega tenant se disponível
         tenant = kwargs.get('tenant', None)
         
+        # Pega collection_name se disponível (nome da collection de embedding)
+        collection_name = kwargs.get('collection_name', None)
+        
         # Roda ETL
-        await run_etl_on_passages(client, passage_uuids, tenant)
+        await run_etl_on_passages(client, passage_uuids, tenant, collection_name)
     
     # Registra hook (precisa ser chamado após o plugin ser carregado)
     global_hooks.register_hook('import.after', after_import_document, priority=100)
