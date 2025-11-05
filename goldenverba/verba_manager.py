@@ -258,6 +258,18 @@ class VerbaManager:
                 msg.info(f"[ETL] ETL A2 não habilitado para este documento (enable_etl=False)")
             
             msg.info(f"[CHUNKING] Iniciando chunking para '{document.title}' (ETL={'enabled' if enable_etl else 'disabled'})")
+            
+            # Envia status de início do chunking
+            try:
+                await logger.send_report(
+                    currentFileConfig.fileID,
+                    status=FileStatus.CHUNKING,
+                    message=f"Chunking {document.title}...",
+                    took=0,
+                )
+            except Exception:
+                pass  # Não falha se WebSocket fechar
+            
             chunk_task = asyncio.create_task(
                 self.chunker_manager.chunk(
                     currentFileConfig.rag_config["Chunker"].selected,

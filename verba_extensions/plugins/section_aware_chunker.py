@@ -13,6 +13,7 @@ Dependências:
 """
 
 import re
+import asyncio
 from typing import List
 from goldenverba.components.chunk import Chunk
 from goldenverba.components.interfaces import Chunker
@@ -141,8 +142,11 @@ class SectionAwareChunker(Chunker):
             text = document.content
             
             # Pega entidades pré-extraídas (se disponível via ETL pré-chunking)
+            # ⚠️ DESABILITADO POR PADRÃO: entity-aware chunking é muito lento com muitas entidades
+            # Manter desabilitado para performance. Pode ser re-habilitado se necessário com feature flag
             entity_spans = []
-            if hasattr(document, 'meta') and document.meta:
+            use_entity_aware = False  # Desabilitado por padrão para performance
+            if use_entity_aware and hasattr(document, 'meta') and document.meta:
                 entity_spans = document.meta.get("entity_spans", [])
                 if entity_spans:
                     msg.info(f"[ENTITY-AWARE] Usando {len(entity_spans)} entidades pré-extraídas para chunking entity-aware")
@@ -162,7 +166,11 @@ class SectionAwareChunker(Chunker):
             all_chunks = []
             chunk_id_counter = 0
             
-            for section in sections:
+            for section_idx, section in enumerate(sections):
+                # Permite que outras corrotinas rodem periodicamente (keep-alive, etc)
+                if section_idx % 5 == 0:
+                    await asyncio.sleep(0)
+                
                 section_text = section["content"]
                 section_title = section["title"]
                 
@@ -202,6 +210,10 @@ class SectionAwareChunker(Chunker):
                     char_offset = section["start"]
                     
                     for para_idx, para in enumerate(paragraphs):
+                        # Permite que outras corrotinas rodem periodicamente (keep-alive, etc)
+                        if para_idx % 10 == 0:
+                            await asyncio.sleep(0)
+                        
                         para_words = len(para.split())
                         para_start = char_offset
                         para_end = char_offset + len(para)
