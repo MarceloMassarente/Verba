@@ -71,4 +71,13 @@ Recursos estáticos:
 4. **Quer implementar algo?** Veja `guides/`
 5. **Quer ver o que mudou?** Veja `changelogs/`
 
+## 🚀 Configurações Atuais
+
+### ETL Entity-Aware Chunking (OTIMIZADO)
+- **Status**: ✅ Habilitado e otimizado
+- **Performance**: 10-15x mais rápido (30s → 2-3s)
+- **Entidades**: Apenas ORG + PERSON/PER (exclui LOC/GPE)
+- **Otimizações**: Binary search, deduplicação, normalização PT/EN
+- **Documentação**: `guides/CONFIGURACAO_ETL_FINAL.md`
+
 

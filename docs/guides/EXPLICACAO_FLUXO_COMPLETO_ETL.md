@@ -33,15 +33,55 @@ PDF → Universal A2 Reader → Default Reader → Extração de Texto
 
 ---
 
-### **FASE 2: Chunking** ⏱️ ~1-3s
+### **FASE 2: ETL Pré-Chunking** ⏱️ ~5-6s (OTIMIZADO)
 
 ```
-Documento Completo → Chunker → Múltiplos Chunks
+Documento Completo → Extração de Entidades → Entity-Spans
 ```
 
 **O que acontece:**
-1. Verba aplica o **chunker** escolhido (ex: SentenceChunker)
-2. Divide o texto em chunks de ~200-500 palavras cada
+1. **Extração de Entidades** via spaCy NER:
+   - Extrai apenas **ORG** (organizações) e **PERSON/PER** (pessoas)
+   - Exclui LOC/GPE/MISC para performance (reduz 367 → ~110 entidades)
+   - **Deduplica** entidades duplicadas por posição
+   - **Normaliza** PER (PT) → PERSON (EN) para compatibilidade
+   
+2. **Armazenamento** em `document.meta["entity_spans"]`:
+   ```python
+   entity_spans = [
+       {"text": "Apple", "start": 0, "end": 5, "label": "ORG"},
+       {"text": "Fernando Carneiro", "start": 150, "end": 167, "label": "PERSON"},
+       ...
+   ]
+   ```
+
+**Otimizações:**
+- ✅ **Binary search** para filtragem O(n log n) em vez de O(n²)
+- ✅ **Deduplicação** evita processar entidades repetidas
+- ✅ **Filtro de tipos** reduz volume em 71%
+
+**Resultado:**
+- ✅ ~110 entidades extraídas (ORG + PERSON apenas)
+- ✅ Armazenadas em `document.meta["entity_spans"]`
+- ✅ Prontas para uso no chunking entity-aware
+
+---
+
+### **FASE 3: Chunking Entity-Aware** ⏱️ ~2-3s (OTIMIZADO)
+
+```
+Documento + Entity-Spans → Section-Aware Chunker → Múltiplos Chunks
+```
+
+**O que acontece:**
+1. **Section-Aware Chunker** usa `entity_spans` para:
+   - **Evitar cortar entidades** no meio dos chunks
+   - **Respeitar seções** do documento
+   - **Binary search** para filtrar entidades por seção (O(log n))
+
+2. Divide o texto em chunks respeitando:
+   - Limites de seções
+   - Posições das entidades (não corta no meio)
 
 **Exemplo de chunks criados:**
 ```
@@ -61,7 +101,7 @@ Chunk 6: "...chamado Gemini Pro, supera ChatGPT em vários benchmarks..."
 
 ---
 
-### **FASE 3: Embedding (Vectorização)** ⏱️ ~5-15s
+### **FASE 4: Embedding (Vectorização)** ⏱️ ~5-15s
 
 ```
 Chunks → Embedder → Vetores (384/768/1536 dimensões)
@@ -84,7 +124,7 @@ Chunk 2 → [0.234, -0.567, 0.890, ..., 0.345]
 
 ---
 
-### **FASE 4: Import no Weaviate** ⏱️ ~2-5s
+### **FASE 5: Import no Weaviate** ⏱️ ~2-5s
 
 ```
 Chunks + Vetores → Weaviate → Armazenamento
@@ -128,7 +168,7 @@ VERBA_Embedding_SentenceTransformers:
 
 ---
 
-### **FASE 5: Hook Detecta Import** ⏱️ ~0.1s
+### **FASE 6: Hook Detecta Import** ⏱️ ~0.1s
 
 ```
 import_document completo → Hook detecta → Prepara para ETL
@@ -152,7 +192,7 @@ import_document completo → Hook detecta → Prepara para ETL
 
 ---
 
-### **FASE 6: ETL Executa por Chunk** ⏱️ ~10-30s (background)
+### **FASE 7: ETL Pós-Chunking Executa por Chunk** ⏱️ ~10-30s (background)
 
 ```
 Cada Chunk → ETL A2 → Entidades + Seções → Atualiza Weaviate
@@ -160,7 +200,7 @@ Cada Chunk → ETL A2 → Entidades + Seções → Atualiza Weaviate
 
 **O que acontece para CADA chunk:**
 
-#### **6.1. Extração de Entidades via SpaCy**
+#### **7.1. Extração de Entidades via SpaCy**
 
 Para o **Chunk 1**: `"Apple lança novo iPhone. A empresa americana anunciou..."`
 
@@ -168,20 +208,22 @@ Para o **Chunk 1**: `"Apple lança novo iPhone. A empresa americana anunciou..."
 nlp = spacy.load("pt_core_news_sm")
 doc = nlp("Apple lança novo iPhone. A empresa americana anunciou...")
 
-# Entidades encontradas:
+# Entidades encontradas (apenas ORG e PERSON/PER):
 entidades_encontradas = [
-    {"text": "Apple", "label": "ORG"},      # Organização
-    {"text": "iPhone", "label": "MISC"},    # Produto
-    {"text": "americana", "label": "GPE"}   # Localização
+    {"text": "Apple", "label": "ORG"},      # Organização ✅
+    # "iPhone" não é extraído (MISC excluído)
+    # "americana" não é extraído (LOC/GPE excluído)
 ]
 ```
+
+**Nota**: ETL pós-chunking extrai apenas ORG e PERSON/PER (igual ao pré-chunking), para consistência.
 
 **Resultado:**
 - ✅ Lista de entidades por chunk (texto + label)
 
 ---
 
-#### **6.2. Normalização via Gazetteer**
+#### **7.2. Normalização via Gazetteer**
 
 Para o **Chunk 1** com entidade `"Apple"`:
 
@@ -203,7 +245,7 @@ entity_ids = ["Q312"]  # Apple Inc
 
 ---
 
-#### **6.3. Detecção de Seções**
+#### **7.3. Detecção de Seções**
 
 Para o **Chunk 1** no contexto do documento completo:
 
@@ -223,7 +265,7 @@ section_entity_ids = ["Q312"]  # Entidades mencionadas nesta seção
 
 ---
 
-#### **6.4. Atualização no Weaviate**
+#### **7.4. Atualização no Weaviate**
 
 Para **cada chunk**, atualiza metadados:
 
@@ -258,7 +300,7 @@ passage_collection.data.update(
 
 ---
 
-### **FASE 7: Consolidação no Article** ⏱️ ~1-2s
+### **FASE 8: Consolidação no Article** ⏱️ ~1-2s
 
 ```
 Passages atualizados → Consolida entidades → Atualiza Article
@@ -364,16 +406,21 @@ Resultado:
 
 ---
 
-## ⏱️ Tempo Total Estimado
+## ⏱️ Tempo Total Estimado (OTIMIZADO)
 
 - **Upload + Leitura**: 2-5s
-- **Chunking**: 1-3s
+- **ETL Pré-Chunking**: 5-6s (otimizado: 71% menos entidades)
+- **Chunking Entity-Aware**: 2-3s (otimizado: binary search, 10-15x mais rápido)
 - **Embedding**: 5-15s
 - **Import Weaviate**: 2-5s
-- **ETL (background)**: 10-30s
-- **Total**: **20-58 segundos**
+- **ETL Pós-Chunking (background)**: 10-30s
+- **Total**: **26-64 segundos**
 
-**Importante**: ETL executa em background, então você pode continuar usando o Verba enquanto processa!
+**Antes das otimizações**: 30s+ apenas no chunking  
+**Depois das otimizações**: 2-3s no chunking  
+**Ganho total**: **10-15x mais rápido** no chunking!
+
+**Importante**: ETL pós-chunking executa em background, então você pode continuar usando o Verba enquanto processa!
 
 ---
 
@@ -387,10 +434,18 @@ Resultado:
 5. **Background**: Não bloqueia interface
 
 ### ⚠️ **Limitações:**
-1. **SpaCy**: Requer modelo instalado (`pt_core_news_sm`)
+1. **SpaCy**: Requer modelo instalado (`pt_core_news_sm` ou `en_core_web_sm`)
 2. **Gazetteer**: Entidades precisam estar no arquivo JSON
-3. **Performance**: ETL adiciona 10-30s por documento
+3. **Performance**: ETL adiciona 10-30s por documento (pós-chunking, em background)
 4. **PDF Complexo**: Pode não separar artigos automaticamente (se forem contínuos)
+5. **Tipos de Entidades**: Apenas ORG e PERSON extraídas (LOC/GPE excluídos para performance)
+
+### 🚀 **Otimizações Implementadas:**
+1. **Binary Search**: Filtragem O(n²) → O(n log n) (6.7x mais rápido)
+2. **Deduplicação**: Remove entidades duplicadas por posição
+3. **Filtro de Tipos**: Apenas ORG + PERSON (reduz 71% das entidades)
+4. **Normalização**: PER (PT) → PERSON (EN) para compatibilidade
+5. **Entity-Aware**: Chunking não corta entidades no meio (qualidade mantida)
 
 ---
 

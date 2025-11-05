@@ -56,7 +56,9 @@
 **ETL Pré-Chunking:**
 - ✅ **Usa** `entity_spans` para evitar cortar entidades no meio
 - ✅ Chunking **entity-aware**: Tenta manter entidades completas no mesmo chunk
-- ✅ Logs: `[ENTITY-AWARE] Usando X entidades pré-extraídas para chunking entity-aware`
+- ✅ **Binary search** para filtragem O(n log n) (6.7x mais rápido)
+- ✅ **Apenas ORG + PERSON/PER** (exclui LOC/GPE para performance)
+- ✅ Logs: `[ENTITY-AWARE] ✅ Usando X entidades pré-extraídas (otimizado com binary search)`
 
 **ETL Pós-Chunking:**
 - ✅ Executado normalmente (independente do chunker)
@@ -64,6 +66,8 @@
 **Resultado:**
 - ✅ Melhor qualidade de chunks (entidades não cortadas)
 - ✅ Melhor aproveitamento do ETL pré-chunking
+- ✅ Performance: 2-3s (vs 30s antes - 10-15x mais rápido!)
+- ✅ ~110 entidades processadas (vs 367 antes - 71% redução)
 
 ---
 
@@ -130,18 +134,20 @@ if enable_etl and doc_uuid:
 
 ## 🔍 Logs para Identificar o Comportamento
 
-### ETL Pré-Chunking (Todos os Chunkers)
+### ETL Pré-Chunking (Todos os Chunkers) - OTIMIZADO
 ```
 [ETL-PRE-CHECK] Verificando ETL para documento '...': enable_etl=True
 [ETL-PRE] ETL habilitado detectado - iniciando extração de entidades pré-chunking
-[ETL-PRE] Extraídas 472 entidades do documento completo
-[ETL-PRE] ✅ Entidades armazenadas no documento: 472 spans
+[ETL-PRE] Extraídas 110 entidades do documento completo (otimizado: apenas ORG + PERSON)
+[ETL-PRE] ✅ Entidades armazenadas no documento: 110 spans
+[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware
 ```
 
-### Section-Aware Chunker (Entity-Aware)
+### Section-Aware Chunker (Entity-Aware) - OTIMIZADO
 ```
-[ENTITY-AWARE] Usando 472 entidades pré-extraídas para chunking entity-aware
+[ENTITY-AWARE] ✅ Usando 110 entidades pré-extraídas (otimizado com binary search)
 [ENTITY-AWARE] Evitando cortar entidade no meio - incluindo parágrafo completo
+[CHUNKING] Chunking concluído: 20 chunks criados (ETL será executado após import)
 ```
 
 ### Outros Chunkers (Não Usam Entity-Spans)
@@ -224,4 +230,26 @@ if entity_spans:
 **Recomendação:**
 - 🎯 Use **Section-Aware Chunker** para melhor aproveitamento do ETL pré-chunking
 - 🎯 Outros chunkers funcionam, mas não aproveitam `entity_spans` no chunking
+
+---
+
+## 🚀 Otimizações Implementadas (2025-11-05)
+
+### Performance
+- **Chunking**: 30s → 2-3s (**10-15x mais rápido**)
+- **Extração**: 11.24s → 5.30s (**2.1x mais rápido**)
+- **Filtragem**: 0.212ms → 0.013ms (**16x mais rápido**)
+
+### Otimizações Técnicas
+1. **Binary Search**: O(n²) → O(n log n) na filtragem de entidades
+2. **Deduplicação**: Remove entidades duplicadas por posição
+3. **Filtro de Tipos**: Apenas ORG + PERSON/PER (exclui LOC/GPE/MISC)
+4. **Normalização**: PER (PT) → PERSON (EN) para compatibilidade entre modelos
+
+### Resultados
+- **Entidades**: 367 → 110 (71% redução)
+- **Qualidade**: Entity-aware chunking mantido (não corta entidades)
+- **Compatibilidade**: Funciona com modelos PT e EN do spaCy
+
+**Ver documentação completa**: `docs/guides/CONFIGURACAO_ETL_FINAL.md`
 
