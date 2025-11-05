@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir sentence-transformers || true
 # Instala dependências das extensões
 RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 
+# Instala pandas e openpyxl para suporte completo a arquivos Excel (.xlsx e .xls)
+RUN pip install --no-cache-dir pandas openpyxl xlrd || true
+
 # Baixa modelos do spaCy (para ETL A2 e EntityAware Retriever)
 RUN python -m spacy download pt_core_news_sm || true
 
