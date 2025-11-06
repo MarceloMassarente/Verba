@@ -146,6 +146,7 @@ class EntityAwareRetriever(Retriever):
         embedder: str,
         labels: List[str],
         document_uuids: List[str],
+        rag_config: Optional[Dict[str, Any]] = None,  # RAG config completo (para Query Builder usar generator)
     ):
         """
         Retrieval com filtros entity-aware + busca semântica
@@ -202,6 +203,7 @@ class EntityAwareRetriever(Retriever):
             normalized = weaviate_manager._normalize_embedder_name(embedder)
             collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
             
+            # Usar RAG config passado como parâmetro (mesmo do chat)
             # Construir query conhecendo schema
             strategy = await builder.build_query(
                 user_query=query,
@@ -209,7 +211,8 @@ class EntityAwareRetriever(Retriever):
                 collection_name=collection_name,
                 use_cache=True,
                 validate=False,  # Não precisa validar aqui, já está executando
-                auto_detect_aggregation=True  # NOVO: detecta agregações automaticamente
+                auto_detect_aggregation=True,  # NOVO: detecta agregações automaticamente
+                rag_config=rag_config  # Passar RAG config para usar generator configurado (mesmo do chat)
             )
             
             # NOVO: Verificar se é agregação e executar se for

@@ -159,7 +159,8 @@ class QueryBuilderPlugin:
         collection_name: str,
         use_cache: bool = True,
         validate: bool = False,
-        auto_detect_aggregation: bool = True
+        auto_detect_aggregation: bool = True,
+        rag_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Constrói query complexa conhecendo o schema.
@@ -226,12 +227,36 @@ class QueryBuilderPlugin:
         
         # Chamar LLM para construir query
         try:
-            generator = self._get_generator()
-            if generator is None:
-                msg.warn("  Query builder: generator não disponível, usando fallback")
-                return self._fallback_response(user_query)
+            # Obter generator configurado do RAG config (mesmo do chat) ou usar fallback
+            generator = None
+            generator_config = None
             
-            strategy = await self._call_llm_with_schema(generator, user_query, schema_info, validate)
+            if rag_config and "Generator" in rag_config:
+                try:
+                    from goldenverba.components.managers import GeneratorManager
+                    generator_manager = GeneratorManager()
+                    
+                    generator_name = rag_config["Generator"].selected
+                    generator_config = rag_config["Generator"].components[generator_name].config
+                    
+                    if generator_name in generator_manager.generators:
+                        generator = generator_manager.generators[generator_name]
+                        msg.info(f"  Query builder: usando generator configurado '{generator_name}' do RAG config")
+                    else:
+                        msg.warn(f"  Query builder: generator '{generator_name}' não encontrado, tentando fallback")
+                except Exception as e:
+                    msg.warn(f"  Query builder: erro ao obter generator do RAG config: {str(e)}, tentando fallback")
+            
+            # Fallback: criar generator padrão se não conseguiu do RAG config
+            if generator is None:
+                generator = self._get_generator()
+                if generator is None:
+                    msg.warn("  Query builder: generator não disponível, usando fallback")
+                    return self._fallback_response(user_query)
+                else:
+                    msg.info("  Query builder: usando generator padrão (RAG config não disponível)")
+            
+            strategy = await self._call_llm_with_schema(generator, user_query, schema_info, validate, generator_config)
             
             # Validar resposta
             if not self._validate_strategy(strategy):
@@ -267,7 +292,8 @@ class QueryBuilderPlugin:
         generator,
         user_query: str,
         schema_info: Dict[str, Any],
-        validate: bool
+        validate: bool,
+        generator_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Chama LLM para construir query conhecendo o schema"""
         
@@ -356,7 +382,19 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
         try:
             import asyncio
             
-            generator_config = generator.config if hasattr(generator, "config") else {}
+            # Usar generator_config passado (do RAG config) ou fallback para generator.config
+            if generator_config is None:
+                generator_config = generator.config if hasattr(generator, "config") else {}
+            
+            # Log do modelo usado
+            model_name = "unknown"
+            if isinstance(generator_config, dict) and "Model" in generator_config:
+                model_config = generator_config["Model"]
+                if isinstance(model_config, dict):
+                    model_name = model_config.get("value", "unknown")
+                elif hasattr(model_config, "value"):
+                    model_name = model_config.value
+            msg.info(f"  Query builder: usando config do generator (modelo: {model_name})")
             
             response_text = ""
             async for chunk in generator.generate_stream(

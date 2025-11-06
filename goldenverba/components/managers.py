@@ -1760,6 +1760,7 @@ class RetrieverManager:
                 embedder_model,
                 labels,
                 document_uuids,
+                rag_config=rag_config,  # Passar RAG config para retriever (para Query Builder usar generator configurado)
             )
             # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
             if len(result) == 3:
