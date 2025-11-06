@@ -174,13 +174,10 @@ class EntityAwareRetriever(Retriever):
         limit = int(config["Limit/Sensitivity"].value)
         # Ler reranker_top_k da configuração
         reranker_top_k_config = config.get("Reranker Top K", {})
-        msg.info(f"  DEBUG: reranker_top_k_config type={type(reranker_top_k_config)}, hasattr value={hasattr(reranker_top_k_config, 'value') if reranker_top_k_config else 'N/A'}")
         if reranker_top_k_config and hasattr(reranker_top_k_config, 'value'):
             reranker_top_k = int(reranker_top_k_config.value)
-            msg.info(f"  DEBUG: reranker_top_k lido da config: {reranker_top_k}")
         else:
             reranker_top_k = 5  # Default
-            msg.info(f"  DEBUG: reranker_top_k usando default: {reranker_top_k} (campo 'Reranker Top K' não encontrado na config)")
         
         # Verificar se não está confundindo com Limit/Sensitivity
         if reranker_top_k == limit and limit != 5:
