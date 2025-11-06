@@ -123,19 +123,24 @@ async def validate_chunks(
 ):
     """Valida chunks de uma collection"""
     
-    msg.info(f"🔍 Validando chunks da collection: {collection_name}")
+    msg.info(f"Validando chunks da collection: {collection_name}")
     
     try:
         collection = client.collections.get(collection_name)
     except Exception as e:
-        msg.fail(f"❌ Erro ao acessar collection: {str(e)}")
+        msg.fail(f"Erro ao acessar collection: {str(e)}")
         return
     
     # Buscar chunks
-    msg.info(f"📥 Buscando até {limit} chunks...")
+    msg.info(f"Buscando ate {limit} chunks...")
     chunks = []
     try:
-        async for chunk in collection.iterator(limit=limit):
+        # Usar fetch_objects com return_properties explícito para evitar problemas gRPC
+        response = collection.query.fetch_objects(
+            limit=limit,
+            return_properties=["content", "chunk_id", "doc_uuid", "chunk_lang", "title"]
+        )
+        for chunk in response.objects:
             chunk_data = {
                 "uuid": str(chunk.uuid),
                 "content": chunk.properties.get("content", ""),
@@ -146,23 +151,41 @@ async def validate_chunks(
             }
             chunks.append(chunk_data)
     except Exception as e:
-        msg.fail(f"❌ Erro ao buscar chunks: {str(e)}")
-        return
+        # Se falhar com gRPC, tentar usar iterator (pode funcionar melhor)
+        try:
+            msg.warn("Tentando metodo alternativo (iterator)...")
+            count = 0
+            async for chunk in collection.iterator():
+                if count >= limit:
+                    break
+                chunk_data = {
+                    "uuid": str(chunk.uuid),
+                    "content": chunk.properties.get("content", ""),
+                    "chunk_id": chunk.properties.get("chunk_id", 0),
+                    "doc_uuid": chunk.properties.get("doc_uuid", ""),
+                    "chunk_lang": chunk.properties.get("chunk_lang", ""),
+                    "title": chunk.properties.get("title", ""),
+                }
+                chunks.append(chunk_data)
+                count += 1
+        except Exception as e2:
+            msg.fail(f"Erro ao buscar chunks: {str(e)} (tentativa alternativa: {str(e2)})")
+            return
     
     if not chunks:
         msg.warn("⚠️ Nenhum chunk encontrado")
         return
     
-    msg.good(f"✅ {len(chunks)} chunks recuperados")
+    msg.good(f"{len(chunks)} chunks recuperados")
     
     # Amostragem se especificado
     if sample_size and sample_size < len(chunks):
         import random
         chunks = random.sample(chunks, sample_size)
-        msg.info(f"📊 Analisando amostra de {len(chunks)} chunks")
+        msg.info(f"Analisando amostra de {len(chunks)} chunks")
     
     # Análise
-    msg.info("🔬 Analisando qualidade dos chunks...")
+    msg.info("Analisando qualidade dos chunks...")
     
     analyses = []
     content_hashes = {}
@@ -201,7 +224,7 @@ async def validate_chunks(
     
     # Relatório
     msg.info("\n" + "="*80)
-    msg.info("📊 RELATÓRIO DE VALIDAÇÃO DE CHUNKS")
+    msg.info("RELATORIO DE VALIDACAO DE CHUNKS")
     msg.info("="*80)
     msg.info(f"\nCollection: {collection_name}")
     msg.info(f"Total de chunks analisados: {total_chunks}")
@@ -211,7 +234,7 @@ async def validate_chunks(
     msg.info(f"  Média de tamanho: {avg_length:.0f} caracteres")
     msg.info(f"  Média de palavras: {avg_words:.1f} palavras")
     
-    msg.info("\n⚠️ PROBLEMAS DETECTADOS:")
+    msg.info("\nPROBLEMAS DETECTADOS:")
     if empty_chunks > 0:
         msg.warn(f"  Chunks vazios: {empty_chunks} ({empty_chunks/total_chunks*100:.1f}%)")
     if short_chunks > 0:
@@ -227,7 +250,7 @@ async def validate_chunks(
     
     # Exemplos de problemas
     if repetitive_chunks > 0:
-        msg.info("\n🔄 EXEMPLOS DE CHUNKS REPETITIVOS:")
+        msg.info("\nEXEMPLOS DE CHUNKS REPETITIVOS:")
         count = 0
         for analysis in analyses:
             if analysis["repetitive_phrases"]:
@@ -238,13 +261,13 @@ async def validate_chunks(
                         msg.warn(f"    - '{phrase_info['phrase'][:60]}...' aparece {phrase_info['count']}x ({phrase_info['percentage']}% do chunk)")
     
     if duplicates:
-        msg.info("\n🔁 EXEMPLOS DE CHUNKS DUPLICADOS:")
+        msg.info("\nEXEMPLOS DE CHUNKS DUPLICADOS:")
         for dup in duplicates[:5]:  # Mostrar apenas 5 exemplos
             msg.warn(f"  Chunk {dup['chunk_id']} (UUID: {dup['uuid'][:8]}...) é duplicado de {dup['duplicate_of'][:8]}...")
             msg.warn(f"    Preview: {dup['content_preview']}...")
     
     if low_quality > 0:
-        msg.info("\n📉 CHUNKS DE BAIXA QUALIDADE (top 5 piores):")
+        msg.info("\nCHUNKS DE BAIXA QUALIDADE (top 5 piores):")
         sorted_analyses = sorted(analyses, key=lambda x: x["quality_score"])[:5]
         for analysis in sorted_analyses:
             msg.warn(f"\n  Chunk {analysis['chunk_id']} (Score: {analysis['quality_score']}/100):")
@@ -300,17 +323,59 @@ async def main():
     
     try:
         auth = AuthApiKey(w_key) if w_key else None
-        client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=w_url,
-            auth_credentials=auth
-        ) if "weaviate.cloud" in w_url else weaviate.connect_to_local(
-            host=w_url.replace("http://", "").replace("https://", "").split(":")[0],
-            port=int(w_url.split(":")[-1]) if ":" in w_url else 8080
-        )
+        
+        # Verificar se é Weaviate Cloud
+        if "weaviate.cloud" in w_url:
+            client = weaviate.connect_to_weaviate_cloud(
+                cluster_url=w_url,
+                auth_credentials=auth
+            )
+        else:
+            # Para outras URLs (Railway, local, etc.), usar connect_to_custom
+            from urllib.parse import urlparse
+            parsed = urlparse(w_url)
+            host = parsed.hostname or parsed.netloc.split(':')[0]
+            
+            # Determinar porta e secure
+            if parsed.port:
+                port = parsed.port
+            elif parsed.scheme == 'https':
+                port = 443
+                secure = True
+            elif parsed.scheme == 'http':
+                port = 80
+                secure = False
+            else:
+                port = 8080
+                secure = False
+            
+            secure = parsed.scheme == 'https' if parsed.scheme else False
+            
+            # Para Railway/outros, usar mesmo host para HTTP e gRPC
+            # gRPC geralmente usa porta diferente, mas vamos tentar a mesma
+            grpc_port = 50051 if not parsed.port else parsed.port
+            
+            from weaviate.classes.init import AdditionalConfig, Timeout
+            
+            client = weaviate.connect_to_custom(
+                http_host=host,
+                http_port=port,
+                http_secure=secure,
+                grpc_host=host,
+                grpc_port=grpc_port,
+                grpc_secure=secure,
+                auth_credentials=auth,
+                skip_init_checks=True,  # Desabilitar verificações gRPC se não disponível
+                additional_config=AdditionalConfig(
+                    timeout=Timeout(init=60, query=300, insert=300)
+                )
+            )
         
         msg.good("Conectado ao Weaviate")
     except Exception as e:
         msg.fail(f"Erro ao conectar: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Se collection não especificada, listar collections disponíveis
