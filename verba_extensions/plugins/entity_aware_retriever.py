@@ -352,6 +352,32 @@ class EntityAwareRetriever(Retriever):
         # Se QueryBuilder forneceu entidades, usar elas primeiro
         builder_entities = query_filters_from_builder.get("entities", [])
         
+        # DIAGNÓSTICO: Verificar se spaCy e Gazetteer estão disponíveis
+        try:
+            from verba_extensions.plugins.entity_aware_query_orchestrator import get_nlp, load_gazetteer
+            nlp_model = get_nlp()
+            gaz = load_gazetteer()
+            
+            if not nlp_model:
+                msg.warn(f"  ⚠️ DIAGNÓSTICO: spaCy não está disponível - entidades NÃO serão detectadas")
+                msg.warn(f"  💡 Instale: python -m spacy download pt_core_news_sm")
+            else:
+                msg.info(f"  ✅ DIAGNÓSTICO: spaCy está disponível (modelo: {nlp_model.meta.get('name', 'unknown')})")
+            
+            if not gaz:
+                msg.warn(f"  ⚠️ DIAGNÓSTICO: Gazetteer vazio ou não encontrado - entidades NÃO serão mapeadas")
+                msg.warn(f"  💡 Verifique se existe: verba_extensions/resources/gazetteer.json")
+            else:
+                gaz_size = len(gaz)
+                msg.info(f"  ✅ DIAGNÓSTICO: Gazetteer carregado com {gaz_size} entidades")
+                # Mostrar algumas entidades como exemplo
+                if gaz_size > 0:
+                    sample_entities = list(gaz.items())[:3]
+                    sample_text = ", ".join([f"{eid} ({len(aliases)} aliases)" for eid, aliases in sample_entities])
+                    msg.info(f"  ℹ️ Exemplos: {sample_text}")
+        except Exception as e:
+            msg.warn(f"  ⚠️ Erro ao verificar diagnóstico de entidades: {str(e)}")
+        
         parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
         parsed = parse_query(parse_query_text)
         parsed_entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
@@ -362,6 +388,18 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"  🔍 Entidades detectadas: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
         msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
+        
+        # DIAGNÓSTICO: Se não encontrou entidades, mostrar por quê
+        if not entity_ids:
+            msg.warn(f"  ⚠️ DIAGNÓSTICO: Nenhuma entidade detectada na query: '{query}'")
+            if parsed.get("entities"):
+                entities_without_id = [e["text"] for e in parsed["entities"] if not e.get("entity_id")]
+                if entities_without_id:
+                    msg.warn(f"  💡 Menções detectadas pelo spaCy mas SEM entity_id no gazetteer: {entities_without_id}")
+                    msg.warn(f"  💡 Adicione essas entidades ao gazetteer.json para habilitar filtros")
+            else:
+                msg.warn(f"  💡 Nenhuma menção detectada pelo spaCy (ORG, PERSON, GPE, LOC)")
+                msg.warn(f"  💡 Verifique se a query contém nomes próprios (empresas, pessoas, lugares)")
         
         # Se não há entidades, avisar que filtros restritivos serão ignorados
         if not entity_ids:
