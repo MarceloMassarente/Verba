@@ -322,8 +322,12 @@ class EntityAwareRetriever(Retriever):
         # Combinar entidades do builder e do parser (priorizar builder)
         entity_ids = builder_entities if builder_entities else parsed_entity_ids
         
-        msg.info(f"  Entidades: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
-        msg.info(f"  Conceitos: {semantic_terms}")
+        msg.info(f"  🔍 Entidades detectadas: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
+        msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
+        
+        # Se não há entidades, avisar que filtros restritivos serão ignorados
+        if not entity_ids:
+            msg.info(f"  ⚠️ NENHUMA entidade detectada - filtros restritivos serão ignorados para busca mais ampla")
         
         # Atualizar debug info com entidades e termos semânticos
         if not debug_info["entities_detected"]:
@@ -484,24 +488,33 @@ class EntityAwareRetriever(Retriever):
         combined_filter = None
         filters_list = []
         
-        # Aplicar filtro de entidade apenas se houver entidades detectadas
-        if entity_filter and entity_ids:
-            filters_list.append(entity_filter)
+        # REGRA PRINCIPAL: Se não há entidades, não aplicar filtros restritivos
+        # (exceto temporal, que não é restritivo demais)
+        has_entities = bool(entity_ids)
         
-        # Filtro de idioma: aplicar apenas quando há entidades (para evitar contaminação)
+        # Aplicar filtro de entidade apenas se houver entidades detectadas
+        if entity_filter and has_entities:
+            filters_list.append(entity_filter)
+            msg.info(f"  ✅ Filtro de entidade aplicado: {entity_ids}")
+        elif entity_filter and not has_entities:
+            msg.info(f"  ⚠️ Filtro de entidade ignorado (sem entidades detectadas)")
+        
+        # Filtro de idioma: aplicar APENAS quando há entidades
         # Quando NÃO há entidades, o filtro de idioma pode estar restringindo demais os resultados
         if lang_filter:
-            if entity_ids:
+            if has_entities:
                 # Quando há entidades, filtro de idioma ajuda a evitar contaminação
                 filters_list.append(lang_filter)
+                msg.info(f"  ✅ Filtro de idioma aplicado (com entidades)")
             else:
                 # Quando não há entidades, filtro de idioma pode estar restringindo demais
                 # Ignorar para permitir busca mais ampla
-                msg.info(f"  Filtro de idioma ignorado (sem entidades, pode restringir demais)")
+                msg.info(f"  ⚠️ Filtro de idioma ignorado (sem entidades, pode restringir demais)")
         
         # Filtro temporal: aplicar sempre que disponível (não restritivo demais)
         if temporal_filter:
             filters_list.append(temporal_filter)
+            msg.info(f"  ✅ Filtro temporal aplicado")
         
         if len(filters_list) == 1:
             combined_filter = filters_list[0]
@@ -511,9 +524,9 @@ class EntityAwareRetriever(Retriever):
         # Atualizar debug info sobre filtros
         if combined_filter:
             filter_types = []
-            if entity_filter and entity_ids:
+            if entity_filter and has_entities:
                 filter_types.append("entidade")
-            if lang_filter and entity_ids:  # Só conta se foi aplicado
+            if lang_filter and has_entities:  # Só conta se foi aplicado
                 filter_types.append("idioma")
             if temporal_filter:
                 filter_types.append("temporal")
