@@ -542,7 +542,7 @@ class EntityAwareRetriever(Retriever):
         if lang_filter:
             if has_entities:
                 # Quando há entidades, filtro de idioma ajuda a evitar contaminação
-                filters_list.append(lang_filter)
+            filters_list.append(lang_filter)
                 msg.info(f"  ✅ Filtro de idioma aplicado (com entidades)")
             else:
                 # Quando não há entidades, filtro de idioma pode estar restringindo demais
@@ -959,8 +959,12 @@ class EntityAwareRetriever(Retriever):
         )
         sorted_documents = sorted(documents, key=lambda x: x["score"], reverse=True)
         
+        # Obter chunk_window da config para passar ao filtro de qualidade
+        chunk_window_config = config.get("Chunk Window", {})
+        chunk_window = int(chunk_window_config.value) if hasattr(chunk_window_config, 'value') else 0
+        
         # Gerar contexto combinado (isso filtra chunks de baixa qualidade)
-        context, filtered_context_documents = self.combine_context(sorted_context_documents)
+        context, filtered_context_documents = self.combine_context(sorted_context_documents, chunk_window=chunk_window)
         
         # IMPORTANTE: Atualizar documents para refletir chunks filtrados
         # Isso garante que o frontend mostre os mesmos chunks que foram enviados ao LLM
@@ -1047,15 +1051,46 @@ class EntityAwareRetriever(Retriever):
         msg.info(f"  📦 Chunk Window: {chunk_window} (vai combinar chunks adjacentes)")
         
         if chunk_window > 0 and chunks:
-            # Agrupa chunks adjacentes com window
+            # Agrupa chunks adjacentes com window, evitando repetição excessiva
             windowed_chunks = []
             for i, chunk in enumerate(chunks):
                 context_chunks = chunks[max(0, i - chunk_window):min(len(chunks), i + chunk_window + 1)]
-                # Acessa content do Weaviate object corretamente
-                combined_content = " ".join([
-                    c.properties["content"] if hasattr(c, "properties") else c.get("content", "")
-                    for c in context_chunks
-                ])
+                
+                # Coletar conteúdos únicos (evitar duplicação exata)
+                contents = []
+                seen_contents = set()
+                for c in context_chunks:
+                    content = c.properties["content"] if hasattr(c, "properties") else c.get("content", "")
+                    content_normalized = content.strip().lower()
+                    # Evitar adicionar conteúdo exatamente igual
+                    if content_normalized and content_normalized not in seen_contents:
+                        contents.append(content)
+                        seen_contents.add(content_normalized)
+                
+                # Combinar com separador adequado
+                combined_content = " ".join(contents)
+                
+                # Se o conteúdo combinado for muito repetitivo, usar apenas o chunk central
+                # (evitar criar repetição massiva)
+                if len(contents) > 1:
+                    # Verificar se há repetição excessiva na combinação
+                    words = combined_content.split()
+                    if len(words) > 10:
+                        # Contar repetições de sequências curtas
+                        seq_counts = {}
+                        for seq_len in [3, 4]:
+                            if len(words) >= seq_len * 2:
+                                for j in range(len(words) - seq_len + 1):
+                                    seq = " ".join(words[j:j+seq_len])
+                                    seq_counts[seq] = seq_counts.get(seq, 0) + 1
+                        
+                        max_repetition = max(seq_counts.values()) if seq_counts else 0
+                        # Se há muita repetição (mais de 5x), usar apenas o chunk central
+                        if max_repetition > 5:
+                            msg.warn(f"  ⚠️ Chunk Window: repetição detectada ({max_repetition}x) ao combinar chunks, usando apenas chunk central")
+                            central_content = context_chunks[len(context_chunks)//2]
+                            combined_content = central_content.properties["content"] if hasattr(central_content, "properties") else central_content.get("content", "")
+                
                 # Atualiza o content do chunk atual
                 if hasattr(chunk, "properties"):
                     chunk.properties["content"] = combined_content
@@ -1066,7 +1101,7 @@ class EntityAwareRetriever(Retriever):
         
         return (chunks, "Chunks retrieved with entity-aware filtering")
     
-    def _is_chunk_quality_good(self, chunk_content: str) -> bool:
+    def _is_chunk_quality_good(self, chunk_content: str, chunk_window: int = 0) -> bool:
         """Valida qualidade do chunk antes de incluir no contexto
         
         Detecta:
@@ -1077,6 +1112,12 @@ class EntityAwareRetriever(Retriever):
         NÃO filtra:
         - Tabelas/gráficos (muitos números, poucas palavras)
         - Chunks com dados estruturados legítimos
+        - Chunks combinados via Chunk Window (espera-se alguma repetição)
+        - Repetições de cabeçalhos/rodapés de documento (normal em PDFs)
+        
+        Args:
+            chunk_content: Conteúdo do chunk a validar
+            chunk_window: Tamanho do chunk window usado (0 = não usado)
         """
         if not chunk_content or len(chunk_content.strip()) < 10:
             return False
@@ -1086,9 +1127,77 @@ class EntityAwareRetriever(Retriever):
         if len(words) < 3:
             return False
         
+        # Detectar e remover cabeçalhos/rodapés comuns de documentos PDF
+        # Cabeçalhos/rodapés geralmente aparecem no início ou fim e são repetidos em múltiplos chunks
+        # Exemplo: "Documento de discussão São Paulo, 17 de setembro de 2025 1 AGENDA Sobre a..."
+        import re
+        
+        # Padrões comuns de cabeçalhos/rodapés
+        lines = content.split('\n')
+        
+        # Verificar primeiras 2-3 linhas (possível cabeçalho)
+        header_lines = [line.strip() for line in lines[:3] if line.strip()]
+        # Verificar últimas 2-3 linhas (possível rodapé)
+        footer_lines = [line.strip() for line in lines[-3:] if line.strip()]
+        
+        # Padrões de palavras-chave de cabeçalhos/rodapés
+        header_footer_keywords = ['documento', 'discussão', 'agenda', 'página', 'data', 'setembro', 
+                                  'outubro', 'novembro', 'dezembro', 'janeiro', 'fevereiro', 'março', 
+                                  'abril', 'maio', 'junho', 'julho', 'agosto']
+        
+        potential_headers_footers = []
+        
+        # 1. Verificar linhas individuais (cabeçalhos simples)
+        for line in header_lines + footer_lines:
+            if len(line) < 150 and any(keyword in line.lower() for keyword in header_footer_keywords):
+                potential_headers_footers.append(line)
+        
+        # 2. Detectar padrão específico: "Documento de discussão [Local] [Data] [Número] AGENDA [Tópicos]"
+        # Padrão flexível que captura o cabeçalho completo
+        header_pattern = r'Documento de discussão[^.]*?\d+\s+de\s+\w+\s+de\s+\d+[^.]*?AGENDA[^.]*?(?:Modelo|Abordagem|Sobre|Sobre a|da|de|na|em)'
+        content_start = content[:250]  # Primeiros 250 caracteres (onde cabeçalho geralmente está)
+        header_match = re.search(header_pattern, content_start, re.IGNORECASE)
+        if header_match:
+            header_text = header_match.group(0).strip()
+            if header_text not in potential_headers_footers:
+                potential_headers_footers.append(header_text)
+        
+        # 3. Detectar sequências repetitivas no início que parecem cabeçalhos
+        # Se os primeiros 80-150 caracteres aparecem múltiplas vezes, provavelmente é cabeçalho
+        for check_len in [80, 120, 150]:
+            first_chars = content[:check_len].strip()
+            if len(first_chars) < 40:  # Muito curto, pular
+                continue
+            # Contar quantas vezes aparece (case-insensitive)
+            occurrences = len(re.findall(re.escape(first_chars), content, re.IGNORECASE))
+            # Se aparece 2+ vezes e contém palavras-chave de cabeçalho, é provável cabeçalho
+            if occurrences >= 2 and any(keyword in first_chars.lower() for keyword in header_footer_keywords):
+                if first_chars not in potential_headers_footers:
+                    potential_headers_footers.append(first_chars)
+                break  # Encontrou um, não precisa verificar outros tamanhos
+        
+        # Remover cabeçalhos/rodapés do conteúdo para verificação de repetição
+        content_for_repetition_check = content
+        if potential_headers_footers:
+            # Remover ocorrências de cabeçalhos/rodapés (podem aparecer múltiplas vezes)
+            for header_footer in potential_headers_footers:
+                # Remover todas as ocorrências (case-insensitive parcial)
+                # Usar regex para remover variações
+                escaped = re.escape(header_footer)
+                # Permitir pequenas variações (espaços extras, etc.)
+                pattern = escaped.replace(r'\ ', r'\s+')
+                content_for_repetition_check = re.sub(pattern, ' ', content_for_repetition_check, flags=re.IGNORECASE)
+            
+            # Limpar espaços múltiplos
+            content_for_repetition_check = re.sub(r'\s+', ' ', content_for_repetition_check).strip()
+            msg.info(f"  ℹ️ Cabeçalhos/rodapés detectados e ignorados: {len(potential_headers_footers)} padrões")
+        
+        # Se após remover cabeçalhos/rodapés o conteúdo ficou muito pequeno, usar conteúdo original
+        if len(content_for_repetition_check.split()) < 5:
+            content_for_repetition_check = content
+        
         # Verificar se é uma tabela/gráfico (muitos números, poucas palavras)
         # Chunks de tabelas/gráficos são legítimos mesmo que tenham padrões repetitivos
-        import re
         numbers = re.findall(r'\d+', content)
         number_ratio = len(numbers) / len(words) if words else 0
         
@@ -1102,49 +1211,130 @@ class EntityAwareRetriever(Retriever):
             if len(words) > 20:  # Tabelas grandes são OK
                 return True
         
+        # Ajustar threshold baseado no chunk window
+        # Quando chunks são combinados (chunk_window > 0), espera-se mais repetição
+        # porque chunks adjacentes podem ter conteúdo similar
+        base_threshold_short = 5  # Sequências curtas (3 palavras): aceita até 5 repetições
+        base_threshold_medium = 4  # Sequências médias (4 palavras): aceita até 4 repetições
+        base_threshold_long = 3   # Sequências longas (5 palavras): aceita até 3 repetições
+        
+        # Aumentar threshold se chunk window está ativo (chunks combinados)
+        if chunk_window > 0:
+            # Chunks combinados podem ter mais repetição natural
+            window_multiplier = 1.5 + (chunk_window * 0.3)  # Ex: window=3 → multiplier=2.4
+            base_threshold_short = int(base_threshold_short * window_multiplier)
+            base_threshold_medium = int(base_threshold_medium * window_multiplier)
+            base_threshold_long = int(base_threshold_long * window_multiplier)
+        
+        # Ajustar ainda mais para tabelas/gráficos
+        if is_likely_table_or_chart:
+            base_threshold_short = max(base_threshold_short, 8)
+            base_threshold_medium = max(base_threshold_medium, 6)
+            base_threshold_long = max(base_threshold_long, 5)
+        
+        # Usar conteúdo sem cabeçalhos/rodapés para verificação de repetição
+        words_for_repetition = content_for_repetition_check.split()
+        
         # Detectar repetição excessiva: verifica sequências de diferentes tamanhos
         # Verificar se há padrões repetitivos (mesma sequência de palavras repetida)
         # Exemplo: "mização da revisão tarifária" repetido múltiplas vezes
         # Verifica sequências de 3, 4 e 5 palavras para capturar diferentes padrões
         max_repetition = 0
+        max_repetition_seq_length = 0
+        
         for seq_length in [3, 4, 5]:
-            if len(words) < seq_length:
+            if len(words_for_repetition) < seq_length:
                 continue
             word_sequences = {}
-            for i in range(len(words) - seq_length + 1):
-                seq = " ".join(words[i:i+seq_length])
+            for i in range(len(words_for_repetition) - seq_length + 1):
+                seq = " ".join(words_for_repetition[i:i+seq_length])
                 word_sequences[seq] = word_sequences.get(seq, 0) + 1
             
             current_max = max(word_sequences.values()) if word_sequences else 0
-            max_repetition = max(max_repetition, current_max)
+            if current_max > max_repetition:
+                max_repetition = current_max
+                max_repetition_seq_length = seq_length
         
-        # Se alguma sequência aparece mais de 3 vezes, é provavelmente repetição
-        # Para sequências maiores (4-5 palavras), aceita até 2 repetições
-        # Para tabelas/gráficos, ser mais permissivo
-        threshold = 5 if is_likely_table_or_chart else (3 if max_repetition <= 3 else 2)
+        # Aplicar threshold apropriado baseado no tamanho da sequência repetida
+        if max_repetition_seq_length == 3:
+            threshold = base_threshold_short
+        elif max_repetition_seq_length == 4:
+            threshold = base_threshold_medium
+        elif max_repetition_seq_length == 5:
+            threshold = base_threshold_long
+        else:
+            threshold = base_threshold_medium  # Default
+        
+        # Filtrar apenas se repetição for claramente excessiva
+        # E também verificar se a repetição representa uma fração significativa do chunk
+        # Usar words_for_repetition (sem cabeçalhos/rodapés) para cálculo de fração
         if max_repetition > threshold:
-            msg.warn(f"  ⚠️ Chunk filtrado: conteúdo repetitivo detectado (sequência repetida {max_repetition} vezes)")
-            return False
+            # Calcular fração do chunk ocupada pela sequência repetida (usando conteúdo sem cabeçalhos/rodapés)
+            repeated_fraction = (max_repetition * max_repetition_seq_length) / len(words_for_repetition) if len(words_for_repetition) > 0 else 0
+            
+            # Filtrar apenas se repetição é alta E ocupa mais de 40% do chunk (sem cabeçalhos/rodapés)
+            # (permite repetição moderada em chunks longos)
+            if repeated_fraction > 0.4:
+                msg.warn(f"  ⚠️ Chunk filtrado: conteúdo repetitivo detectado (sequência de {max_repetition_seq_length} palavras repetida {max_repetition} vezes, {int(repeated_fraction * 100)}% do conteúdo útil, threshold={threshold})")
+                return False
+            else:
+                # Repetição alta mas não ocupa tanto espaço - provavelmente OK
+                msg.info(f"  ℹ️ Repetição moderada detectada ({max_repetition}x), mas apenas {int(repeated_fraction * 100)}% do conteúdo útil - mantendo")
+                return True
         
-        # Verificação adicional: se mais de 50% do chunk é a mesma frase repetida
-        # Útil para casos como "mização da revisão tarifária" repetido muitas vezes
-        # NÃO aplicar a tabelas/gráficos (já verificados acima)
-        if len(words) > 10 and not is_likely_table_or_chart:
-            # Tenta encontrar a frase mais comum (sequência de 4-6 palavras)
-            for seq_length in [4, 5, 6]:
-                if len(words) < seq_length * 2:  # Precisa ter pelo menos 2 repetições
+        # Verificação adicional: detectar repetição de frases completas (não apenas sequências curtas)
+        # Útil para casos como "mização da revisão tarifária" ou frases completas repetidas
+        # Para tabelas/gráficos, verificar apenas frases longas (não números)
+        min_phrase_length = 6 if is_likely_table_or_chart else 4
+        max_phrase_length = 15  # Frases muito longas podem ser parágrafos completos
+        
+        # Ajustar thresholds de repetição de frases baseado no chunk window
+        # Quando chunks são combinados, frases podem se repetir mais naturalmente
+        phrase_repetition_multiplier = 1.0
+        if chunk_window > 0:
+            phrase_repetition_multiplier = 1.5 + (chunk_window * 0.2)  # Ex: window=3 → multiplier=2.1
+        
+        if len(words_for_repetition) > 10:
+            # Verificar sequências de diferentes tamanhos (4-15 palavras)
+            # Usar words_for_repetition para ignorar repetições de cabeçalhos/rodapés
+            for seq_length in range(min_phrase_length, min(max_phrase_length + 1, len(words_for_repetition) // 2 + 1)):
+                if len(words_for_repetition) < seq_length * 2:  # Precisa ter pelo menos 2 repetições
                     continue
+                
                 phrase_counts = {}
-                for i in range(len(words) - seq_length + 1):
-                    phrase = " ".join(words[i:i+seq_length])
+                for i in range(len(words_for_repetition) - seq_length + 1):
+                    phrase = " ".join(words_for_repetition[i:i+seq_length])
+                    # Para tabelas/gráficos, ignorar sequências que são principalmente números
+                    if is_likely_table_or_chart:
+                        # Se a frase tem mais de 50% números, provavelmente é parte de uma tabela legítima
+                        phrase_numbers = len(re.findall(r'\d+', phrase))
+                        if phrase_numbers / seq_length > 0.5:
+                            continue
+                    
                     phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
                 
                 if phrase_counts:
                     most_common_phrase = max(phrase_counts.items(), key=lambda x: x[1])
                     phrase_text, phrase_count = most_common_phrase
-                    # Se a frase mais comum aparece mais de 2 vezes e representa mais de 40% do chunk
-                    if phrase_count >= 2 and (phrase_count * seq_length) / len(words) > 0.4:
-                        msg.warn(f"  ⚠️ Chunk filtrado: frase repetitiva detectada ('{phrase_text[:50]}...' aparece {phrase_count} vezes, {int((phrase_count * seq_length) / len(words) * 100)}% do chunk)")
+                    
+                    # Para frases longas (8+ palavras), ser mais permissivo
+                    # Para frases médias (4-7 palavras), ser mais restritivo
+                    if seq_length >= 8:
+                        # Frases longas: filtrar apenas se aparecer muitas vezes E representar >30% do chunk
+                        threshold_ratio = 0.3
+                        min_repetitions = int(2 * phrase_repetition_multiplier)
+                    else:
+                        # Frases médias: filtrar se aparecer muitas vezes E representar >40% do chunk
+                        threshold_ratio = 0.4
+                        min_repetitions = int(2 * phrase_repetition_multiplier)
+                    
+                    # Aumentar threshold_ratio quando chunk window está ativo (mais tolerante)
+                    if chunk_window > 0:
+                        threshold_ratio = threshold_ratio * (1.0 + chunk_window * 0.1)  # Ex: window=3 → +30%
+                    
+                    # Usar words_for_repetition para calcular fração (ignora cabeçalhos/rodapés)
+                    if phrase_count >= min_repetitions and (phrase_count * seq_length) / len(words_for_repetition) > threshold_ratio:
+                        msg.warn(f"  ⚠️ Chunk filtrado: frase repetitiva detectada ('{phrase_text[:60]}...' aparece {phrase_count} vezes, {int((phrase_count * seq_length) / len(words_for_repetition) * 100)}% do conteúdo útil, {seq_length} palavras, min_repetitions={min_repetitions}, threshold_ratio={threshold_ratio:.2f})")
                         return False
         
         # Detectar fragmentação: chunk começa ou termina no meio de palavra
@@ -1159,8 +1349,12 @@ class EntityAwareRetriever(Retriever):
         
         return True
     
-    def combine_context(self, documents: list[dict]) -> tuple[str, list[dict]]:
+    def combine_context(self, documents: list[dict], chunk_window: int = 0) -> tuple[str, list[dict]]:
         """Combina contexto dos documentos, filtrando chunks de baixa qualidade
+        
+        Args:
+            documents: Lista de documentos com chunks
+            chunk_window: Tamanho do chunk window usado (para ajustar thresholds de qualidade)
         
         Returns:
             tuple: (context_string, filtered_documents)
@@ -1177,7 +1371,7 @@ class EntityAwareRetriever(Retriever):
             for chunk in document["chunks"]:
                 total_chunks += 1
                 chunk_content = chunk.get("content", "")
-                if self._is_chunk_quality_good(chunk_content):
+                if self._is_chunk_quality_good(chunk_content, chunk_window=chunk_window):
                     filtered_chunks_list.append(chunk)
                 else:
                     filtered_chunks += 1
@@ -1188,10 +1382,18 @@ class EntityAwareRetriever(Retriever):
                 filtered_document["chunks"] = filtered_chunks_list
                 filtered_documents.append(filtered_document)
         
+        # FALLBACK: Se todos os chunks foram filtrados, usar os chunks originais (mesmo com repetição)
+        # Isso evita retornar contexto vazio quando o filtro é muito restritivo
+        if len(filtered_documents) == 0 and len(documents) > 0:
+            msg.warn(f"  ⚠️ ATENÇÃO: Todos os {total_chunks} chunks foram filtrados!")
+            msg.warn(f"  ⚠️ Usando fallback: mantendo todos os chunks originais (mesmo com possível repetição)")
+            
+            # Usar documentos originais como fallback
+            filtered_documents = documents
+            filtered_chunks = 0  # Resetar contador para não confundir
+        
         if filtered_chunks > 0:
             msg.warn(f"  ⚠️ {filtered_chunks}/{total_chunks} chunks filtrados por baixa qualidade")
-            if len(filtered_documents) == 0:
-                msg.warn(f"  ⚠️ ATENÇÃO: Todos os chunks foram filtrados! O contexto pode estar vazio.")
         
         # Usar método do WindowRetriever para combinar contexto
         window_retriever = WindowRetriever()

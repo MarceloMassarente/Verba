@@ -312,19 +312,38 @@ async def validate_chunks_http(
     if repetitive_chunks > 0:
         msg.info("\nEXEMPLOS DE CHUNKS REPETITIVOS:")
         count = 0
-        for analysis in analyses:
-            if analysis["repetitive_phrases"]:
-                count += 1
-                if count <= 5:  # Mostrar 5 exemplos
-                    msg.warn(f"\n  Chunk {analysis['chunk_id']} (UUID: {analysis['uuid'][:8]}...):")
-                    for phrase_info in analysis["repetitive_phrases"][:2]:  # Top 2 frases
-                        msg.warn(f"    - '{phrase_info['phrase'][:60]}...' aparece {phrase_info['count']}x ({phrase_info['percentage']:.1f}% do chunk)")
+        # Ordenar por maior repetição primeiro
+        sorted_repetitive = sorted(
+            [a for a in analyses if a["repetitive_phrases"]],
+            key=lambda x: max(p["count"] for p in x["repetitive_phrases"]) if x["repetitive_phrases"] else 0,
+            reverse=True
+        )
+        for analysis in sorted_repetitive:
+            count += 1
+            if count <= 10:  # Mostrar 10 exemplos
+                max_repetition = max(p["count"] for p in analysis["repetitive_phrases"]) if analysis["repetitive_phrases"] else 0
+                msg.warn(f"\n  Chunk {analysis['chunk_id']} (UUID: {analysis['uuid'][:8]}...), Score: {analysis['quality_score']}/100:")
+                msg.warn(f"    Tamanho: {analysis['length']} chars, {analysis['word_count']} palavras")
+                for phrase_info in analysis["repetitive_phrases"][:3]:  # Top 3 frases
+                    msg.warn(f"    - '{phrase_info['phrase'][:80]}...' aparece {phrase_info['count']}x ({phrase_info['percentage']:.1f}% do chunk)")
+                # Mostrar preview do conteúdo
+                chunk_idx = analyses.index(analysis)
+                if chunk_idx < len(chunks):
+                    try:
+                        preview = chunks[chunk_idx]["content"][:200].encode('utf-8', errors='ignore').decode('utf-8')
+                        msg.warn(f"    Preview: {preview}...")
+                    except:
+                        msg.warn(f"    Preview: (erro ao exibir)")
     
     if duplicates:
         msg.info("\nEXEMPLOS DE CHUNKS DUPLICADOS:")
         for dup in duplicates[:5]:  # Mostrar apenas 5 exemplos
-            msg.warn(f"  Chunk {dup['chunk_id']} (UUID: {dup['uuid'][:8]}...) e duplicado de {dup['duplicate_of'][:8]}...")
-            msg.warn(f"    Preview: {dup['content_preview']}...")
+            try:
+                preview = dup['content_preview'].encode('utf-8', errors='ignore').decode('utf-8')
+                msg.warn(f"  Chunk {dup['chunk_id']} (UUID: {dup['uuid'][:8]}...) e duplicado de {dup['duplicate_of'][:8]}...")
+                msg.warn(f"    Preview: {preview}...")
+            except:
+                msg.warn(f"  Chunk {dup['chunk_id']} (UUID: {dup['uuid'][:8]}...) e duplicado de {dup['duplicate_of'][:8]}...")
     
     if low_quality > 0:
         msg.info("\nCHUNKS DE BAIXA QUALIDADE (top 5 piores):")
@@ -338,8 +357,11 @@ async def validate_chunks_http(
                 msg.warn(f"    Comeca com fragmento")
             if analysis["ends_with_fragment"]:
                 msg.warn(f"    Termina com fragmento")
-            preview = chunks[analyses.index(analysis)]["content"][:150]
-            msg.warn(f"    Preview: {preview}...")
+            try:
+                preview = chunks[analyses.index(analysis)]["content"][:150].encode('utf-8', errors='ignore').decode('utf-8')
+                msg.warn(f"    Preview: {preview}...")
+            except:
+                msg.warn(f"    Preview: (erro ao exibir)")
     
     msg.info("\n" + "="*80)
     
