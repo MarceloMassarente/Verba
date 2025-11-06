@@ -124,17 +124,27 @@ def get_nlp(language: str = None):
         msg.warn(f"  ⚠️ Erro ao carregar spaCy: {str(e)}")
         return None
 
-def extract_entities_from_query(query: str) -> List[str]:
-    """Extrai entity_ids da query usando SpaCy + Gazetteer
+def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List[str]:
+    """Extrai entidades da query usando SpaCy (inteligente, sem gazetteer obrigatório)
+    
+    NOVO: Modo inteligente que detecta entidades automaticamente sem precisar de gazetteer.
+    Retorna as menções de texto diretamente para fazer match com conteúdo dos chunks.
     
     Suporta:
-    - Entidades nomeadas (ORG, PERSON, GPE, LOC): "Apple", "Spencer Stuart"
+    - Entidades nomeadas (ORG, PERSON, GPE, LOC): "Apple", "China", "São Paulo"
     - Múltiplas entidades: "apple e microsoft"
-    - Retorna entity_ids apenas (não palavras-chave)
     - Detecção automática de idioma (pt/en) e uso do modelo spaCy apropriado
+    - Modo inteligente: retorna menções de texto (não precisa de gazetteer)
+    - Modo gazetteer (opcional): retorna entity_ids se gazetteer disponível
     
-    Nota: Palavras-chave como "inovação" são ignoradas pelo filtro entity-aware.
-          Para melhor resultado, combine com busca vetorial.
+    Args:
+        query: Query do usuário
+        use_gazetteer: Se True, tenta mapear para entity_ids via gazetteer (modo legado)
+    
+    Returns:
+        Lista de entidades detectadas:
+        - Modo inteligente (use_gazetteer=False): retorna menções de texto ["China", "Apple"]
+        - Modo gazetteer (use_gazetteer=True): retorna entity_ids ["ent:loc:china", "ent:org:apple"]
     """
     # Detectar idioma da query
     query_language = detect_query_language(query)
@@ -142,14 +152,9 @@ def extract_entities_from_query(query: str) -> List[str]:
     
     # Carregar modelo spaCy apropriado para o idioma
     nlp_model = get_nlp(language=query_language)
-    gaz = load_gazetteer()
     
     if not nlp_model:
         msg.warn(f"  ⚠️ spaCy não disponível para extração de entidades (idioma: {query_language})")
-        return []
-    
-    if not gaz:
-        msg.warn("  ⚠️ Gazetteer vazio ou não encontrado - nenhuma entidade será detectada")
         return []
     
     try:
@@ -161,17 +166,29 @@ def extract_entities_from_query(query: str) -> List[str]:
         
         # Log detalhado das menções detectadas pelo spaCy
         if mentions:
-            msg.info(f"  🔍 Menções detectadas pelo spaCy: {[m['text'] for m in mentions]}")
+            msg.info(f"  🔍 Menções detectadas pelo spaCy: {[m['text'] for m in mentions]} (labels: {[m['label'] for m in mentions]})")
         else:
             msg.info(f"  ⚠️ Nenhuma menção detectada pelo spaCy na query: '{query}'")
+            return []
         
-        # Normaliza para entity_ids
+        # MODO INTELIGENTE (padrão): Retornar menções de texto diretamente
+        # Isso permite fazer match com conteúdo dos chunks sem precisar de gazetteer
+        if not use_gazetteer:
+            entity_texts = [m["text"] for m in mentions]
+            msg.info(f"  ✅ Modo inteligente: {len(entity_texts)} entidades detectadas automaticamente: {entity_texts}")
+            return entity_texts
+        
+        # MODO GAZETTEER (opcional, legado): Tentar mapear para entity_ids
+        gaz = load_gazetteer()
+        if not gaz:
+            msg.warn("  ⚠️ Gazetteer não disponível - usando modo inteligente (menções de texto)")
+            return [m["text"] for m in mentions]
+        
+        # Normaliza para entity_ids usando gazetteer
         entity_ids = []
         query_lower = query.lower()
         mention_texts_lower = [m["text"].lower() for m in mentions]
         
-        # Busca mais flexível: verifica se alias está na query OU em menções
-        # Também tenta busca parcial (palavras-chave dentro do alias)
         for entity_id, aliases in gaz.items():
             matched = False
             matched_alias = None
@@ -193,9 +210,7 @@ def extract_entities_from_query(query: str) -> List[str]:
                     break
                 
                 # Busca parcial: verifica se palavras-chave do alias estão na query
-                # (útil para "Nine Dragons" quando gazetteer tem "Nine Dragons Paper")
                 if len(alias_words) > 1:
-                    # Se pelo menos 2 palavras do alias estão na query, considera match
                     words_in_query = sum(1 for word in alias_words if word in query_lower)
                     if words_in_query >= min(2, len(alias_words)):
                         matched = True
@@ -209,11 +224,12 @@ def extract_entities_from_query(query: str) -> List[str]:
         
         # Log final
         if entity_ids:
-            msg.info(f"  ✅ Entidades extraídas ({len(entity_ids)}): {entity_ids}")
+            msg.info(f"  ✅ Entidades extraídas via gazetteer ({len(entity_ids)}): {entity_ids}")
         else:
             if mentions:
                 msg.warn(f"  ⚠️ Menções detectadas mas não encontradas no gazetteer: {[m['text'] for m in mentions]}")
-                msg.warn(f"  💡 Sugestão: Adicionar essas entidades ao gazetteer para habilitar filtros entity-aware")
+                msg.info(f"  💡 Usando modo inteligente: retornando menções de texto diretamente")
+                return [m["text"] for m in mentions]
             else:
                 msg.info(f"  ℹ️ Nenhuma entidade detectada na query")
         

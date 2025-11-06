@@ -388,28 +388,82 @@ class EntityAwareRetriever(Retriever):
         except Exception as e:
             msg.warn(f"  ⚠️ Erro ao verificar diagnóstico de entidades: {str(e)}")
         
+        # NOVO: Modo inteligente - detectar entidades automaticamente (sem gazetteer obrigatório)
+        entity_texts = []  # Menções de texto detectadas (modo inteligente)
+        entity_ids = []    # Entity IDs (modo gazetteer, opcional)
+        
+        # Tentar extrair entidades usando modo inteligente (sem gazetteer)
+        try:
+            from verba_extensions.plugins.entity_aware_query_orchestrator import extract_entities_from_query
+            # Modo inteligente: retorna menções de texto diretamente
+            entity_texts = extract_entities_from_query(query, use_gazetteer=False)
+            
+            # Se há gazetteer, tentar também mapear para entity_ids (opcional)
+            try:
+                entity_ids_from_gazetteer = extract_entities_from_query(query, use_gazetteer=True)
+                if entity_ids_from_gazetteer and all(not eid.startswith("ent:") for eid in entity_ids_from_gazetteer):
+                    # Se retornou textos (não entity_ids), usar como fallback
+                    entity_texts = entity_ids_from_gazetteer
+                else:
+                    # Se retornou entity_ids, usar eles
+                    entity_ids = entity_ids_from_gazetteer
+            except:
+                pass
+        except Exception as e:
+            msg.warn(f"  ⚠️ Erro ao extrair entidades (modo inteligente): {str(e)}")
+        
+        # Fallback: usar query_parser se modo inteligente não funcionou
+        if not entity_texts and not entity_ids:
+            parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
+            parsed = parse_query(parse_query_text)
+            parsed_entity_texts = [e["text"] for e in parsed["entities"] if e.get("text")]
+            parsed_entity_ids = [e["entity_id"] for e in parsed["entities"] if e.get("entity_id")]
+            
+            # Usar textos se não houver entity_ids
+            if parsed_entity_texts:
+                entity_texts = parsed_entity_texts
+            if parsed_entity_ids:
+                entity_ids = parsed_entity_ids
+        
+        # Combinar entidades do builder (se houver)
+        if builder_entities:
+            # Se builder retornou entity_ids, usar eles
+            if all(eid.startswith("ent:") for eid in builder_entities):
+                entity_ids = builder_entities
+            else:
+                # Se builder retornou textos, usar eles
+                entity_texts = builder_entities
+        
+        # Log final
+        if entity_texts:
+            msg.info(f"  🔍 Entidades detectadas (modo inteligente): {entity_texts}")
+        if entity_ids:
+            msg.info(f"  🔍 Entity IDs detectados (via gazetteer): {entity_ids}")
+        
+        # Usar entity_texts para boostar busca (adicionar à query de keyword search)
+        # Isso faz chunks que contenham essas entidades terem score maior
+        if entity_texts:
+            # Adicionar entidades à query de busca para boostar chunks que as contenham
+            entity_boost = " ".join(entity_texts)
+            msg.info(f"  ✅ Usando entidades para boostar busca: {entity_boost}")
+        
+        # Para compatibilidade: usar entity_ids se disponível, senão usar entity_texts
+        final_entity_ids = entity_ids if entity_ids else entity_texts
+        
+        # Obter termos semânticos
         parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
         parsed = parse_query(parse_query_text)
-        parsed_entity_ids = [e["entity_id"] for e in parsed["entities"] if e["entity_id"]]
         semantic_terms = parsed["semantic_concepts"]
         
-        # Combinar entidades do builder e do parser (priorizar builder)
-        entity_ids = builder_entities if builder_entities else parsed_entity_ids
-        
-        msg.info(f"  🔍 Entidades detectadas: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
         msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
         
         # DIAGNÓSTICO: Se não encontrou entidades, mostrar por quê
-        if not entity_ids:
+        if not final_entity_ids:
             msg.warn(f"  ⚠️ DIAGNÓSTICO: Nenhuma entidade detectada na query: '{query}'")
-            if parsed.get("entities"):
-                entities_without_id = [e["text"] for e in parsed["entities"] if not e.get("entity_id")]
-                if entities_without_id:
-                    msg.warn(f"  💡 Menções detectadas pelo spaCy mas SEM entity_id no gazetteer: {entities_without_id}")
-                    msg.warn(f"  💡 Adicione essas entidades ao gazetteer.json para habilitar filtros")
-            else:
-                msg.warn(f"  💡 Nenhuma menção detectada pelo spaCy (ORG, PERSON, GPE, LOC)")
-                msg.warn(f"  💡 Verifique se a query contém nomes próprios (empresas, pessoas, lugares)")
+            msg.warn(f"  💡 Verifique se a query contém nomes próprios (empresas, pessoas, lugares)")
+        
+        # Se não há entidades, usar entity_ids para compatibilidade
+        entity_ids = final_entity_ids
         
         # Se não há entidades, avisar que filtros restritivos serão ignorados
         if not entity_ids:
@@ -634,16 +688,30 @@ class EntityAwareRetriever(Retriever):
             }
         
         # 3. DETERMINA QUERY PARA BUSCA SEMÂNTICA
-        # Prioridade: rewritten_query > semantic_terms > query original
+        # NOVO: Adicionar entidades detectadas à query para boostar chunks que as contenham
+        # Prioridade: rewritten_query > semantic_terms + entity_texts > query original
+        
+        # Preparar query com boost de entidades
+        base_query = query
         if enable_query_rewriting:
-            search_query = rewritten_query
-            msg.info(f"  Query semântica (rewritten): '{search_query}'")
+            base_query = rewritten_query
         elif enable_semantic and semantic_terms:
-            # Se tem conceitos semânticos, usa-os para melhorar a busca
-            search_query = " ".join(semantic_terms)
-            msg.info(f"  Query semântica: '{search_query}'")
+            base_query = " ".join(semantic_terms)
+        
+        # Adicionar entidades detectadas para boostar busca (modo inteligente)
+        if entity_texts:
+            # Combinar query base com entidades para melhorar relevância
+            entity_boost = " ".join(entity_texts)
+            search_query = f"{base_query} {entity_boost}".strip()
+            msg.info(f"  Query semântica (com boost de entidades): '{base_query}' + '{entity_boost}'")
         else:
-            search_query = query  # Padrão: query completa
+            search_query = base_query
+            if enable_query_rewriting:
+                msg.info(f"  Query semântica (rewritten): '{search_query}'")
+            elif enable_semantic and semantic_terms:
+                msg.info(f"  Query semântica: '{search_query}'")
+            else:
+                msg.info(f"  Query semântica: '{search_query}'")
         
         # Atualizar debug info com query final usada
         if not debug_info["rewritten_query"]:
