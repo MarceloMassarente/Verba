@@ -161,7 +161,14 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"EntityAwareRetriever processando: '{query}'")
         
-        # DEBUG INFO: Coletar informações de debug para exibir ao usuário
+        # CONFIG
+        search_mode = config["Search Mode"].value
+        limit_mode = config["Limit Mode"].value
+        limit = int(config["Limit/Sensitivity"].value)
+        alpha_value = config["Alpha"].value
+        alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
+        
+        # DEBUG INFO: Coletar informações de debug para exibir ao usuário (DEPOIS de definir alpha)
         debug_info = {
             "original_query": query,
             "rewritten_query": None,
@@ -174,13 +181,6 @@ class EntityAwareRetriever(Retriever):
             "search_mode": None,
             "explanation": None,
         }
-        
-        # CONFIG
-        search_mode = config["Search Mode"].value
-        limit_mode = config["Limit Mode"].value
-        limit = int(config["Limit/Sensitivity"].value)
-        alpha_value = config["Alpha"].value
-        alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
         enable_semantic = config.get("Enable Semantic Search", {}).value if isinstance(config.get("Enable Semantic Search"), InputConfig) else True
         enable_query_rewriting = config.get("Enable Query Rewriting", {}).value if isinstance(config.get("Enable Query Rewriting"), InputConfig) else False
