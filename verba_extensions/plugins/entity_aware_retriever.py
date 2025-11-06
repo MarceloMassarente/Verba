@@ -542,7 +542,7 @@ class EntityAwareRetriever(Retriever):
         if lang_filter:
             if has_entities:
                 # Quando há entidades, filtro de idioma ajuda a evitar contaminação
-            filters_list.append(lang_filter)
+                filters_list.append(lang_filter)
                 msg.info(f"  ✅ Filtro de idioma aplicado (com entidades)")
             else:
                 # Quando não há entidades, filtro de idioma pode estar restringindo demais
