@@ -53,6 +53,7 @@ class WindowRetriever(Retriever):
         embedder,
         labels,
         document_uuids,
+        rag_config=None,  # Optional: RAG config (not used by WindowRetriever, but accepted for compatibility)
     ):
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value

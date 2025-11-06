@@ -44,15 +44,76 @@ class QueryBuilderPlugin:
         self._schema_cache_time: float = 0
         self._schema_cache_ttl = 300  # 5 minutos
     
-    def _get_generator(self):
-        """Lazy load do generator (Anthropic)"""
+    def _get_generator(self, preferred_generator_name: Optional[str] = None):
+        """
+        Lazy load do generator com fallback inteligente.
+        
+        Tenta usar o mesmo tipo de generator que está configurado no chat.
+        Ordem de tentativa:
+        1. Generator preferido (se especificado)
+        2. OpenAI (mais comum)
+        3. Anthropic
+        4. Outros generators disponíveis
+        """
         if self._generator is None:
+            # Lista de generators para tentar (em ordem de preferência)
+            generators_to_try = []
+            
+            if preferred_generator_name:
+                generators_to_try.append(preferred_generator_name)
+            
+            # Adicionar generators comuns em ordem de preferência
+            generators_to_try.extend([
+                "OpenAI",      # Mais comum
+                "Anthropic",   # Segundo mais comum
+                "Groq",        # Alternativa rápida
+                "Cohere",      # Outra alternativa
+            ])
+            
+            # Tentar criar cada generator até conseguir
+            for gen_name in generators_to_try:
+                try:
+                    if gen_name == "OpenAI":
+                        from goldenverba.components.generation.OpenAIGenerator import OpenAIGenerator
+                        self._generator = OpenAIGenerator()
+                        msg.info(f"  Query builder: usando generator padrão '{gen_name}'")
+                        return self._generator
+                    elif gen_name == "Anthropic":
+                        from goldenverba.components.generation.AnthrophicGenerator import AnthropicGenerator
+                        self._generator = AnthropicGenerator()
+                        msg.info(f"  Query builder: usando generator padrão '{gen_name}'")
+                        return self._generator
+                    elif gen_name == "Groq":
+                        from goldenverba.components.generation.GroqGenerator import GroqGenerator
+                        self._generator = GroqGenerator()
+                        msg.info(f"  Query builder: usando generator padrão '{gen_name}'")
+                        return self._generator
+                    elif gen_name == "Cohere":
+                        from goldenverba.components.generation.CohereGenerator import CohereGenerator
+                        self._generator = CohereGenerator()
+                        msg.info(f"  Query builder: usando generator padrão '{gen_name}'")
+                        return self._generator
+                except Exception as e:
+                    msg.warn(f"  Query builder: não foi possível criar generator '{gen_name}': {e}")
+                    continue
+            
+            # Se nenhum funcionou, tentar via GeneratorManager
             try:
-                from goldenverba.components.generation.AnthrophicGenerator import AnthropicGenerator
-                self._generator = AnthropicGenerator()
+                from goldenverba.components.managers import GeneratorManager
+                generator_manager = GeneratorManager()
+                
+                # Tentar usar o primeiro generator disponível
+                if generator_manager.generators:
+                    first_gen_name = list(generator_manager.generators.keys())[0]
+                    self._generator = generator_manager.generators[first_gen_name]
+                    msg.info(f"  Query builder: usando primeiro generator disponível '{first_gen_name}'")
+                    return self._generator
             except Exception as e:
-                msg.warn(f"AnthropicGenerator não disponível: {e}")
-                return None
+                msg.warn(f"  Query builder: erro ao obter generator via GeneratorManager: {e}")
+            
+            msg.warn("  Query builder: nenhum generator disponível para fallback")
+            return None
+        
         return self._generator
     
     async def get_schema_info(self, client, collection_name: str) -> Dict[str, Any]:
@@ -230,6 +291,7 @@ class QueryBuilderPlugin:
             # Obter generator configurado do RAG config (mesmo do chat) ou usar fallback
             generator = None
             generator_config = None
+            preferred_generator_name = None  # Para usar no fallback se necessário
             
             if rag_config and "Generator" in rag_config:
                 try:
@@ -237,24 +299,59 @@ class QueryBuilderPlugin:
                     generator_manager = GeneratorManager()
                     
                     generator_name = rag_config["Generator"].selected
+                    preferred_generator_name = generator_name  # Guardar para fallback
                     generator_config = rag_config["Generator"].components[generator_name].config
                     
                     if generator_name in generator_manager.generators:
                         generator = generator_manager.generators[generator_name]
                         msg.info(f"  Query builder: usando generator configurado '{generator_name}' do RAG config")
                     else:
-                        msg.warn(f"  Query builder: generator '{generator_name}' não encontrado, tentando fallback")
+                        msg.warn(f"  Query builder: generator '{generator_name}' não encontrado no GeneratorManager, tentando criar novo")
+                        # Tentar criar diretamente se não estiver no manager
+                        try:
+                            if generator_name == "OpenAI":
+                                from goldenverba.components.generation.OpenAIGenerator import OpenAIGenerator
+                                generator = OpenAIGenerator()
+                            elif generator_name == "Anthropic":
+                                from goldenverba.components.generation.AnthrophicGenerator import AnthropicGenerator
+                                generator = AnthropicGenerator()
+                            elif generator_name == "Groq":
+                                from goldenverba.components.generation.GroqGenerator import GroqGenerator
+                                generator = GroqGenerator()
+                            elif generator_name == "Cohere":
+                                from goldenverba.components.generation.CohereGenerator import CohereGenerator
+                                generator = CohereGenerator()
+                            else:
+                                msg.warn(f"  Query builder: tipo de generator '{generator_name}' não suportado para criação direta")
+                            
+                            # Aplicar configuração do rag_config ao generator criado
+                            if generator and generator_config:
+                                try:
+                                    # Atualizar config do generator com as configurações do rag_config
+                                    for key, value in generator_config.items():
+                                        if key in generator.config:
+                                            if hasattr(generator.config[key], 'value'):
+                                                generator.config[key].value = value.get('value', generator.config[key].value)
+                                    msg.info(f"  Query builder: configuração do RAG config aplicada ao generator '{generator_name}'")
+                                except Exception as e:
+                                    msg.warn(f"  Query builder: erro ao aplicar configuração ao generator: {str(e)}")
+                        except Exception as e:
+                            msg.warn(f"  Query builder: erro ao criar generator '{generator_name}': {str(e)}")
                 except Exception as e:
                     msg.warn(f"  Query builder: erro ao obter generator do RAG config: {str(e)}, tentando fallback")
             
             # Fallback: criar generator padrão se não conseguiu do RAG config
+            # IMPORTANTE: Tenta usar o mesmo tipo de generator que está configurado no chat
             if generator is None:
-                generator = self._get_generator()
+                generator = self._get_generator(preferred_generator_name=preferred_generator_name)
                 if generator is None:
-                    msg.warn("  Query builder: generator não disponível, usando fallback")
+                    msg.warn("  Query builder: generator não disponível, usando fallback (query não será expandida)")
                     return self._fallback_response(user_query)
                 else:
-                    msg.info("  Query builder: usando generator padrão (RAG config não disponível)")
+                    if preferred_generator_name:
+                        msg.info(f"  Query builder: usando generator padrão '{preferred_generator_name}' (RAG config não disponível, mas tentando mesmo tipo)")
+                    else:
+                        msg.info("  Query builder: usando generator padrão (RAG config não disponível)")
             
             strategy = await self._call_llm_with_schema(generator, user_query, schema_info, validate, generator_config)
             

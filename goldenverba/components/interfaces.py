@@ -140,6 +140,7 @@ class Retriever(VerbaComponent):
         embedder,
         labels,
         document_uuids,
+        rag_config=None,  # Optional: RAG config for retrievers that need it (e.g., Query Builder)
     ):
 
         raise NotImplementedError("retrieve method must be implemented by a subclass.")
