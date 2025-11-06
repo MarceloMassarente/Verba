@@ -1,44 +1,67 @@
 """
-Hook ETL A2 - Executa ETL após importação no Verba
+Hook ETL A2 - Executa ETL inteligente após importação no Verba
 Integrado no fluxo normal do Verba via hooks
+NOVO: Multi-idioma, detecção automática de entidades sem gazetteer obrigatório
 """
 
 import os
 from typing import List, Dict, Any, Callable
 from wasabi import msg
 
-# Importações do ETL (lazy para não quebrar se não tiver spacy)
-_nlp = None
-_gazetteer = None
+# Importações do ETL inteligente
+_etl_module = None
+
+def get_etl_module():
+    """Carrega módulo ETL inteligente com lazy import"""
+    global _etl_module
+    if _etl_module is not None:
+        return _etl_module
+    
+    try:
+        import sys
+        # Adicionar ingestor ao path
+        if "ingestor" not in sys.modules:
+            ingestor_path = os.path.join(os.path.dirname(__file__), "..", "..", "ingestor")
+            if os.path.exists(ingestor_path):
+                sys.path.insert(0, ingestor_path)
+        
+        # Tentar importar ETL inteligente
+        try:
+            from etl_a2_intelligent import (
+                extract_entities_intelligent,
+                extract_entities_with_gazetteer,
+                run_etl_patch_for_passage_uuids,
+                load_gazetteer as load_gaz,
+            )
+            _etl_module = {
+                "extract_entities_intelligent": extract_entities_intelligent,
+                "extract_entities_with_gazetteer": extract_entities_with_gazetteer,
+                "run_etl_patch_for_passage_uuids": run_etl_patch_for_passage_uuids,
+                "load_gazetteer": load_gaz,
+            }
+            msg.info("✅ ETL inteligente (multi-idioma) carregado com sucesso")
+            return _etl_module
+        except ImportError:
+            # Fallback para ETL legado
+            msg.warn("⚠️ ETL inteligente não encontrado, usando versão legada")
+            from etl_a2 import (
+                load_gazetteer as load_gaz,
+                run_etl_patch_for_passage_uuids,
+            )
+            _etl_module = {
+                "load_gazetteer": load_gaz,
+                "run_etl_patch_for_passage_uuids": run_etl_patch_for_passage_uuids,
+            }
+            return _etl_module
+    except Exception as e:
+        msg.warn(f"⚠️ Erro ao carregar ETL: {str(e)}")
+        return None
 
 def load_gazetteer(path: str = None) -> Dict:
-    """Carrega gazetteer"""
-    global _gazetteer
-    if _gazetteer is not None:
-        return _gazetteer
-    
-    import json
-    if path is None:
-        # Tenta vários caminhos possíveis
-        possible_paths = [
-            "ingestor/resources/gazetteer.json",
-            "verba_extensions/resources/gazetteer.json",
-            "resources/gazetteer.json",
-        ]
-        for p in possible_paths:
-            if os.path.exists(p):
-                path = p
-                break
-    
-    if path and os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            _gazetteer = {item["entity_id"]: item["aliases"] for item in raw}
-            return _gazetteer
-        except:
-            pass
-    
+    """Carrega gazetteer (opcional, para modo legado)"""
+    etl = get_etl_module()
+    if etl and "load_gazetteer" in etl:
+        return etl["load_gazetteer"](path if path else "ingestor/resources/gazetteer.json")
     return {}
 
 def get_nlp():
@@ -107,7 +130,9 @@ async def run_etl_on_passages(
     collection_name: str = None
 ) -> Dict:
     """
-    Executa ETL A2 em passages recém-criados
+    Executa ETL A2 inteligente em passages recém-criados
+    NOVO: Multi-idioma, detecção automática de entidades
+    
     Chamado via hook após import_document
     
     Args:
@@ -116,7 +141,31 @@ async def run_etl_on_passages(
         tenant: Tenant (opcional)
         collection_name: Nome da collection de embedding (ex: VERBA_Embedding_all_MiniLM_L6_v2)
                         Se None, tenta detectar automaticamente
+    
+    Returns:
+        {"patched": count, "total": total, "error": str or None}
+        
+    NOVO: Salva também `entity_mentions` com estrutura JSON:
+        [{"text": "China", "label": "GPE", "confidence": 0.95}, ...]
     """
+    # Tentar usar ETL inteligente
+    etl = get_etl_module()
+    if etl and "run_etl_patch_for_passage_uuids" in etl:
+        try:
+            msg.info(f"📊 Executando ETL inteligente (multi-idioma) em {len(passage_uuids)} chunks...")
+            # ETL inteligente do ingestor
+            from ingestor.etl_a2_intelligent import run_etl_patch_for_passage_uuids as run_etl_intelligent
+            result = await run_etl_intelligent(
+                lambda: client,
+                passage_uuids,
+                tenant
+            )
+            msg.good(f"✅ ETL inteligente concluído: {result.get('patched', 0)} chunks processados")
+            return result
+        except Exception as e:
+            msg.warn(f"⚠️ Erro no ETL inteligente: {str(e)}, usando fallback...")
+    
+    # Fallback para ETL legado
     try:
         from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
         
