@@ -710,13 +710,26 @@ async def query(payload: QueryPayload):
     try:
         client = await client_manager.connect(payload.credentials)
         documents_uuid = [document.uuid for document in payload.documentFilter]
-        documents, context = await manager.retrieve_chunks(
+        result = await manager.retrieve_chunks(
             client, payload.query, payload.RAG, payload.labels, documents_uuid
         )
-
-        return JSONResponse(
-            content={"error": "", "documents": documents, "context": context}
-        )
+        
+        # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
+        if len(result) == 3:
+            documents, context, debug_info = result
+            return JSONResponse(
+                content={
+                    "error": "", 
+                    "documents": documents, 
+                    "context": context,
+                    "debug_info": debug_info  # Informações de debug para exibir no frontend
+                }
+            )
+        else:
+            documents, context = result
+            return JSONResponse(
+                content={"error": "", "documents": documents, "context": context}
+            )
     except Exception as e:
         msg.fail(f"Query failed: {str(e)}")
         return JSONResponse(

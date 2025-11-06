@@ -161,6 +161,20 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"EntityAwareRetriever processando: '{query}'")
         
+        # DEBUG INFO: Coletar informações de debug para exibir ao usuário
+        debug_info = {
+            "original_query": query,
+            "rewritten_query": None,
+            "query_builder_used": False,
+            "query_rewriter_used": False,
+            "entities_detected": [],
+            "semantic_terms": [],
+            "filters_applied": {},
+            "alpha_used": alpha,
+            "search_mode": None,
+            "explanation": None,
+        }
+        
         # CONFIG
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value
@@ -230,22 +244,27 @@ class EntityAwareRetriever(Retriever):
             
             # Usar semantic_query para busca vetorial
             rewritten_query = strategy.get("semantic_query", query)
+            debug_info["rewritten_query"] = rewritten_query
+            debug_info["query_builder_used"] = True
             
             # Aplicar alpha sugerido
             suggested_alpha = strategy.get("alpha")
             if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
                 rewritten_alpha = float(suggested_alpha)
+                debug_info["alpha_used"] = rewritten_alpha
                 msg.info(f"  Query builder: alpha ajustado para {rewritten_alpha}")
             
             # Extrair filtros do builder (se houver)
             query_filters_from_builder = strategy.get("filters", {})
             builder_entities = query_filters_from_builder.get("entities", [])
             if builder_entities:
+                debug_info["entities_detected"] = builder_entities
                 msg.info(f"  Query builder: entidades detectadas: {builder_entities}")
             
             # Log explanation
             explanation = strategy.get("explanation", "")
             if explanation:
+                debug_info["explanation"] = explanation
                 msg.info(f"  Query builder: {explanation}")
             
         except ImportError:
@@ -258,15 +277,19 @@ class EntityAwareRetriever(Retriever):
                     
                     # Usar semantic_query para busca vetorial
                     rewritten_query = strategy.get("semantic_query", query)
+                    debug_info["rewritten_query"] = rewritten_query
+                    debug_info["query_rewriter_used"] = True
                     
                     # Aplicar alpha sugerido
                     suggested_alpha = strategy.get("alpha")
                     if suggested_alpha is not None and 0.0 <= suggested_alpha <= 1.0:
                         rewritten_alpha = float(suggested_alpha)
+                        debug_info["alpha_used"] = rewritten_alpha
                         msg.info(f"  Query rewriting: alpha ajustado para {rewritten_alpha}")
                     
                     # Log intent se disponível
                     intent = strategy.get("intent", "search")
+                    debug_info["intent"] = intent
                     msg.info(f"  Query rewriting: intent={intent}")
                     
                 except Exception as e:
@@ -301,6 +324,11 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"  Entidades: {entity_ids} (builder: {builder_entities}, parser: {parsed_entity_ids})")
         msg.info(f"  Conceitos: {semantic_terms}")
+        
+        # Atualizar debug info com entidades e termos semânticos
+        if not debug_info["entities_detected"]:
+            debug_info["entities_detected"] = entity_ids
+        debug_info["semantic_terms"] = semantic_terms
         
         # 2. CONSTRÓI FILTRO DE ENTIDADE (WHERE clause)
         # Suporte para filtros hierárquicos (documento primeiro, depois chunks)
@@ -477,12 +505,21 @@ class EntityAwareRetriever(Retriever):
         else:
             search_query = query  # Padrão: query completa
         
+        # Atualizar debug info com query final usada
+        if not debug_info["rewritten_query"]:
+            debug_info["rewritten_query"] = search_query
+        debug_info["search_mode"] = search_mode
+        
         # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!)
         if search_mode == "Hybrid Search":
             try:
                 if combined_filter:
                     # FILTRA por entidade + idioma, DEPOIS faz busca semântica
                     msg.info(f"  Executando: Hybrid search com filtros combinados")
+                    debug_info["filters_applied"] = {
+                        "type": "combined",
+                        "description": "Filtros combinados (entidade + idioma + outros)"
+                    }
                     
                     chunks = await weaviate_manager.hybrid_chunks_with_filter(
                         client=client,
@@ -499,6 +536,11 @@ class EntityAwareRetriever(Retriever):
                 elif entity_filter and enable_entity_filter:
                     # FILTRA apenas por entidade
                     msg.info(f"  Executando: Hybrid search com entity filter")
+                    debug_info["filters_applied"] = {
+                        "type": "entity",
+                        "entities": entity_ids,
+                        "description": f"Filtro por entidades: {entity_ids}"
+                    }
                     
                     chunks = await weaviate_manager.hybrid_chunks_with_filter(
                         client=client,
@@ -515,6 +557,10 @@ class EntityAwareRetriever(Retriever):
                 else:
                     # Sem filtros: busca normal
                     msg.info(f"  Executando: Hybrid search sem filtros")
+                    debug_info["filters_applied"] = {
+                        "type": "none",
+                        "description": "Sem filtros aplicados"
+                    }
                     
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
@@ -772,7 +818,30 @@ class EntityAwareRetriever(Retriever):
         # Gerar contexto combinado
         context = self.combine_context(sorted_context_documents)
         
-        return (sorted_documents, context)
+        # Adicionar informações de debug ao contexto (formato JSON no final)
+        debug_summary = f"\n\n[DEBUG INFO]\n"
+        debug_summary += f"Query original: {debug_info['original_query']}\n"
+        debug_summary += f"Query reescrita: {debug_info['rewritten_query']}\n"
+        if debug_info['query_builder_used']:
+            debug_summary += f"Query Builder usado: Sim\n"
+        if debug_info['query_rewriter_used']:
+            debug_summary += f"Query Rewriter usado: Sim\n"
+        if debug_info['entities_detected']:
+            debug_summary += f"Entidades detectadas: {', '.join(debug_info['entities_detected'])}\n"
+        if debug_info['semantic_terms']:
+            debug_summary += f"Termos semânticos: {', '.join(debug_info['semantic_terms'])}\n"
+        if debug_info['filters_applied']:
+            debug_summary += f"Filtros aplicados: {debug_info['filters_applied'].get('description', 'N/A')}\n"
+        debug_summary += f"Alpha usado: {debug_info['alpha_used']}\n"
+        debug_summary += f"Modo de busca: {debug_info['search_mode']}\n"
+        if debug_info.get('explanation'):
+            debug_summary += f"Explicação: {debug_info['explanation']}\n"
+        
+        # Retornar com informações de debug como terceiro elemento (para API)
+        # Mas também incluir no contexto para compatibilidade
+        context_with_debug = context + debug_summary
+        
+        return (sorted_documents, context_with_debug, debug_info)
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
         """Processa chunks aplicando window technique"""

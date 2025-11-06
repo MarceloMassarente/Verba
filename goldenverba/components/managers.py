@@ -1751,7 +1751,7 @@ class RetrieverManager:
                 .value
             )
             config = rag_config["Retriever"].components[retriever].config
-            documents, context = await self.retrievers[retriever].retrieve(
+            result = await self.retrievers[retriever].retrieve(
                 client,
                 query,
                 vector,
@@ -1761,7 +1761,13 @@ class RetrieverManager:
                 labels,
                 document_uuids,
             )
-            return (documents, context)
+            # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
+            if len(result) == 3:
+                documents, context, debug_info = result
+                return (documents, context, debug_info)
+            else:
+                documents, context = result
+                return (documents, context)
 
         except Exception as e:
             raise e

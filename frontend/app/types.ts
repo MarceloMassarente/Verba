@@ -63,10 +63,29 @@ export type HealthPayload = {
   default_deployment: "Weaviate" | "Docker" | "Local" | "Custom" | "";
 };
 
+export type DebugInfo = {
+  original_query?: string;
+  rewritten_query?: string;
+  query_builder_used?: boolean;
+  query_rewriter_used?: boolean;
+  entities_detected?: string[];
+  semantic_terms?: string[];
+  filters_applied?: {
+    type?: string;
+    description?: string;
+    entities?: string[];
+  };
+  alpha_used?: number;
+  search_mode?: string;
+  explanation?: string;
+  intent?: string;
+};
+
 export type QueryPayload = {
   error: string;
   documents: DocumentScore[];
   context: string;
+  debug_info?: DebugInfo;  // Informações de debug opcionais
 };
 
 export type DocumentScore = {
@@ -402,6 +421,7 @@ export interface Message {
   cached?: boolean;
   distance?: string;
   context?: string;
+  debug_info?: DebugInfo;  // Informações de debug opcionais
 }
 
 // Setting Fields

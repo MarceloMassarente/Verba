@@ -125,6 +125,41 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             </div>
           </button>
         ))}
+        {message.debug_info && (
+          <div className="col-span-full mt-2 p-3 bg-secondary-verba rounded-lg text-xs text-text-alt-verba border border-button-verba">
+            <div className="font-semibold mb-2 text-text-verba">🔍 Debug Info</div>
+            <div className="space-y-1">
+              <div><strong>Query original:</strong> {message.debug_info.original_query}</div>
+              {message.debug_info.rewritten_query && (
+                <div><strong>Query reescrita:</strong> {message.debug_info.rewritten_query}</div>
+              )}
+              {message.debug_info.query_builder_used && (
+                <div>✅ Query Builder usado</div>
+              )}
+              {message.debug_info.query_rewriter_used && (
+                <div>✅ Query Rewriter usado</div>
+              )}
+              {message.debug_info.entities_detected && message.debug_info.entities_detected.length > 0 && (
+                <div><strong>Entidades:</strong> {message.debug_info.entities_detected.join(", ")}</div>
+              )}
+              {message.debug_info.semantic_terms && message.debug_info.semantic_terms.length > 0 && (
+                <div><strong>Termos semânticos:</strong> {message.debug_info.semantic_terms.join(", ")}</div>
+              )}
+              {message.debug_info.filters_applied && (
+                <div><strong>Filtros:</strong> {message.debug_info.filters_applied.description || "N/A"}</div>
+              )}
+              {message.debug_info.alpha_used !== undefined && (
+                <div><strong>Alpha:</strong> {message.debug_info.alpha_used}</div>
+              )}
+              {message.debug_info.search_mode && (
+                <div><strong>Modo:</strong> {message.debug_info.search_mode}</div>
+              )}
+              {message.debug_info.explanation && (
+                <div><strong>Explicação:</strong> {message.debug_info.explanation}</div>
+              )}
+            </div>
+          </div>
+        )}
         <VerbaButton
           Icon={IoDocumentAttach}
           className="btn-sm btn-square"

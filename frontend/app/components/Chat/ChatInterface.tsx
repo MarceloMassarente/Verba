@@ -271,7 +271,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleSuccessResponse = (data: QueryPayload, sendInput: string) => {
     setMessages((prev) => [
       ...prev,
-      { type: "retrieval", content: data.documents, context: data.context },
+      { 
+        type: "retrieval", 
+        content: data.documents, 
+        context: data.context,
+        debug_info: data.debug_info  // Incluir informações de debug
+      },
     ]);
 
     addStatusMessage(

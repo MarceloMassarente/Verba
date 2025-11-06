@@ -1007,7 +1007,7 @@ class VerbaManager:
         vector = await self.embedder_manager.vectorize_query(
             embedder, query, rag_config
         )
-        documents, context = await self.retriever_manager.retrieve(
+        result = await self.retriever_manager.retrieve(
             client,
             retriever,
             query,
@@ -1017,8 +1017,14 @@ class VerbaManager:
             labels,
             document_uuids,
         )
-
-        return (documents, context)
+        
+        # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
+        if len(result) == 3:
+            documents, context, debug_info = result
+            return (documents, context, debug_info)
+        else:
+            documents, context = result
+            return (documents, context)
 
     async def generate_stream_answer(
         self,
