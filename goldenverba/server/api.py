@@ -1024,6 +1024,20 @@ async def get_labels(payload: Credentials):
 @app.post("/api/get_content")
 async def get_content(payload: GetContentPayload):
     try:
+        # Validar chunkScores
+        if not payload.chunkScores:
+            msg.warn("No chunkScores provided")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "No chunks provided",
+                    "content": None,
+                }
+            )
+        
+        # Log para debug
+        msg.debug(f"get_content: {len(payload.chunkScores)} chunks, tipos: {[(cs.uuid, type(cs.chunk_id).__name__, cs.chunk_id) for cs in payload.chunkScores[:3]]}")
+        
         client = await client_manager.connect(payload.credentials)
         content, maxPage = await manager.get_content(
             client, payload.uuid, payload.page - 1, payload.chunkScores
@@ -1035,6 +1049,7 @@ async def get_content(payload: GetContentPayload):
     except Exception as e:
         msg.fail(f"Document retrieval failed: {str(e)}")
         return JSONResponse(
+            status_code=500,
             content={
                 "error": str(e),
                 "document": None,
