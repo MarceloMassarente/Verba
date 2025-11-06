@@ -18,6 +18,24 @@ import time
 from typing import Dict, Any, Optional, List
 from wasabi import msg
 
+# Importar detecção de idioma
+try:
+    from goldenverba.components.document import detect_language
+except ImportError:
+    # Fallback se não disponível
+    try:
+        from langdetect import detect as detect_language
+    except ImportError:
+        def detect_language(text: str) -> str:
+            """Fallback simples de detecção de idioma"""
+            # Detecção básica por palavras comuns
+            text_lower = text.lower()
+            if any(word in text_lower for word in ['the', 'is', 'are', 'which', 'what', 'where', 'when', 'how']):
+                return 'en'
+            elif any(word in text_lower for word in ['o', 'a', 'os', 'as', 'que', 'qual', 'onde', 'quando', 'como']):
+                return 'pt'
+            return 'unknown'
+
 
 class QueryBuilderPlugin:
     """
@@ -195,6 +213,123 @@ class QueryBuilderPlugin:
             # Retornar schema padrão conhecido
             return self._get_default_schema()
     
+    async def get_dominant_language(
+        self,
+        client,
+        collection_name: str,
+        labels: Optional[List[str]] = None,
+        document_uuids: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Obtém o idioma dominante dos documentos filtrados na collection.
+        
+        IMPORTANTE: Calcula apenas dos documentos que serão buscados (filtrados por labels/document_uuids).
+        Isso permite que diferentes coleções de documentos tenham idiomas dominantes diferentes.
+        
+        Args:
+            client: Cliente Weaviate
+            collection_name: Nome da collection
+            labels: Lista de labels para filtrar documentos (opcional)
+            document_uuids: Lista de UUIDs de documentos para filtrar (opcional)
+            
+        Returns:
+            Código do idioma dominante (ex: "en", "pt") ou None se não conseguir detectar
+        """
+        try:
+            collection = client.collections.get(collection_name)
+            
+            # Verificar se chunk_lang existe no schema
+            try:
+                config = collection.config.get()
+                if hasattr(config, '__await__'):
+                    config = await config
+            except TypeError:
+                config = await collection.config.get()
+            
+            has_chunk_lang = any(prop.name == "chunk_lang" for prop in config.properties)
+            
+            if not has_chunk_lang:
+                return None
+            
+            # Construir filtros para agregação (apenas documentos que serão buscados)
+            from weaviate.classes.query import Filter
+            from weaviate.classes.aggregate import GroupByAggregate
+            
+            filters = []
+            
+            # Filtro por labels (se fornecido e não vazio)
+            if labels and isinstance(labels, list) and len(labels) > 0:
+                # Verificar se a collection tem propriedade "labels"
+                has_labels = any(prop.name == "labels" for prop in config.properties)
+                if has_labels:
+                    filters.append(Filter.by_property("labels").contains_any(labels))
+            
+            # Filtro por document_uuids (se fornecido e não vazio)
+            if document_uuids and isinstance(document_uuids, list) and len(document_uuids) > 0:
+                # Verificar se a collection tem propriedade "doc_uuid"
+                has_doc_uuid = any(prop.name == "doc_uuid" for prop in config.properties)
+                if has_doc_uuid:
+                    filters.append(Filter.by_property("doc_uuid").contains_any(document_uuids))
+            
+            # Combinar filtros
+            combined_filter = None
+            if len(filters) == 1:
+                combined_filter = filters[0]
+            elif len(filters) > 1:
+                # AND entre filtros (documento deve ter label E estar na lista de UUIDs)
+                combined_filter = filters[0]
+                for f in filters[1:]:
+                    combined_filter = combined_filter & f
+            
+            try:
+                # Fazer agregação com filtros (se houver)
+                if combined_filter:
+                    result = await collection.aggregate.over_all(
+                        filters=combined_filter,
+                        group_by=GroupByAggregate(prop="chunk_lang"),
+                        total_count=True
+                    )
+                    filter_info = []
+                    if labels:
+                        filter_info.append(f"labels={labels}")
+                    if document_uuids:
+                        filter_info.append(f"docs={len(document_uuids)}")
+                    msg.debug(f"  Query builder: calculando idioma dominante com filtros: {', '.join(filter_info)}")
+                else:
+                    result = await collection.aggregate.over_all(
+                        group_by=GroupByAggregate(prop="chunk_lang"),
+                        total_count=True
+                    )
+                
+                if not result.groups:
+                    return None
+                
+                # Encontrar o grupo com maior total_count
+                dominant_group = max(result.groups, key=lambda g: g.total_count)
+                dominant_lang = dominant_group.grouped_by.value if hasattr(dominant_group.grouped_by, 'value') else None
+                
+                if dominant_lang:
+                    filter_desc = ""
+                    if labels or document_uuids:
+                        parts = []
+                        if labels:
+                            parts.append(f"labels: {labels}")
+                        if document_uuids:
+                            parts.append(f"{len(document_uuids)} docs")
+                        filter_desc = f" (filtrado: {', '.join(parts)})"
+                    msg.info(f"  Query builder: idioma dominante dos documentos{filter_desc}: {dominant_lang}")
+                    return dominant_lang
+                    
+            except Exception as e:
+                msg.debug(f"  Query builder: erro ao obter idioma dominante: {str(e)}")
+                return None
+                
+        except Exception as e:
+            msg.debug(f"  Query builder: erro ao verificar idioma dominante: {str(e)}")
+            return None
+        
+        return None
+    
     def _get_default_schema(self) -> Dict[str, Any]:
         """Retorna schema padrão conhecido se não conseguir obter do Weaviate"""
         return {
@@ -221,7 +356,9 @@ class QueryBuilderPlugin:
         use_cache: bool = True,
         validate: bool = False,
         auto_detect_aggregation: bool = True,
-        rag_config: Optional[Dict[str, Any]] = None
+        rag_config: Optional[Dict[str, Any]] = None,
+        labels: Optional[List[str]] = None,
+        document_uuids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Constrói query complexa conhecendo o schema.
@@ -285,6 +422,16 @@ class QueryBuilderPlugin:
         
         # Obter schema
         schema_info = await self.get_schema_info(client, collection_name)
+        
+        # Obter idioma dominante dos documentos filtrados (se disponível)
+        # IMPORTANTE: Calcula apenas dos documentos que serão buscados (labels/document_uuids)
+        dominant_language = None
+        try:
+            dominant_language = await self.get_dominant_language(
+                client, collection_name, labels=labels, document_uuids=document_uuids
+            )
+        except Exception as e:
+            msg.debug(f"  Query builder: não foi possível obter idioma dominante: {str(e)}")
         
         # Chamar LLM para construir query
         try:
@@ -353,7 +500,9 @@ class QueryBuilderPlugin:
                     else:
                         msg.info("  Query builder: usando generator padrão (RAG config não disponível)")
             
-            strategy = await self._call_llm_with_schema(generator, user_query, schema_info, validate, generator_config)
+            strategy = await self._call_llm_with_schema(
+                generator, user_query, schema_info, validate, generator_config, dominant_language
+            )
             
             # Validar resposta
             if not self._validate_strategy(strategy):
@@ -390,9 +539,22 @@ class QueryBuilderPlugin:
         user_query: str,
         schema_info: Dict[str, Any],
         validate: bool,
-        generator_config: Optional[Dict[str, Any]] = None
+        generator_config: Optional[Dict[str, Any]] = None,
+        dominant_language: Optional[str] = None
     ) -> Dict[str, Any]:
         """Chama LLM para construir query conhecendo o schema"""
+        
+        # Detectar idioma da query
+        query_language = detect_language(user_query)
+        if query_language == "unknown":
+            query_language = "en"  # Default para inglês se não detectar
+        msg.info(f"  Query builder: idioma da query: {query_language.upper()}")
+        
+        # Se temos idioma dominante e é diferente da query, usar estratégia multi-idioma
+        use_multi_language = False
+        if dominant_language and dominant_language != query_language:
+            use_multi_language = True
+            msg.info(f"  Query builder: idioma da query ({query_language.upper()}) diferente do dominante ({dominant_language.upper()}), usando expansão multi-idioma")
         
         properties_str = "\n".join([
             f"  - {p['name']} ({p['type']}): {p.get('description', '')}"
@@ -400,6 +562,67 @@ class QueryBuilderPlugin:
         ])
         
         available_filters = ", ".join(schema_info["available_filters"])
+        
+        # Instrução sobre idioma baseada no idioma detectado e idioma dominante
+        language_instruction = ""
+        if use_multi_language:
+            # Estratégia multi-idioma: expandir com termos em ambos os idiomas
+            if query_language == "en" and dominant_language == "pt":
+                language_instruction = f"""
+REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
+- A query do usuário está em INGLÊS, mas os documentos são principalmente em PORTUGUÊS ({dominant_language.upper()})
+- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
+- Primeiro, expanda com termos em INGLÊS (idioma da query)
+- Depois, adicione termos equivalentes em PORTUGUÊS (idioma dos documentos)
+- Exemplo: "which companies" → "companies corporations firms businesses organizations empresas corporações companhias organizações"
+- Exemplo: "adding capacity" → "adding capacity expanding production increasing output building new facilities aumentando capacidade expansão produção incremento instalações novas"
+- Isso permite encontrar documentos em ambos os idiomas
+"""
+            elif query_language == "pt" and dominant_language == "en":
+                language_instruction = f"""
+REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
+- A query do usuário está em PORTUGUÊS, mas os documentos são principalmente em INGLÊS ({dominant_language.upper()})
+- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
+- Primeiro, expanda com termos em PORTUGUÊS (idioma da query)
+- Depois, adicione termos equivalentes em INGLÊS (idioma dos documentos)
+- Exemplo: "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita opportunities gain return profit benefit maximization value revenue"
+- Exemplo: "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida tariff review tariff distributor electric energy revenue required"
+- Isso permite encontrar documentos em ambos os idiomas
+"""
+            else:
+                language_instruction = f"""
+REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
+- A query do usuário está em {query_language.upper()}, mas os documentos são principalmente em {dominant_language.upper()}
+- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
+- Primeiro, expanda com termos no idioma da query ({query_language.upper()})
+- Depois, adicione termos equivalentes no idioma dos documentos ({dominant_language.upper()})
+- Isso permite encontrar documentos em ambos os idiomas
+"""
+        elif query_language == "en":
+            language_instruction = """
+REGRA CRÍTICA - IDIOMA:
+- A query do usuário está em INGLÊS
+- Você DEVE manter TODOS os termos expandidos em INGLÊS
+- NÃO traduza para português ou qualquer outro idioma
+- Exemplo: "which companies" → "companies corporations firms businesses organizations" (todos em inglês)
+- Exemplo: "adding capacity" → "adding capacity expanding production increasing output building new facilities" (todos em inglês)
+"""
+        elif query_language == "pt":
+            language_instruction = """
+REGRA CRÍTICA - IDIOMA:
+- A query do usuário está em PORTUGUÊS
+- Você DEVE manter TODOS os termos expandidos em PORTUGUÊS
+- NÃO traduza para inglês ou qualquer outro idioma
+- Exemplo: "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita" (todos em português)
+"""
+        else:
+            language_instruction = f"""
+REGRA CRÍTICA - IDIOMA:
+- A query do usuário está em {query_language.upper()}
+- Você DEVE manter TODOS os termos expandidos no MESMO IDIOMA ({query_language})
+- NÃO traduza para outro idioma
+- Mantenha a consistência linguística em toda a expansão
+"""
         
         prompt = f"""Você é um assistente especializado em construir queries complexas para busca vetorial no Weaviate.
 
@@ -411,23 +634,28 @@ Filtros disponíveis: {available_filters}
 ETL-aware: {schema_info['etl_aware']}
 
 QUERY DO USUÁRIO: "{user_query}"
+IDIOMA DETECTADO: {query_language.upper()}
+
+{language_instruction}
 
 Sua tarefa:
 1. Analisar a query do usuário e entender o que ele quer
 2. Extrair entidades mencionadas (ex: "Apple", "Microsoft", "2024")
 3. Identificar filtros necessários (entidades, datas, idioma, etc.)
-4. **EXPANDIR a query semântica** com sinônimos, termos relacionados e conceitos semânticos
-5. Gerar query keyword otimizada para BM25 (termos-chave importantes)
+4. **EXPANDIR a query semântica** com sinônimos, termos relacionados e conceitos semânticos **NO MESMO IDIOMA DA QUERY ORIGINAL**
+5. Gerar query keyword otimizada para BM25 (termos-chave importantes) **NO MESMO IDIOMA**
 6. Determinar intenção (search, comparison, description)
 7. Sugerir alpha para hybrid search
 
 REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
 - A query semântica DEVE ser EXPANDIDA, não apenas repetir a query original
-- Adicione sinônimos, termos relacionados, conceitos semânticos
-- Exemplo: "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita"
-- Exemplo: "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida"
-- Exemplo: "fatores de sucesso" → "fatores de sucesso elementos críticos componentes essenciais requisitos fundamentais"
+- Adicione sinônimos, termos relacionados, conceitos semânticos **NO MESMO IDIOMA DA QUERY ORIGINAL**
+- Exemplo (português): "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita"
+- Exemplo (português): "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida"
+- Exemplo (inglês): "which companies" → "which companies corporations firms businesses organizations enterprises"
+- Exemplo (inglês): "adding capacity" → "adding capacity expanding production increasing output building new facilities"
 - NUNCA retorne a query original sem expansão
+- NUNCA traduza a query para outro idioma
 
 IMPORTANTE:
 - Use propriedades do schema para filtros (entities_local_ids, section_entity_ids, chunk_lang, chunk_date, etc.)
@@ -450,30 +678,30 @@ FILTROS POR FREQUÊNCIA (se necessário):
 - Se query menciona "mais que X", "aparece mais que Y":
   - frequency_comparison: {{"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}}
 
-Retorne JSON válido:
+Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
 {{
     "semantic_query": "query expandida para busca semântica",
     "keyword_query": "query otimizada para BM25",
     "intent": "search|comparison|description",
     "filters": {{
-        "entities": ["Q312", "Q2283"],  // Entity IDs extraídos (se mencionados)
-        "entity_property": "section_entity_ids",  // Propriedade a usar: "section_entity_ids" (contexto de seção, evita contaminação) ou "entities_local_ids" (apenas menções explícitas no chunk)
-        "document_level_entities": [],  // Entidades para filtrar documentos primeiro (ex: ["Q312"] para Apple)
-        "filter_by_frequency": false,  // Se deve filtrar por frequência de entidade
-        "min_frequency": 0,  // Frequência mínima requerida (0 = qualquer)
-        "dominant_only": false,  // Apenas se entidade for dominante no documento
-        "frequency_comparison": null,  // Comparação de frequência: {{"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}}
-        "date_range": {{"start": "2024-01-01", "end": "2024-12-31"}},  // Se mencionar data
-        "language": "pt",  // Se detectar idioma
-        "labels": [],  // Labels específicos (se mencionados)
-        "section_title": ""  // Se mencionar seção específica
+        "entities": ["Q312", "Q2283"],
+        "entity_property": "section_entity_ids",
+        "document_level_entities": [],
+        "filter_by_frequency": false,
+        "min_frequency": 0,
+        "dominant_only": false,
+        "frequency_comparison": null,
+        "date_range": {{"start": "2024-01-01", "end": "2024-12-31"}},
+        "language": "pt",
+        "labels": [],
+        "section_title": ""
     }},
-    "alpha": 0.6,  // Balance keyword/vector (0.0-1.0)
+    "alpha": 0.6,
     "explanation": "Explicação da query: filtros aplicados, entidades detectadas, etc.",
-    "requires_validation": {str(validate).lower()}  // Se precisa validar com usuário
+    "requires_validation": {str(validate).lower()}
 }}
 
-Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
+IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem markdown, sem explicações fora do JSON.
 """
         
         try:
@@ -506,6 +734,7 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
             # Parse JSON
             if response_text:
                 response_text = response_text.strip()
+                # Remover markdown code blocks
                 if response_text.startswith("```json"):
                     response_text = response_text[7:]
                 if response_text.startswith("```"):
@@ -513,6 +742,13 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
                 if response_text.endswith("```"):
                     response_text = response_text[:-3]
                 response_text = response_text.strip()
+                
+                # Remover comentários de linha (//) e de bloco (/* */) do JSON
+                import re
+                # Remove comentários de linha (// ...)
+                response_text = re.sub(r'//.*?$', '', response_text, flags=re.MULTILINE)
+                # Remove comentários de bloco (/* ... */)
+                response_text = re.sub(r'/\*.*?\*/', '', response_text, flags=re.DOTALL)
                 
                 strategy = json.loads(response_text)
             else:
@@ -554,14 +790,25 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
         return True
     
     def _fallback_response(self, query: str) -> Dict[str, Any]:
-        """Resposta de fallback se LLM falhar"""
+        """Resposta de fallback se LLM falhar - ainda tenta extrair entidades"""
         msg.warn(f"  Query builder: usando fallback (LLM não disponível ou erro)")
+        
+        # Tentar extrair entidades mesmo no fallback usando spaCy + Gazetteer
+        entity_ids = []
+        try:
+            from verba_extensions.plugins.entity_aware_query_orchestrator import extract_entities_from_query
+            entity_ids = extract_entities_from_query(query)
+            if entity_ids:
+                msg.info(f"  Query builder (fallback): entidades detectadas: {entity_ids}")
+        except Exception as e:
+            msg.debug(f"  Query builder (fallback): erro ao extrair entidades: {str(e)}")
+        
         return {
             "semantic_query": query,  # Fallback não expande - apenas retorna original
             "keyword_query": query,
             "intent": "search",
             "filters": {
-                "entities": [],
+                "entities": entity_ids,  # Entidades extraídas via spaCy + Gazetteer
                 "entity_property": "section_entity_ids",  # Padrão: usa contexto de seção para evitar contaminação
                 "document_level_entities": [],  # Entidades para filtrar documentos primeiro
                 "filter_by_frequency": False,  # Filtrar por frequência
@@ -574,7 +821,7 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
                 "section_title": ""
             },
             "alpha": 0.6,
-            "explanation": "Query simples (fallback - LLM não disponível)",
+            "explanation": f"Query simples (fallback - LLM não disponível)" + (f", entidades detectadas: {len(entity_ids)}" if entity_ids else ""),
             "requires_validation": False
         }
     

@@ -212,7 +212,9 @@ class EntityAwareRetriever(Retriever):
                 use_cache=True,
                 validate=False,  # Não precisa validar aqui, já está executando
                 auto_detect_aggregation=True,  # NOVO: detecta agregações automaticamente
-                rag_config=rag_config  # Passar RAG config para usar generator configurado (mesmo do chat)
+                rag_config=rag_config,  # Passar RAG config para usar generator configurado (mesmo do chat)
+                labels=labels,  # Passar labels para calcular idioma dominante apenas dos documentos filtrados
+                document_uuids=document_uuids  # Passar document_uuids para calcular idioma dominante apenas dos documentos filtrados
             )
             
             # NOVO: Verificar se é agregação e executar se for
@@ -749,8 +751,21 @@ class EntityAwareRetriever(Retriever):
                         chunk_obj = Chunk(
                             content=chunk.properties.get("content", ""),
                             chunk_id=str(chunk.uuid),
-                            meta=chunk.properties.get("meta", {})
+                            content_without_overlap=chunk.properties.get("content_without_overlap", "")
                         )
+                        # Atribui metadata após criação (meta não é parâmetro do construtor)
+                        import json
+                        meta_str = chunk.properties.get("meta", "{}")
+                        try:
+                            chunk_obj.meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+                        except:
+                            chunk_obj.meta = {}
+                        # Copia outros campos relevantes
+                        chunk_obj.uuid = chunk.uuid
+                        chunk_obj.doc_uuid = chunk.properties.get("doc_uuid")
+                        chunk_obj.chunk_lang = chunk.properties.get("chunk_lang")
+                        chunk_obj.chunk_date = chunk.properties.get("chunk_date")
+                        chunk_obj.title = chunk.properties.get("title", "")
                         chunk_objects.append(chunk_obj)
                 
                 if chunk_objects:
