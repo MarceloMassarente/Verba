@@ -1073,17 +1073,36 @@ class EntityAwareRetriever(Retriever):
         - Chunks repetitivos (mesmo texto repetido múltiplas vezes)
         - Chunks fragmentados (começam/fim no meio de palavras)
         - Chunks muito curtos ou vazios
+        
+        NÃO filtra:
+        - Tabelas/gráficos (muitos números, poucas palavras)
+        - Chunks com dados estruturados legítimos
         """
         if not chunk_content or len(chunk_content.strip()) < 10:
             return False
         
         content = chunk_content.strip()
-        
-        # Detectar repetição excessiva: verifica sequências de diferentes tamanhos
         words = content.split()
         if len(words) < 3:
             return False
         
+        # Verificar se é uma tabela/gráfico (muitos números, poucas palavras)
+        # Chunks de tabelas/gráficos são legítimos mesmo que tenham padrões repetitivos
+        import re
+        numbers = re.findall(r'\d+', content)
+        number_ratio = len(numbers) / len(words) if words else 0
+        
+        # Se mais de 30% do conteúdo são números, provavelmente é tabela/gráfico
+        # Aceitar esses chunks mesmo com repetição
+        is_likely_table_or_chart = number_ratio > 0.3
+        
+        if is_likely_table_or_chart:
+            # Para tabelas/gráficos, ser mais permissivo com repetição
+            # Apenas filtrar se for claramente um erro (sequência muito curta repetida muitas vezes)
+            if len(words) > 20:  # Tabelas grandes são OK
+                return True
+        
+        # Detectar repetição excessiva: verifica sequências de diferentes tamanhos
         # Verificar se há padrões repetitivos (mesma sequência de palavras repetida)
         # Exemplo: "mização da revisão tarifária" repetido múltiplas vezes
         # Verifica sequências de 3, 4 e 5 palavras para capturar diferentes padrões
@@ -1101,14 +1120,16 @@ class EntityAwareRetriever(Retriever):
         
         # Se alguma sequência aparece mais de 3 vezes, é provavelmente repetição
         # Para sequências maiores (4-5 palavras), aceita até 2 repetições
-        threshold = 3 if max_repetition <= 3 else 2
+        # Para tabelas/gráficos, ser mais permissivo
+        threshold = 5 if is_likely_table_or_chart else (3 if max_repetition <= 3 else 2)
         if max_repetition > threshold:
             msg.warn(f"  ⚠️ Chunk filtrado: conteúdo repetitivo detectado (sequência repetida {max_repetition} vezes)")
             return False
         
         # Verificação adicional: se mais de 50% do chunk é a mesma frase repetida
         # Útil para casos como "mização da revisão tarifária" repetido muitas vezes
-        if len(words) > 10:
+        # NÃO aplicar a tabelas/gráficos (já verificados acima)
+        if len(words) > 10 and not is_likely_table_or_chart:
             # Tenta encontrar a frase mais comum (sequência de 4-6 palavras)
             for seq_length in [4, 5, 6]:
                 if len(words) < seq_length * 2:  # Precisa ter pelo menos 2 repetições
