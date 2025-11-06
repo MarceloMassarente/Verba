@@ -16,20 +16,67 @@ _nlp = None
 _gazetteer = None
 
 
-def get_nlp():
-    """Lazy load spaCy"""
-    global _nlp
-    if _nlp is not None:
-        return _nlp
+def detect_query_language(query: str) -> str:
+    """Detecta idioma da query (pt, en, etc.)"""
+    try:
+        from langdetect import detect
+        lang = detect(query)
+        # Normalizar códigos de idioma
+        if lang in ["pt", "pt-BR", "pt-PT"]:
+            return "pt"
+        elif lang in ["en", "en-US", "en-GB"]:
+            return "en"
+        return lang
+    except:
+        # Fallback: heurística simples
+        query_lower = query.lower()
+        pt_words = ["de", "da", "do", "em", "para", "com", "que", "não", "é", "são"]
+        en_words = ["the", "of", "to", "in", "for", "with", "that", "not", "is", "are"]
+        pt_count = sum(1 for word in pt_words if word in query_lower)
+        en_count = sum(1 for word in en_words if word in query_lower)
+        if pt_count > en_count:
+            return "pt"
+        elif en_count > pt_count:
+            return "en"
+        return "pt"  # Default para português
+
+# Cache de modelos por idioma
+_nlp_models = {}
+
+def get_nlp(language: str = None):
+    """Lazy load spaCy com suporte multi-idioma"""
+    global _nlp_models
+    
+    # Se language não fornecido, detectar da query ou usar default
+    if language is None:
+        language = "pt"  # Default
+    
+    # Retornar modelo já carregado
+    if language in _nlp_models:
+        return _nlp_models[language]
+    
+    # Mapear idioma para modelo spaCy
+    model_map = {
+        "pt": "pt_core_news_sm",
+        "en": "en_core_web_sm",
+    }
+    
+    model_name = model_map.get(language, "pt_core_news_sm")
     
     try:
         import spacy
-        try:
-            _nlp = spacy.load("pt_core_news_sm")
-        except OSError:
-            msg.warn("spaCy model not found, NLP parsing disabled")
-            return None
-        return _nlp
+        _nlp_models[language] = spacy.load(model_name)
+        return _nlp_models[language]
+    except OSError:
+        msg.warn(f"spaCy model '{model_name}' not found for language '{language}', NLP parsing disabled")
+        # Tentar fallback para português
+        if language != "pt":
+            try:
+                _nlp_models["pt"] = spacy.load("pt_core_news_sm")
+                return _nlp_models["pt"]
+            except:
+                pass
+        return None
     except:
         return None
 
@@ -122,7 +169,9 @@ def parse_query(query: str) -> Dict[str, Any]:
     }
     """
     
-    nlp = get_nlp()
+    # Detectar idioma da query e usar modelo apropriado
+    query_language = detect_query_language(query)
+    nlp = get_nlp(language=query_language)
     if not nlp:
         # Fallback: sem NLP, trata tudo como semântico
         return {

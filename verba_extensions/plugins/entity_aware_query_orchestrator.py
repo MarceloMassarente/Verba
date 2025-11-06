@@ -8,8 +8,8 @@ import re
 from typing import Dict, List, Any
 from wasabi import msg
 
-# Lazy load
-_nlp = None
+# Lazy load - cache de modelos por idioma
+_nlp_models = {}  # {"pt": nlp_pt, "en": nlp_en}
 _gazetteer = None
 
 def load_gazetteer(path: str = None) -> Dict:
@@ -41,19 +41,87 @@ def load_gazetteer(path: str = None) -> Dict:
     
     return {}
 
-def get_nlp():
-    """Lazy load spaCy"""
-    global _nlp
-    if _nlp is not None:
-        return _nlp
+def detect_query_language(query: str) -> str:
+    """Detecta idioma da query (pt, en, etc.)"""
+    try:
+        from langdetect import detect
+        lang = detect(query)
+        # Normalizar códigos de idioma
+        if lang in ["pt", "pt-BR", "pt-PT"]:
+            return "pt"
+        elif lang in ["en", "en-US", "en-GB"]:
+            return "en"
+        return lang
+    except:
+        # Fallback: heurística simples
+        # Contar palavras comuns em português vs inglês
+        query_lower = query.lower()
+        pt_words = ["de", "da", "do", "em", "para", "com", "que", "não", "é", "são"]
+        en_words = ["the", "of", "to", "in", "for", "with", "that", "not", "is", "are"]
+        pt_count = sum(1 for word in pt_words if word in query_lower)
+        en_count = sum(1 for word in en_words if word in query_lower)
+        if pt_count > en_count:
+            return "pt"
+        elif en_count > pt_count:
+            return "en"
+        return "pt"  # Default para português
+
+def get_nlp(language: str = None):
+    """Lazy load spaCy com suporte multi-idioma
     
-    model = os.getenv("SPACY_MODEL", "pt_core_news_sm")
+    Args:
+        language: Código do idioma ("pt", "en"). Se None, usa default ou detecta.
+    
+    Returns:
+        Modelo spaCy apropriado ou None se não disponível
+    """
+    global _nlp_models
+    
+    # Se language não fornecido, tentar usar default da env var
+    if language is None:
+        model_name = os.getenv("SPACY_MODEL", "pt_core_news_sm")
+        # Inferir idioma do nome do modelo
+        if "pt_core" in model_name or "pt" in model_name:
+            language = "pt"
+        elif "en_core" in model_name or "en" in model_name:
+            language = "en"
+        else:
+            language = "pt"  # Default
+    
+    # Retornar modelo já carregado
+    if language in _nlp_models:
+        return _nlp_models[language]
+    
+    # Mapear idioma para modelo spaCy
+    model_map = {
+        "pt": "pt_core_news_sm",
+        "en": "en_core_web_sm",
+    }
+    
+    model_name = model_map.get(language, "pt_core_news_sm")
+    
     try:
         import spacy
-        _nlp = spacy.load(model)
-        return _nlp
+        msg.info(f"  Carregando modelo spaCy: {model_name} (idioma: {language})")
+        nlp = spacy.load(model_name)
+        _nlp_models[language] = nlp
+        return nlp
+    except OSError as e:
+        msg.warn(f"  ⚠️ Modelo spaCy '{model_name}' não encontrado para idioma '{language}'")
+        msg.warn(f"  💡 Instale: python -m spacy download {model_name}")
+        # Tentar fallback para português se não for pt
+        if language != "pt" and "pt" in model_map:
+            try:
+                fallback_model = model_map["pt"]
+                msg.info(f"  Tentando fallback: {fallback_model}")
+                nlp = spacy.load(fallback_model)
+                _nlp_models["pt"] = nlp
+                return nlp
+            except:
+                pass
+        return None
     except Exception as e:
-        msg.warn(f"spaCy não disponível para extração de entidades da query: {str(e)}")
+        msg.warn(f"  ⚠️ Erro ao carregar spaCy: {str(e)}")
         return None
 
 def extract_entities_from_query(query: str) -> List[str]:
@@ -63,19 +131,25 @@ def extract_entities_from_query(query: str) -> List[str]:
     - Entidades nomeadas (ORG, PERSON, GPE, LOC): "Apple", "Spencer Stuart"
     - Múltiplas entidades: "apple e microsoft"
     - Retorna entity_ids apenas (não palavras-chave)
+    - Detecção automática de idioma (pt/en) e uso do modelo spaCy apropriado
     
     Nota: Palavras-chave como "inovação" são ignoradas pelo filtro entity-aware.
           Para melhor resultado, combine com busca vetorial.
     """
-    nlp_model = get_nlp()
+    # Detectar idioma da query
+    query_language = detect_query_language(query)
+    msg.info(f"  🌐 Idioma da query detectado: {query_language.upper()}")
+    
+    # Carregar modelo spaCy apropriado para o idioma
+    nlp_model = get_nlp(language=query_language)
     gaz = load_gazetteer()
     
     if not nlp_model:
-        msg.warn("spaCy não disponível para extração de entidades")
+        msg.warn(f"  ⚠️ spaCy não disponível para extração de entidades (idioma: {query_language})")
         return []
     
     if not gaz:
-        msg.warn("Gazetteer vazio ou não encontrado - nenhuma entidade será detectada")
+        msg.warn("  ⚠️ Gazetteer vazio ou não encontrado - nenhuma entidade será detectada")
         return []
     
     try:
