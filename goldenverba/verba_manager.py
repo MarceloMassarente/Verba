@@ -620,6 +620,41 @@ class VerbaManager:
     async def set_user_config(self, client, config: dict):
         await self.weaviate_manager.set_config(client, self.user_config_uuid, config)
 
+    def merge_config(self, loaded_config: dict, new_config: dict) -> dict:
+        """
+        Merge loaded config with new config, adding missing fields with default values.
+        This ensures new fields (like "Reranker Top K") are added to old configs.
+        """
+        merged_config = deepcopy(loaded_config)
+        
+        for component_key in new_config.keys():
+            if component_key not in merged_config:
+                merged_config[component_key] = new_config[component_key]
+                continue
+            
+            new_components = new_config[component_key]["components"]
+            merged_components = merged_config[component_key]["components"]
+            
+            for component_name, new_component in new_components.items():
+                if component_name not in merged_components:
+                    # Component doesn't exist in loaded config, add it
+                    merged_components[component_name] = new_component
+                    continue
+                
+                # Merge config fields: add missing fields with default values
+                merged_component = merged_components[component_name]
+                new_component_config = new_component["config"]
+                merged_component_config = merged_component["config"]
+                
+                for config_key, new_config_setting in new_component_config.items():
+                    if config_key not in merged_component_config:
+                        # Field doesn't exist in loaded config, add it with default value
+                        default_value = new_config_setting.get('value', 'N/A') if isinstance(new_config_setting, dict) else getattr(new_config_setting, 'value', 'N/A')
+                        msg.info(f"Adding missing config field '{config_key}' to {component_key}.{component_name} with default value: {default_value}")
+                        merged_component_config[config_key] = new_config_setting
+        
+        return merged_config
+
     async def load_rag_config(self, client):
         """Check if a Configuration File exists in the database, if yes, check if corrupted. Returns a valid configuration file"""
         # Garante que todas as coleções de embeddings existem
@@ -639,9 +674,12 @@ class VerbaManager:
                 msg.info("Using Existing RAG Configuration")
                 return loaded_config
             else:
-                msg.info("Using New RAG Configuration")
-                await self.set_rag_config(client, new_config)
-                return new_config
+                # Config structure changed (new fields added), merge instead of replacing
+                msg.info("Merging RAG Configuration: adding missing fields with default values")
+                merged_config = self.merge_config(loaded_config, new_config)
+                # Save merged config to persist new fields
+                await self.set_rag_config(client, merged_config)
+                return merged_config
         else:
             msg.info("Using New RAG Configuration")
             return new_config
