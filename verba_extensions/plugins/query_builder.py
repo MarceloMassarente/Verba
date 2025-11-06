@@ -309,7 +309,7 @@ FILTROS POR FREQUÊNCIA (se necessário):
   - min_frequency: 5  // Frequência mínima (opcional)
   - dominant_only: true  // Apenas entidade dominante (opcional)
 - Se query menciona "mais que X", "aparece mais que Y":
-  - frequency_comparison: {"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}
+  - frequency_comparison: {{"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}}
 
 Retorne JSON válido:
 {{

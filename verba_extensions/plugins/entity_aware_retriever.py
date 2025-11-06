@@ -33,6 +33,7 @@ ENTIDADE (spaCy NER) vs SEMÂNTICA (Vector Search):
 
 from goldenverba.components.interfaces import Retriever
 from goldenverba.components.types import InputConfig
+from goldenverba.components.chunk import Chunk
 from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
 from typing import Optional, Dict, Any, List
 from wasabi import msg
@@ -673,7 +674,105 @@ class EntityAwareRetriever(Retriever):
             msg.warn(f"Reranking falhou (não crítico): {str(e)}")
             # Continua sem reranking
         
-        return (chunks, message)
+        # 7. CONVERTE CHUNKS PARA FORMATO ESPERADO (dicionários serializáveis)
+        # Similar ao WindowRetriever, precisa converter objetos Weaviate para dicionários
+        documents = []
+        doc_map = {}
+        
+        for chunk in chunks:
+            if not hasattr(chunk, "properties"):
+                continue
+                
+            chunk_props = chunk.properties
+            doc_uuid = str(chunk_props.get("doc_uuid", ""))
+            
+            if not doc_uuid:
+                continue
+            
+            # Buscar documento se ainda não foi buscado
+            if doc_uuid not in doc_map:
+                try:
+                    document = await weaviate_manager.get_document(client, doc_uuid)
+                    if document is None:
+                        continue
+                    doc_map[doc_uuid] = {
+                        "title": document.get("title", ""),
+                        "chunks": [],
+                        "score": 0,
+                        "metadata": document.get("metadata", {}),
+                    }
+                except Exception as e:
+                    msg.warn(f"Erro ao buscar documento {doc_uuid}: {str(e)}")
+                    continue
+            
+            # Adicionar chunk ao documento
+            chunk_score = chunk.metadata.score if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "score") else 0
+            doc_map[doc_uuid]["chunks"].append({
+                "uuid": str(chunk.uuid),
+                "score": chunk_score,
+                "chunk_id": chunk_props.get("chunk_id", ""),
+                "content": chunk_props.get("content", ""),
+            })
+            doc_map[doc_uuid]["score"] += chunk_score
+        
+        # Converter doc_map para lista de documentos e gerar contexto
+        documents = []
+        context_documents = []
+        
+        for doc_uuid, doc_data in doc_map.items():
+            # Documento com chunks mínimos (sem content nos chunks)
+            _chunks = [
+                {
+                    "uuid": chunk["uuid"],
+                    "score": chunk["score"],
+                    "chunk_id": chunk["chunk_id"],
+                    "embedder": embedder,
+                }
+                for chunk in doc_data["chunks"]
+            ]
+            
+            # Documento com content para contexto
+            context_chunks = [
+                {
+                    "uuid": chunk["uuid"],
+                    "score": chunk["score"],
+                    "content": chunk["content"],
+                    "chunk_id": chunk["chunk_id"],
+                    "embedder": embedder,
+                }
+                for chunk in doc_data["chunks"]
+            ]
+            
+            # Ordenar por chunk_id
+            _chunks_sorted = sorted(_chunks, key=lambda x: x["chunk_id"])
+            context_chunks_sorted = sorted(context_chunks, key=lambda x: x["chunk_id"])
+            
+            documents.append({
+                "title": doc_data["title"],
+                "chunks": _chunks_sorted,
+                "score": doc_data["score"],
+                "metadata": doc_data["metadata"],
+                "uuid": doc_uuid,
+            })
+            
+            context_documents.append({
+                "title": doc_data["title"],
+                "chunks": context_chunks_sorted,
+                "score": doc_data["score"],
+                "uuid": doc_uuid,
+                "metadata": doc_data["metadata"],
+            })
+        
+        # Ordenar por score
+        sorted_context_documents = sorted(
+            context_documents, key=lambda x: x["score"], reverse=True
+        )
+        sorted_documents = sorted(documents, key=lambda x: x["score"], reverse=True)
+        
+        # Gerar contexto combinado
+        context = self.combine_context(sorted_context_documents)
+        
+        return (sorted_documents, context)
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
         """Processa chunks aplicando window technique"""

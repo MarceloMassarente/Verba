@@ -412,3 +412,4 @@ Essa hierarquia permite:
 - ✅ Considerar frequência relativa entre documentos
 
 
+
