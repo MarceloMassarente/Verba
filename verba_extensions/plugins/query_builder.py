@@ -295,7 +295,7 @@ class QueryBuilderPlugin:
                         filter_info.append(f"labels={labels}")
                     if document_uuids:
                         filter_info.append(f"docs={len(document_uuids)}")
-                    msg.debug(f"  Query builder: calculando idioma dominante com filtros: {', '.join(filter_info)}")
+                    msg.info(f"  Query builder: calculando idioma dominante com filtros: {', '.join(filter_info)}")
                 else:
                     msg.info(f"  Query builder: calculando idioma dominante de toda a collection '{collection_name}' (sem filtros)")
                     result = await collection.aggregate.over_all(
@@ -327,11 +327,11 @@ class QueryBuilderPlugin:
                     return dominant_lang
                     
             except Exception as e:
-                msg.debug(f"  Query builder: erro ao obter idioma dominante: {str(e)}")
+                msg.info(f"  Query builder: erro ao obter idioma dominante: {str(e)}")
                 return None
                 
         except Exception as e:
-            msg.debug(f"  Query builder: erro ao verificar idioma dominante: {str(e)}")
+            msg.info(f"  Query builder: erro ao verificar idioma dominante: {str(e)}")
             return None
         
         return None
@@ -405,11 +405,11 @@ class QueryBuilderPlugin:
                 return dominant_lang
                 
             except Exception as e:
-                msg.debug(f"  Query builder: erro na busca rápida: {str(e)}")
+                msg.info(f"  Query builder: erro na busca rápida: {str(e)}")
                 return None
                 
         except Exception as e:
-            msg.debug(f"  Query builder: erro ao fazer busca rápida para detectar idioma: {str(e)}")
+            msg.info(f"  Query builder: erro ao fazer busca rápida para detectar idioma: {str(e)}")
             return None
     
     def _get_default_schema(self) -> Dict[str, Any]:
@@ -505,35 +505,13 @@ class QueryBuilderPlugin:
         # Obter schema
         schema_info = await self.get_schema_info(client, collection_name)
         
-        # Obter idioma dominante dos documentos filtrados (se disponível)
-        # IMPORTANTE: Calcula apenas dos documentos que serão buscados (labels/document_uuids)
-        # Se não há filtros, calcula de toda a collection (pode não ser ideal, mas é melhor que nada)
-        dominant_language = None
-        try:
-            dominant_language = await self.get_dominant_language(
-                client, collection_name, labels=labels, document_uuids=document_uuids
-            )
-            if dominant_language:
-                msg.info(f"  Query builder: idioma dominante detectado: {dominant_language.upper()}")
-            else:
-                # Se não conseguiu detectar via agregação e não há filtros, tentar busca rápida
-                if not labels and not document_uuids:
-                    msg.info(f"  Query builder: agregação não detectou idioma, tentando busca rápida inicial...")
-                    try:
-                        dominant_language = await self._detect_language_from_quick_search(
-                            client, collection_name, user_query
-                        )
-                        if dominant_language:
-                            msg.info(f"  Query builder: idioma detectado via busca rápida: {dominant_language.upper()}")
-                        else:
-                            msg.info(f"  Query builder: busca rápida não encontrou chunks com chunk_lang")
-                    except Exception as e:
-                        msg.warn(f"  Query builder: busca rápida falhou: {str(e)}")
-                
-                if not dominant_language:
-                    msg.info(f"  Query builder: não foi possível detectar idioma dominante (pode ser normal se collection não tem chunk_lang ou está vazia)")
-        except Exception as e:
-            msg.warn(f"  Query builder: erro ao obter idioma dominante: {str(e)}")
+        # SIMPLIFICADO: Usar sempre o idioma da query, não tentar detectar idioma dominante
+        # Motivos:
+        # 1. Com muitos documentos, busca rápida pode pegar chunks irrelevantes
+        # 2. Agregação pode falhar ou retornar idioma não representativo
+        # 3. É mais simples e confiável usar o idioma que o usuário está usando
+        # 4. O LLM pode expandir a query adequadamente no idioma da query
+        dominant_language = None  # Não usar detecção de idioma dominante
         
         # Chamar LLM para construir query
         try:
@@ -652,11 +630,8 @@ class QueryBuilderPlugin:
             query_language = "en"  # Default para inglês se não detectar
         msg.info(f"  Query builder: idioma da query: {query_language.upper()}")
         
-        # Se temos idioma dominante e é diferente da query, usar estratégia multi-idioma
-        use_multi_language = False
-        if dominant_language and dominant_language != query_language:
-            use_multi_language = True
-            msg.info(f"  Query builder: idioma da query ({query_language.upper()}) diferente do dominante ({dominant_language.upper()}), usando expansão multi-idioma")
+        # SIMPLIFICADO: Usar sempre o idioma da query para expansão
+        # Não tentar detectar idioma dominante (pode ser problemático com muitos documentos)
         
         properties_str = "\n".join([
             f"  - {p['name']} ({p['type']}): {p.get('description', '')}"
@@ -665,42 +640,9 @@ class QueryBuilderPlugin:
         
         available_filters = ", ".join(schema_info["available_filters"])
         
-        # Instrução sobre idioma baseada no idioma detectado e idioma dominante
+        # Instrução sobre idioma baseada apenas no idioma da query
         language_instruction = ""
-        if use_multi_language:
-            # Estratégia multi-idioma: expandir com termos em ambos os idiomas
-            if query_language == "en" and dominant_language == "pt":
-                language_instruction = f"""
-REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
-- A query do usuário está em INGLÊS, mas os documentos são principalmente em PORTUGUÊS ({dominant_language.upper()})
-- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
-- Primeiro, expanda com termos em INGLÊS (idioma da query)
-- Depois, adicione termos equivalentes em PORTUGUÊS (idioma dos documentos)
-- Exemplo: "which companies" → "companies corporations firms businesses organizations empresas corporações companhias organizações"
-- Exemplo: "adding capacity" → "adding capacity expanding production increasing output building new facilities aumentando capacidade expansão produção incremento instalações novas"
-- Isso permite encontrar documentos em ambos os idiomas
-"""
-            elif query_language == "pt" and dominant_language == "en":
-                language_instruction = f"""
-REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
-- A query do usuário está em PORTUGUÊS, mas os documentos são principalmente em INGLÊS ({dominant_language.upper()})
-- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
-- Primeiro, expanda com termos em PORTUGUÊS (idioma da query)
-- Depois, adicione termos equivalentes em INGLÊS (idioma dos documentos)
-- Exemplo: "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita opportunities gain return profit benefit maximization value revenue"
-- Exemplo: "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida tariff review tariff distributor electric energy revenue required"
-- Isso permite encontrar documentos em ambos os idiomas
-"""
-            else:
-                language_instruction = f"""
-REGRA CRÍTICA - IDIOMA MULTI-LINGUAL:
-- A query do usuário está em {query_language.upper()}, mas os documentos são principalmente em {dominant_language.upper()}
-- Você DEVE expandir a query com termos em AMBOS os idiomas para maximizar a cobertura
-- Primeiro, expanda com termos no idioma da query ({query_language.upper()})
-- Depois, adicione termos equivalentes no idioma dos documentos ({dominant_language.upper()})
-- Isso permite encontrar documentos em ambos os idiomas
-"""
-        elif query_language == "en":
+        if query_language == "en":
             language_instruction = """
 REGRA CRÍTICA - IDIOMA:
 - A query do usuário está em INGLÊS
@@ -736,7 +678,7 @@ Filtros disponíveis: {available_filters}
 ETL-aware: {schema_info['etl_aware']}
 
 QUERY DO USUÁRIO: "{user_query}"
-IDIOMA DETECTADO: {query_language.upper()}
+IDIOMA DA QUERY: {query_language.upper()}
 
 {language_instruction}
 
@@ -903,7 +845,7 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
             if entity_ids:
                 msg.info(f"  Query builder (fallback): entidades detectadas: {entity_ids}")
         except Exception as e:
-            msg.debug(f"  Query builder (fallback): erro ao extrair entidades: {str(e)}")
+            msg.info(f"  Query builder (fallback): erro ao extrair entidades: {str(e)}")
         
         return {
             "semantic_query": query,  # Fallback não expande - apenas retorna original
