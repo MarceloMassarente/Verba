@@ -102,6 +102,11 @@ class RerankerPlugin:
         config = config or {}
         top_k = config.get("top_k", self.default_top_k)
         
+        # Log para debug
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"RERANKER: Recebeu {len(chunks)} chunks, top_k={top_k} (default={self.default_top_k})")
+        
         # Calcula scores para cada chunk
         scored_chunks = []
         for chunk in chunks:
@@ -114,7 +119,9 @@ class RerankerPlugin:
         # Retorna top_k chunks
         reranked = [chunk for _, chunk in scored_chunks[:top_k]]
         
-        logger.info(f"Reranked {len(chunks)} chunks → top {len(reranked)} chunks")
+        logger.info(f"RERANKER: Retornando {len(reranked)} chunks de {len(chunks)} (top_k={top_k})")
+        if len(reranked) < top_k and len(chunks) >= top_k:
+            logger.warning(f"RERANKER: ATENÇÃO - Retornou apenas {len(reranked)} chunks quando deveria retornar {top_k}!")
         
         return reranked
     

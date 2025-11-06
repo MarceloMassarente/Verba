@@ -6,6 +6,11 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from wasabi import msg
+# Fix: Adicionar método debug ao msg se não existir (compatibilidade)
+if not hasattr(msg, 'debug'):
+    def debug_wrapper(*args, **kwargs):
+        msg.info(*args, **kwargs)
+    msg.debug = debug_wrapper
 import asyncio
 
 from copy import deepcopy

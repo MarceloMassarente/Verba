@@ -25,6 +25,14 @@ from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 from wasabi import msg  # type: ignore[import]
 
+# Fix: Adicionar método debug ao msg se não existir (compatibilidade)
+# O objeto Printer do wasabi não tem método debug, mas alguns códigos podem tentar usá-lo
+if not hasattr(msg, 'debug'):
+    def debug_wrapper(*args, **kwargs):
+        # Fallback para info se debug não existir
+        msg.info(*args, **kwargs)
+    msg.debug = debug_wrapper
+
 from goldenverba import verba_manager
 
 from goldenverba.server.types import (
@@ -1036,7 +1044,7 @@ async def get_content(payload: GetContentPayload):
             )
         
         # Log para debug
-        msg.debug(f"get_content: {len(payload.chunkScores)} chunks, tipos: {[(cs.uuid, type(cs.chunk_id).__name__, cs.chunk_id) for cs in payload.chunkScores[:3]]}")
+        msg.info(f"get_content: {len(payload.chunkScores)} chunks, tipos: {[(cs.uuid, type(cs.chunk_id).__name__, cs.chunk_id) for cs in payload.chunkScores[:3]]}")
         
         client = await client_manager.connect(payload.credentials)
         content, maxPage = await manager.get_content(
@@ -1047,7 +1055,12 @@ async def get_content(payload: GetContentPayload):
             content={"error": "", "content": content, "maxPage": maxPage}
         )
     except Exception as e:
-        msg.fail(f"Document retrieval failed: {str(e)}")
+        # Log error - usar msg.warn se msg.fail não funcionar (compatibilidade)
+        try:
+            msg.fail(f"Document retrieval failed: {str(e)}")
+        except AttributeError:
+            # Fallback se msg não tiver método fail (compatibilidade)
+            msg.warn(f"Document retrieval failed: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={

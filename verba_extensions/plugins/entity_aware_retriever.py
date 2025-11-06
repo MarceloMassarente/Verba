@@ -78,7 +78,7 @@ class EntityAwareRetriever(Retriever):
         self.config["Limit/Sensitivity"] = InputConfig(
             type="number",
             value=1,
-            description="Limit value or sensitivity",
+            description="Limit value or sensitivity (for initial search)",
             values=[],
         )
         self.config["Chunk Window"] = InputConfig(
@@ -121,6 +121,12 @@ class EntityAwareRetriever(Retriever):
             type="number",
             value=3600,
             description="Cache TTL in seconds for query rewriting (default: 3600)",
+            values=[],
+        )
+        self.config["Reranker Top K"] = InputConfig(
+            type="number",
+            value=5,
+            description="Number of top chunks to return after reranking (default: 5, use 0 to return all)",
             values=[],
         )
         self.config["Enable Temporal Filter"] = InputConfig(
@@ -166,6 +172,29 @@ class EntityAwareRetriever(Retriever):
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value
         limit = int(config["Limit/Sensitivity"].value)
+        # Ler reranker_top_k da configuração
+        reranker_top_k_config = config.get("Reranker Top K", {})
+        msg.info(f"  DEBUG: reranker_top_k_config type={type(reranker_top_k_config)}, hasattr value={hasattr(reranker_top_k_config, 'value') if reranker_top_k_config else 'N/A'}")
+        if reranker_top_k_config and hasattr(reranker_top_k_config, 'value'):
+            reranker_top_k = int(reranker_top_k_config.value)
+            msg.info(f"  DEBUG: reranker_top_k lido da config: {reranker_top_k}")
+        else:
+            reranker_top_k = 5  # Default
+            msg.info(f"  DEBUG: reranker_top_k usando default: {reranker_top_k} (campo 'Reranker Top K' não encontrado na config)")
+        
+        # Verificar se não está confundindo com Limit/Sensitivity
+        if reranker_top_k == limit and limit != 5:
+            msg.warn(f"  ⚠️ ATENÇÃO: reranker_top_k={reranker_top_k} é igual a limit={limit}! Isso pode indicar que 'Reranker Top K' não está na configuração e está usando limit por engano.")
+            # Se for igual ao limit e limit não for o default, usar 5 como fallback seguro
+            if limit < 5:
+                msg.warn(f"  ⚠️ Usando reranker_top_k=5 como fallback seguro (limit={limit} é muito baixo para reranker)")
+                reranker_top_k = 5
+        
+        msg.good(f"  ⚙️ CONFIG RETRIEVER: limit={limit} (busca inicial), reranker_top_k={reranker_top_k} (pós-rerank)")
+        if reranker_top_k == 2:
+            msg.warn(f"  ⚠️ ATENÇÃO: reranker_top_k={reranker_top_k} está limitando demais! Considere aumentar para 5-10 na interface.")
+        elif reranker_top_k < 5:
+            msg.warn(f"  ⚠️ reranker_top_k={reranker_top_k} pode ser muito baixo. Recomendado: 5-10")
         alpha_value = config["Alpha"].value
         alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         
@@ -769,20 +798,51 @@ class EntityAwareRetriever(Retriever):
                         chunk_objects.append(chunk_obj)
                 
                 if chunk_objects:
-                    # Rerank usando top_k baseado no limit original
+                    # IMPORTANTE: O reranker tem sua própria configuração de top_k
+                    # O `limit` é usado apenas para a busca inicial (Autocut/Fixed)
+                    # O `Reranker Top K` controla quantos chunks passam pelo reranking
+                    num_chunks = len(chunk_objects)
+                    
+                    # Se reranker_top_k = 0, rerankear todos os chunks recuperados
+                    # Caso contrário, usar o valor configurado (mas não mais que os chunks disponíveis)
+                    if reranker_top_k == 0:
+                        top_k_for_rerank = num_chunks  # Rerankear todos
+                    else:
+                        top_k_for_rerank = min(reranker_top_k, num_chunks)  # Usar config ou todos, o que for menor
+                    
+                    msg.good(f"  🔄 RERANKER INPUT: {num_chunks} chunks recuperados, top_k={top_k_for_rerank} (limit={limit} busca inicial, reranker_top_k={reranker_top_k})")
+                    msg.info(f"  Reranker config: top_k={top_k_for_rerank}, query='{query[:50]}...'")
+                    
                     reranked_objects = await reranker.process_chunks(
                         chunk_objects,
                         query=query,
-                        config={"top_k": limit}
+                        config={"top_k": top_k_for_rerank}
                     )
                     
+                    msg.info(f"  Reranker retornou {len(reranked_objects)} chunks (esperado: {top_k_for_rerank})")
+                    if len(reranked_objects) < top_k_for_rerank:
+                        msg.warn(f"  ⚠️ Reranker retornou menos chunks ({len(reranked_objects)}) do que esperado ({top_k_for_rerank})")
+                    if len(reranked_objects) > 0:
+                        msg.info(f"  Primeiro chunk rerankado: chunk_id={reranked_objects[0].chunk_id}, content_preview='{reranked_objects[0].content[:50]}...'")
+                    
                     # Reconstrói chunks Weaviate a partir dos rerankeados
-                    reranked_uuids = {chunk.chunk_id for chunk in reranked_objects}
-                    chunks = [c for c in chunks if str(c.uuid) in reranked_uuids]
+                    # IMPORTANTE: chunk.chunk_id é str(chunk.uuid) do objeto Weaviate original
+                    reranked_uuids = {str(chunk.chunk_id) for chunk in reranked_objects}
+                    chunks_filtered = [c for c in chunks if str(c.uuid) in reranked_uuids]
+                    
+                    msg.info(f"  Chunks filtrados: {len(chunks_filtered)} de {len(chunks)} originais")
                     
                     # Reordena conforme reranking
-                    uuid_to_chunk = {str(c.uuid): c for c in chunks}
-                    chunks = [uuid_to_chunk.get(chunk.chunk_id) for chunk in reranked_objects if chunk.chunk_id in uuid_to_chunk]
+                    uuid_to_chunk = {str(c.uuid): c for c in chunks_filtered}
+                    chunks_ordered = []
+                    for reranked_chunk in reranked_objects:
+                        chunk_uuid = str(reranked_chunk.chunk_id)
+                        if chunk_uuid in uuid_to_chunk:
+                            chunks_ordered.append(uuid_to_chunk[chunk_uuid])
+                        else:
+                            msg.warn(f"  ⚠️ Chunk {chunk_uuid} do reranker não encontrado nos chunks originais")
+                    
+                    chunks = chunks_ordered
                     
                     msg.good(f"Reranked {len(chunks)} chunks usando {reranker.name}")
         except Exception as e:
@@ -902,8 +962,53 @@ class EntityAwareRetriever(Retriever):
         )
         sorted_documents = sorted(documents, key=lambda x: x["score"], reverse=True)
         
-        # Gerar contexto combinado
-        context = self.combine_context(sorted_context_documents)
+        # Gerar contexto combinado (isso filtra chunks de baixa qualidade)
+        context, filtered_context_documents = self.combine_context(sorted_context_documents)
+        
+        # IMPORTANTE: Atualizar documents para refletir chunks filtrados
+        # Isso garante que o frontend mostre os mesmos chunks que foram enviados ao LLM
+        # Criar um mapeamento dos chunks filtrados por documento
+        filtered_documents_map = {doc["uuid"]: doc for doc in filtered_context_documents}
+        
+        # Atualizar sorted_documents para refletir apenas chunks filtrados
+        updated_documents = []
+        total_chunks_before = 0
+        total_chunks_after = 0
+        for doc in sorted_documents:
+            doc_uuid = doc["uuid"]
+            if doc_uuid in filtered_documents_map:
+                filtered_doc = filtered_documents_map[doc_uuid]
+                # Criar lista de chunks atualizada (sem content, apenas metadados)
+                filtered_chunks_metadata = [
+                    {
+                        "uuid": chunk["uuid"],
+                        "score": chunk["score"],
+                        "chunk_id": chunk["chunk_id"],
+                        "embedder": embedder,
+                    }
+                    for chunk in filtered_doc["chunks"]
+                ]
+                total_chunks_before += len(doc["chunks"])
+                total_chunks_after += len(filtered_chunks_metadata)
+                
+                updated_doc = doc.copy()
+                updated_doc["chunks"] = filtered_chunks_metadata
+                updated_documents.append(updated_doc)
+            else:
+                # Documento foi completamente filtrado (todos os chunks eram de baixa qualidade)
+                total_chunks_before += len(doc["chunks"])
+                # Não adicionar ao updated_documents
+        
+        # Adicionar informação sobre filtragem ao debug_info
+        chunks_filtered = total_chunks_before - total_chunks_after
+        if chunks_filtered > 0:
+            debug_info["chunks_filtered"] = {
+                "total_before": total_chunks_before,
+                "total_after": total_chunks_after,
+                "filtered_count": chunks_filtered,
+                "message": f"{chunks_filtered} chunks filtrados por baixa qualidade"
+            }
+            msg.warn(f"  ⚠️ {chunks_filtered}/{total_chunks_before} chunks filtrados - frontend atualizado para mostrar apenas chunks válidos")
         
         # Adicionar informações de debug ao contexto (formato JSON no final)
         debug_summary = f"\n\n[DEBUG INFO]\n"
@@ -921,6 +1026,8 @@ class EntityAwareRetriever(Retriever):
             debug_summary += f"Filtros aplicados: {debug_info['filters_applied'].get('description', 'N/A')}\n"
         debug_summary += f"Alpha usado: {debug_info['alpha_used']}\n"
         debug_summary += f"Modo de busca: {debug_info['search_mode']}\n"
+        if debug_info.get('chunks_filtered'):
+            debug_summary += f"Chunks filtrados: {debug_info['chunks_filtered']['message']}\n"
         if debug_info.get('explanation'):
             debug_summary += f"Explicação: {debug_info['explanation']}\n"
         
@@ -928,12 +1035,19 @@ class EntityAwareRetriever(Retriever):
         # Mas também incluir no contexto para compatibilidade
         context_with_debug = context + debug_summary
         
-        return (sorted_documents, context_with_debug, debug_info)
+        # Retornar documents atualizados (com chunks filtrados)
+        return (updated_documents, context_with_debug, debug_info)
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
         """Processa chunks aplicando window technique"""
         
-        chunk_window = int(config.get("Chunk Window", {}).value if hasattr(config.get("Chunk Window"), 'value') else config.get("Chunk Window", 1))
+        chunk_window_config = config.get("Chunk Window", {})
+        if hasattr(chunk_window_config, 'value'):
+            chunk_window = int(chunk_window_config.value)
+        else:
+            chunk_window = 1  # Default
+        
+        msg.info(f"  📦 Chunk Window: {chunk_window} (vai combinar chunks adjacentes)")
         
         if chunk_window > 0 and chunks:
             # Agrupa chunks adjacentes com window
@@ -955,11 +1069,117 @@ class EntityAwareRetriever(Retriever):
         
         return (chunks, "Chunks retrieved with entity-aware filtering")
     
-    def combine_context(self, documents: list[dict]) -> str:
-        """Combina contexto dos documentos"""
+    def _is_chunk_quality_good(self, chunk_content: str) -> bool:
+        """Valida qualidade do chunk antes de incluir no contexto
+        
+        Detecta:
+        - Chunks repetitivos (mesmo texto repetido múltiplas vezes)
+        - Chunks fragmentados (começam/fim no meio de palavras)
+        - Chunks muito curtos ou vazios
+        """
+        if not chunk_content or len(chunk_content.strip()) < 10:
+            return False
+        
+        content = chunk_content.strip()
+        
+        # Detectar repetição excessiva: verifica sequências de diferentes tamanhos
+        words = content.split()
+        if len(words) < 3:
+            return False
+        
+        # Verificar se há padrões repetitivos (mesma sequência de palavras repetida)
+        # Exemplo: "mização da revisão tarifária" repetido múltiplas vezes
+        # Verifica sequências de 3, 4 e 5 palavras para capturar diferentes padrões
+        max_repetition = 0
+        for seq_length in [3, 4, 5]:
+            if len(words) < seq_length:
+                continue
+            word_sequences = {}
+            for i in range(len(words) - seq_length + 1):
+                seq = " ".join(words[i:i+seq_length])
+                word_sequences[seq] = word_sequences.get(seq, 0) + 1
+            
+            current_max = max(word_sequences.values()) if word_sequences else 0
+            max_repetition = max(max_repetition, current_max)
+        
+        # Se alguma sequência aparece mais de 3 vezes, é provavelmente repetição
+        # Para sequências maiores (4-5 palavras), aceita até 2 repetições
+        threshold = 3 if max_repetition <= 3 else 2
+        if max_repetition > threshold:
+            msg.warn(f"  ⚠️ Chunk filtrado: conteúdo repetitivo detectado (sequência repetida {max_repetition} vezes)")
+            return False
+        
+        # Verificação adicional: se mais de 50% do chunk é a mesma frase repetida
+        # Útil para casos como "mização da revisão tarifária" repetido muitas vezes
+        if len(words) > 10:
+            # Tenta encontrar a frase mais comum (sequência de 4-6 palavras)
+            for seq_length in [4, 5, 6]:
+                if len(words) < seq_length * 2:  # Precisa ter pelo menos 2 repetições
+                    continue
+                phrase_counts = {}
+                for i in range(len(words) - seq_length + 1):
+                    phrase = " ".join(words[i:i+seq_length])
+                    phrase_counts[phrase] = phrase_counts.get(phrase, 0) + 1
+                
+                if phrase_counts:
+                    most_common_phrase = max(phrase_counts.items(), key=lambda x: x[1])
+                    phrase_text, phrase_count = most_common_phrase
+                    # Se a frase mais comum aparece mais de 2 vezes e representa mais de 40% do chunk
+                    if phrase_count >= 2 and (phrase_count * seq_length) / len(words) > 0.4:
+                        msg.warn(f"  ⚠️ Chunk filtrado: frase repetitiva detectada ('{phrase_text[:50]}...' aparece {phrase_count} vezes, {int((phrase_count * seq_length) / len(words) * 100)}% do chunk)")
+                        return False
+        
+        # Detectar fragmentação: chunk começa ou termina no meio de palavra
+        # (palavras muito curtas no início/fim podem indicar fragmentação)
+        if len(words) > 0:
+            first_word = words[0]
+            last_word = words[-1]
+            # Palavras muito curtas no início/fim podem ser fragmentos
+            if len(first_word) < 3 and len(words) > 1:
+                msg.warn(f"  ⚠️ Chunk filtrado: possível fragmentação detectada (começa com palavra muito curta: '{first_word}')")
+                return False
+        
+        return True
+    
+    def combine_context(self, documents: list[dict]) -> tuple[str, list[dict]]:
+        """Combina contexto dos documentos, filtrando chunks de baixa qualidade
+        
+        Returns:
+            tuple: (context_string, filtered_documents)
+        """
         from goldenverba.components.retriever.WindowRetriever import WindowRetriever
+        
+        # Filtrar chunks de baixa qualidade antes de combinar
+        filtered_documents = []
+        total_chunks = 0
+        filtered_chunks = 0
+        
+        for document in documents:
+            filtered_chunks_list = []
+            for chunk in document["chunks"]:
+                total_chunks += 1
+                chunk_content = chunk.get("content", "")
+                if self._is_chunk_quality_good(chunk_content):
+                    filtered_chunks_list.append(chunk)
+                else:
+                    filtered_chunks += 1
+            
+            # Só adicionar documento se tiver pelo menos um chunk válido
+            if filtered_chunks_list:
+                filtered_document = document.copy()
+                filtered_document["chunks"] = filtered_chunks_list
+                filtered_documents.append(filtered_document)
+        
+        if filtered_chunks > 0:
+            msg.warn(f"  ⚠️ {filtered_chunks}/{total_chunks} chunks filtrados por baixa qualidade")
+            if len(filtered_documents) == 0:
+                msg.warn(f"  ⚠️ ATENÇÃO: Todos os chunks foram filtrados! O contexto pode estar vazio.")
+        
+        # Usar método do WindowRetriever para combinar contexto
         window_retriever = WindowRetriever()
-        return window_retriever.combine_context(documents)
+        context = window_retriever.combine_context(filtered_documents)
+        
+        return (context, filtered_documents)
 
 
 def register():

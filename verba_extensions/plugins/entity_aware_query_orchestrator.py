@@ -70,36 +70,84 @@ def extract_entities_from_query(query: str) -> List[str]:
     nlp_model = get_nlp()
     gaz = load_gazetteer()
     
-    if not nlp_model or not gaz:
+    if not nlp_model:
+        msg.warn("spaCy não disponível para extração de entidades")
+        return []
+    
+    if not gaz:
+        msg.warn("Gazetteer vazio ou não encontrado - nenhuma entidade será detectada")
         return []
     
     try:
         doc = nlp_model(query)
         mentions = [
-            e.text for e in doc.ents 
+            {"text": e.text, "label": e.label_} for e in doc.ents 
             if e.label_ in ("ORG", "PERSON", "GPE", "LOC")
         ]
+        
+        # Log detalhado das menções detectadas pelo spaCy
+        if mentions:
+            msg.info(f"  🔍 Menções detectadas pelo spaCy: {[m['text'] for m in mentions]}")
+        else:
+            msg.info(f"  ⚠️ Nenhuma menção detectada pelo spaCy na query: '{query}'")
         
         # Normaliza para entity_ids
         entity_ids = []
         query_lower = query.lower()
+        mention_texts_lower = [m["text"].lower() for m in mentions]
         
+        # Busca mais flexível: verifica se alias está na query OU em menções
+        # Também tenta busca parcial (palavras-chave dentro do alias)
         for entity_id, aliases in gaz.items():
+            matched = False
+            matched_alias = None
+            
             for alias in aliases:
                 alias_lower = alias.lower()
-                # Verifica se alias está na query
-                if alias_lower in query_lower or any(alias_lower in m.lower() for m in mentions):
-                    if entity_id not in entity_ids:
-                        entity_ids.append(entity_id)
+                alias_words = alias_lower.split()
+                
+                # Verifica match exato ou parcial
+                if alias_lower in query_lower:
+                    matched = True
+                    matched_alias = alias
                     break
+                
+                # Verifica se alias está em alguma menção
+                if any(alias_lower in m for m in mention_texts_lower):
+                    matched = True
+                    matched_alias = alias
+                    break
+                
+                # Busca parcial: verifica se palavras-chave do alias estão na query
+                # (útil para "Nine Dragons" quando gazetteer tem "Nine Dragons Paper")
+                if len(alias_words) > 1:
+                    # Se pelo menos 2 palavras do alias estão na query, considera match
+                    words_in_query = sum(1 for word in alias_words if word in query_lower)
+                    if words_in_query >= min(2, len(alias_words)):
+                        matched = True
+                        matched_alias = alias
+                        break
+            
+            if matched:
+                if entity_id not in entity_ids:
+                    entity_ids.append(entity_id)
+                    msg.info(f"  ✅ Entidade mapeada: '{matched_alias}' → {entity_id}")
         
-        # Log para debug
+        # Log final
         if entity_ids:
-            msg.info(f"Entidades extraídas: {entity_ids}")
+            msg.info(f"  ✅ Entidades extraídas ({len(entity_ids)}): {entity_ids}")
+        else:
+            if mentions:
+                msg.warn(f"  ⚠️ Menções detectadas mas não encontradas no gazetteer: {[m['text'] for m in mentions]}")
+                msg.warn(f"  💡 Sugestão: Adicionar essas entidades ao gazetteer para habilitar filtros entity-aware")
+            else:
+                msg.info(f"  ℹ️ Nenhuma entidade detectada na query")
         
         return entity_ids
     except Exception as e:
         msg.warn(f"Erro ao extrair entidades da query: {str(e)}")
+        import traceback
+        msg.info(f"Traceback: {traceback.format_exc()}")
         return []
 
 def register_hooks():

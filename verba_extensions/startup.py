@@ -7,6 +7,13 @@ import os
 import sys
 from pathlib import Path
 from wasabi import msg
+# Fix: Adicionar método debug ao msg se não existir (compatibilidade)
+# O objeto Printer do wasabi não tem método debug, mas alguns códigos podem tentar usá-lo
+if not hasattr(msg, 'debug'):
+    def debug_wrapper(*args, **kwargs):
+        # Fallback para info se debug não existir
+        msg.info(*args, **kwargs)
+    msg.debug = debug_wrapper
 
 def initialize_extensions():
     """
