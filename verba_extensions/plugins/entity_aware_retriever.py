@@ -822,10 +822,28 @@ class EntityAwareRetriever(Retriever):
             
             # Adicionar chunk ao documento
             chunk_score = chunk.metadata.score if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "score") else 0
+            
+            # Converter chunk_id para int (pode vir como float ou string do Weaviate)
+            chunk_id_raw = chunk_props.get("chunk_id", 0)
+            try:
+                # Tenta converter para int
+                if isinstance(chunk_id_raw, (int, float)):
+                    chunk_id = int(chunk_id_raw)
+                elif isinstance(chunk_id_raw, str):
+                    # Se for string, tenta converter
+                    if chunk_id_raw.strip() == "":
+                        chunk_id = 0
+                    else:
+                        chunk_id = int(float(chunk_id_raw))
+                else:
+                    chunk_id = 0
+            except (ValueError, TypeError):
+                chunk_id = 0
+            
             doc_map[doc_uuid]["chunks"].append({
                 "uuid": str(chunk.uuid),
                 "score": chunk_score,
-                "chunk_id": chunk_props.get("chunk_id", ""),
+                "chunk_id": chunk_id,  # Agora garantidamente int
                 "content": chunk_props.get("content", ""),
             })
             doc_map[doc_uuid]["score"] += chunk_score

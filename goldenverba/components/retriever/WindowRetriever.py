@@ -55,6 +55,20 @@ class WindowRetriever(Retriever):
         document_uuids,
         rag_config=None,  # Optional: RAG config (not used by WindowRetriever, but accepted for compatibility)
     ):
+        
+        def convert_chunk_id(chunk_id_raw):
+            """Converte chunk_id para int, lidando com diferentes tipos"""
+            try:
+                if isinstance(chunk_id_raw, (int, float)):
+                    return int(chunk_id_raw)
+                elif isinstance(chunk_id_raw, str):
+                    if chunk_id_raw.strip() == "":
+                        return 0
+                    return int(float(chunk_id_raw))
+                else:
+                    return 0
+            except (ValueError, TypeError):
+                return 0
         search_mode = config["Search Mode"].value
         limit_mode = config["Limit Mode"].value
         limit = int(config["Limit/Sensitivity"].value)
@@ -99,7 +113,7 @@ class WindowRetriever(Retriever):
                 {
                     "uuid": str(chunk.uuid),
                     "score": chunk.metadata.score,
-                    "chunk_id": chunk.properties["chunk_id"],
+                    "chunk_id": convert_chunk_id(chunk.properties.get("chunk_id", 0)),
                     "content": chunk.properties["content"],
                 }
             )
@@ -143,16 +157,17 @@ class WindowRetriever(Retriever):
                     chunk["chunk_id"] for chunk in doc_map[doc]["chunks"]
                 )
                 for chunk in additional_chunks:
-                    if chunk.properties["chunk_id"] not in existing_chunk_ids:
+                    chunk_id_converted = convert_chunk_id(chunk.properties.get("chunk_id", 0))
+                    if chunk_id_converted not in existing_chunk_ids:
                         doc_map[doc]["chunks"].append(
                             {
                                 "uuid": str(chunk.uuid),
                                 "score": 0,
-                                "chunk_id": chunk.properties["chunk_id"],
+                                "chunk_id": chunk_id_converted,
                                 "content": chunk.properties["content"],
                             }
                         )
-                        existing_chunk_ids.add(chunk.properties["chunk_id"])
+                        existing_chunk_ids.add(chunk_id_converted)
 
             _chunks = [
                 {
