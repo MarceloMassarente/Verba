@@ -293,10 +293,10 @@ async def main():
     w_key = args.key or os.getenv("WEAVIATE_API_KEY_VERBA")
     
     if not w_url:
-        msg.fail("❌ WEAVIATE_URL_VERBA não encontrado. Use --url ou defina no .env")
+        msg.fail("WEAVIATE_URL_VERBA nao encontrado. Use --url ou defina no .env")
         return
     
-    msg.info(f"🔌 Conectando ao Weaviate: {w_url}")
+    msg.info(f"Conectando ao Weaviate: {w_url}")
     
     try:
         auth = AuthApiKey(w_key) if w_key else None
@@ -308,22 +308,22 @@ async def main():
             port=int(w_url.split(":")[-1]) if ":" in w_url else 8080
         )
         
-        msg.good("✅ Conectado ao Weaviate")
+        msg.good("Conectado ao Weaviate")
     except Exception as e:
-        msg.fail(f"❌ Erro ao conectar: {str(e)}")
+        msg.fail(f"Erro ao conectar: {str(e)}")
         return
     
     # Se collection não especificada, listar collections disponíveis
     if not args.collection:
-        msg.info("📋 Collections disponíveis:")
+        msg.info("Collections disponiveis:")
         try:
             collections = client.collections.list_all()
             for coll_name in collections:
                 if "VERBA" in coll_name or "Embedding" in coll_name:
                     msg.info(f"  - {coll_name}")
         except Exception as e:
-            msg.warn(f"⚠️ Não foi possível listar collections: {str(e)}")
-        msg.info("\n💡 Use --collection para especificar uma collection")
+            msg.warn(f"Nao foi possivel listar collections: {str(e)}")
+        msg.info("\nUse --collection para especificar uma collection")
         return
     
     # Validar chunks
@@ -335,7 +335,7 @@ async def main():
             sample_size=args.sample
         )
     except Exception as e:
-        msg.fail(f"❌ Erro durante validação: {str(e)}")
+        msg.fail(f"Erro durante validacao: {str(e)}")
         import traceback
         traceback.print_exc()
     finally:
