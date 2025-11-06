@@ -1498,15 +1498,57 @@ class EntityAwareRetriever(Retriever):
                 filtered_document["chunks"] = filtered_chunks_list
                 filtered_documents.append(filtered_document)
         
-        # FALLBACK: Se todos os chunks foram filtrados, usar os chunks originais (mesmo com repetição)
-        # Isso evita retornar contexto vazio quando o filtro é muito restritivo
+        # FALLBACK 1: Se mais de 80% dos chunks foram filtrados, tentar novamente com thresholds mais relaxados
+        if total_chunks > 0 and filtered_chunks / total_chunks > 0.8:
+            msg.warn(f"  ⚠️ ATENÇÃO: {filtered_chunks}/{total_chunks} chunks filtrados ({int(filtered_chunks/total_chunks*100)}%)")
+            msg.warn(f"  ⚠️ Tentando modo emergência: relaxando thresholds de qualidade")
+            
+            # Segunda passada com modo emergência (thresholds mais relaxados)
+            filtered_documents_emergency = []
+            filtered_chunks_emergency = 0
+            
+            for document in documents:
+                filtered_chunks_list = []
+                for chunk in document["chunks"]:
+                    chunk_content = chunk.get("content", "")
+                    # Modo emergência: apenas filtrar chunks completamente vazios ou muito fragmentados
+                    if chunk_content and len(chunk_content.strip()) >= 10:
+                        # Apenas verificar fragmentação extrema (palavras muito curtas no início/fim)
+                        words = chunk_content.strip().split()
+                        if len(words) >= 3:
+                            first_word = words[0] if words else ""
+                            # Apenas filtrar se começar com fragmento muito óbvio (1-2 caracteres)
+                            if len(first_word) >= 2:
+                                filtered_chunks_list.append(chunk)
+                            else:
+                                filtered_chunks_emergency += 1
+                        else:
+                            filtered_chunks_emergency += 1
+                    else:
+                        filtered_chunks_emergency += 1
+                
+                if filtered_chunks_list:
+                    filtered_document = document.copy()
+                    filtered_document["chunks"] = filtered_chunks_list
+                    filtered_documents_emergency.append(filtered_document)
+            
+            # Se modo emergência conseguiu salvar alguns chunks, usar eles
+            if len(filtered_documents_emergency) > 0:
+                msg.warn(f"  ⚠️ Modo emergência: {len(filtered_documents_emergency)} documentos salvos ({total_chunks - filtered_chunks_emergency} chunks válidos)")
+                filtered_documents = filtered_documents_emergency
+                filtered_chunks = filtered_chunks_emergency
+            else:
+                # Modo emergência também falhou, usar todos os chunks originais
+                msg.warn(f"  ⚠️ Modo emergência também falhou. Usando TODOS os chunks originais (sem filtro)")
+                filtered_documents = documents
+                filtered_chunks = 0
+        
+        # FALLBACK 2: Se ainda não há documentos, usar todos os chunks originais
         if len(filtered_documents) == 0 and len(documents) > 0:
             msg.warn(f"  ⚠️ ATENÇÃO: Todos os {total_chunks} chunks foram filtrados!")
-            msg.warn(f"  ⚠️ Usando fallback: mantendo todos os chunks originais (mesmo com possível repetição)")
-            
-            # Usar documentos originais como fallback
+            msg.warn(f"  ⚠️ Usando fallback final: mantendo todos os chunks originais (sem filtro de qualidade)")
             filtered_documents = documents
-            filtered_chunks = 0  # Resetar contador para não confundir
+            filtered_chunks = 0
         
         if filtered_chunks > 0:
             msg.warn(f"  ⚠️ {filtered_chunks}/{total_chunks} chunks filtrados por baixa qualidade")
