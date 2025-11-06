@@ -244,6 +244,13 @@ class EntityAwareRetriever(Retriever):
             
             # Usar semantic_query para busca vetorial
             rewritten_query = strategy.get("semantic_query", query)
+            
+            # Verificar se a query foi realmente expandida
+            if rewritten_query == query:
+                msg.warn(f"  ⚠️ Query builder retornou query idêntica - pode estar usando fallback ou LLM não expandiu")
+            else:
+                msg.good(f"  ✅ Query builder expandiu: '{query}' → '{rewritten_query[:100]}...'")
+            
             debug_info["rewritten_query"] = rewritten_query
             debug_info["query_builder_used"] = True
             

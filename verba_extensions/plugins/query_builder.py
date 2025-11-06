@@ -238,6 +238,12 @@ class QueryBuilderPlugin:
                 msg.warn("  Query builder: resposta inválida do LLM, usando fallback")
                 return self._fallback_response(user_query)
             
+            # Validar se query foi expandida (não deve ser idêntica à original)
+            semantic_query = strategy.get("semantic_query", user_query)
+            if semantic_query == user_query:
+                msg.warn(f"  ⚠️ Query builder: LLM retornou query idêntica - pode não ter expandido corretamente")
+                msg.warn(f"  Considerando usar fallback ou verificar prompt do LLM")
+            
             # Adicionar flag de agregação
             strategy["is_aggregation"] = False
             strategy["aggregation_info"] = None
@@ -248,6 +254,8 @@ class QueryBuilderPlugin:
                 self.cache[cache_key] = (strategy, time.time())
             
             msg.good(f"  Query builder: query estruturada gerada")
+            if semantic_query != user_query:
+                msg.info(f"  Query expandida: '{user_query[:50]}...' → '{semantic_query[:100]}...'")
             return strategy
             
         except Exception as e:
@@ -285,18 +293,26 @@ Sua tarefa:
 1. Analisar a query do usuário e entender o que ele quer
 2. Extrair entidades mencionadas (ex: "Apple", "Microsoft", "2024")
 3. Identificar filtros necessários (entidades, datas, idioma, etc.)
-4. Gerar query semântica expandida
-5. Gerar query keyword otimizada
+4. **EXPANDIR a query semântica** com sinônimos, termos relacionados e conceitos semânticos
+5. Gerar query keyword otimizada para BM25 (termos-chave importantes)
 6. Determinar intenção (search, comparison, description)
 7. Sugerir alpha para hybrid search
+
+REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
+- A query semântica DEVE ser EXPANDIDA, não apenas repetir a query original
+- Adicione sinônimos, termos relacionados, conceitos semânticos
+- Exemplo: "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita"
+- Exemplo: "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida"
+- Exemplo: "fatores de sucesso" → "fatores de sucesso elementos críticos componentes essenciais requisitos fundamentais"
+- NUNCA retorne a query original sem expansão
 
 IMPORTANTE:
 - Use propriedades do schema para filtros (entities_local_ids, section_entity_ids, chunk_lang, chunk_date, etc.)
 - Se mencionar empresa/pessoa, use filtro de entidade (entities_local_ids ou section_entity_ids)
 - Se mencionar data/ano, use filtro temporal (chunk_date)
 - Se mencionar idioma, use filtro de idioma (chunk_lang)
-- Gere query semântica expandida com sinônimos e conceitos relacionados
-- Gere query keyword otimizada para BM25
+- **SEMPRE expanda a query semântica** - adicione termos relacionados, sinônimos, conceitos
+- Gere query keyword otimizada para BM25 (termos-chave principais)
 
 FILTROS HIERÁRQUICOS (se necessário):
 - Se query menciona "documentos que falam sobre X, depois chunks sobre Y":
@@ -404,8 +420,9 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
     
     def _fallback_response(self, query: str) -> Dict[str, Any]:
         """Resposta de fallback se LLM falhar"""
+        msg.warn(f"  Query builder: usando fallback (LLM não disponível ou erro)")
         return {
-            "semantic_query": query,
+            "semantic_query": query,  # Fallback não expande - apenas retorna original
             "keyword_query": query,
             "intent": "search",
             "filters": {
@@ -422,7 +439,7 @@ Retorne apenas JSON válido, sem markdown, sem explicações fora do JSON:
                 "section_title": ""
             },
             "alpha": 0.6,
-            "explanation": "Query simples (fallback)",
+            "explanation": "Query simples (fallback - LLM não disponível)",
             "requires_validation": False
         }
     
