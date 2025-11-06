@@ -354,15 +354,25 @@ class EntityAwareRetriever(Retriever):
         
         # DIAGNÓSTICO: Verificar se spaCy e Gazetteer estão disponíveis
         try:
-            from verba_extensions.plugins.entity_aware_query_orchestrator import get_nlp, load_gazetteer
-            nlp_model = get_nlp()
+            from verba_extensions.plugins.entity_aware_query_orchestrator import get_nlp, load_gazetteer, detect_query_language
+            query_language = detect_query_language(query)
+            msg.info(f"  🌐 DIAGNÓSTICO: Idioma da query detectado: {query_language.upper()}")
+            
+            # Tentar carregar modelo para o idioma detectado
+            nlp_model = get_nlp(language=query_language)
             gaz = load_gazetteer()
             
             if not nlp_model:
-                msg.warn(f"  ⚠️ DIAGNÓSTICO: spaCy não está disponível - entidades NÃO serão detectadas")
-                msg.warn(f"  💡 Instale: python -m spacy download pt_core_news_sm")
+                msg.warn(f"  ⚠️ DIAGNÓSTICO: spaCy não está disponível para {query_language.upper()} - entidades NÃO serão detectadas")
+                if query_language == "pt":
+                    msg.warn(f"  💡 Instale: python -m spacy download pt_core_news_sm")
+                elif query_language == "en":
+                    msg.warn(f"  💡 Instale: python -m spacy download en_core_web_sm")
+                else:
+                    msg.warn(f"  💡 Instale modelo spaCy apropriado para {query_language}")
             else:
-                msg.info(f"  ✅ DIAGNÓSTICO: spaCy está disponível (modelo: {nlp_model.meta.get('name', 'unknown')})")
+                model_name = nlp_model.meta.get('name', 'unknown')
+                msg.info(f"  ✅ DIAGNÓSTICO: spaCy está disponível (modelo: {model_name}, idioma: {query_language.upper()})")
             
             if not gaz:
                 msg.warn(f"  ⚠️ DIAGNÓSTICO: Gazetteer vazio ou não encontrado - entidades NÃO serão mapeadas")
