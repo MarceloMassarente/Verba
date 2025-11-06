@@ -479,12 +479,27 @@ class EntityAwareRetriever(Retriever):
                 msg.warn("  entity_frequency não disponível, ignorando filtro de frequência")
         
         # Combinar filtros (entity + language + temporal)
+        # IMPORTANTE: Quando não há entidades, filtros podem estar restringindo demais os resultados
+        # Estratégia: aplicar filtros apenas quando há entidades OU quando são realmente necessários
         combined_filter = None
         filters_list = []
-        if entity_filter:
+        
+        # Aplicar filtro de entidade apenas se houver entidades detectadas
+        if entity_filter and entity_ids:
             filters_list.append(entity_filter)
+        
+        # Filtro de idioma: aplicar apenas quando há entidades (para evitar contaminação)
+        # Quando NÃO há entidades, o filtro de idioma pode estar restringindo demais os resultados
         if lang_filter:
-            filters_list.append(lang_filter)
+            if entity_ids:
+                # Quando há entidades, filtro de idioma ajuda a evitar contaminação
+                filters_list.append(lang_filter)
+            else:
+                # Quando não há entidades, filtro de idioma pode estar restringindo demais
+                # Ignorar para permitir busca mais ampla
+                msg.info(f"  Filtro de idioma ignorado (sem entidades, pode restringir demais)")
+        
+        # Filtro temporal: aplicar sempre que disponível (não restritivo demais)
         if temporal_filter:
             filters_list.append(temporal_filter)
         
@@ -492,6 +507,32 @@ class EntityAwareRetriever(Retriever):
             combined_filter = filters_list[0]
         elif len(filters_list) > 1:
             combined_filter = Filter.all_of(filters_list)
+        
+        # Atualizar debug info sobre filtros
+        if combined_filter:
+            filter_types = []
+            if entity_filter and entity_ids:
+                filter_types.append("entidade")
+            if lang_filter and entity_ids:  # Só conta se foi aplicado
+                filter_types.append("idioma")
+            if temporal_filter:
+                filter_types.append("temporal")
+            
+            if filter_types:
+                debug_info["filters_applied"] = {
+                    "type": "combined" if len(filter_types) > 1 else filter_types[0],
+                    "description": f"Filtros aplicados: {', '.join(filter_types)}"
+                }
+            else:
+                debug_info["filters_applied"] = {
+                    "type": "temporal_only",
+                    "description": "Apenas filtro temporal"
+                }
+        else:
+            debug_info["filters_applied"] = {
+                "type": "none",
+                "description": "Sem filtros aplicados (sem entidades detectadas)"
+            }
         
         # 3. DETERMINA QUERY PARA BUSCA SEMÂNTICA
         # Prioridade: rewritten_query > semantic_terms > query original
@@ -516,10 +557,7 @@ class EntityAwareRetriever(Retriever):
                 if combined_filter:
                     # FILTRA por entidade + idioma, DEPOIS faz busca semântica
                     msg.info(f"  Executando: Hybrid search com filtros combinados")
-                    debug_info["filters_applied"] = {
-                        "type": "combined",
-                        "description": "Filtros combinados (entidade + idioma + outros)"
-                    }
+                    # debug_info já foi atualizado acima
                     
                     chunks = await weaviate_manager.hybrid_chunks_with_filter(
                         client=client,
@@ -536,11 +574,7 @@ class EntityAwareRetriever(Retriever):
                 elif entity_filter and enable_entity_filter:
                     # FILTRA apenas por entidade
                     msg.info(f"  Executando: Hybrid search com entity filter")
-                    debug_info["filters_applied"] = {
-                        "type": "entity",
-                        "entities": entity_ids,
-                        "description": f"Filtro por entidades: {entity_ids}"
-                    }
+                    # debug_info já foi atualizado acima
                     
                     chunks = await weaviate_manager.hybrid_chunks_with_filter(
                         client=client,
@@ -557,10 +591,7 @@ class EntityAwareRetriever(Retriever):
                 else:
                     # Sem filtros: busca normal
                     msg.info(f"  Executando: Hybrid search sem filtros")
-                    debug_info["filters_applied"] = {
-                        "type": "none",
-                        "description": "Sem filtros aplicados"
-                    }
+                    # debug_info já foi atualizado acima
                     
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
