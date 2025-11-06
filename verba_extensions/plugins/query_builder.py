@@ -249,6 +249,7 @@ class QueryBuilderPlugin:
             has_chunk_lang = any(prop.name == "chunk_lang" for prop in config.properties)
             
             if not has_chunk_lang:
+                msg.info(f"  Query builder: collection '{collection_name}' não tem propriedade 'chunk_lang', não é possível detectar idioma dominante")
                 return None
             
             # Construir filtros para agregação (apenas documentos que serão buscados)
@@ -296,13 +297,18 @@ class QueryBuilderPlugin:
                         filter_info.append(f"docs={len(document_uuids)}")
                     msg.debug(f"  Query builder: calculando idioma dominante com filtros: {', '.join(filter_info)}")
                 else:
+                    msg.info(f"  Query builder: calculando idioma dominante de toda a collection '{collection_name}' (sem filtros)")
                     result = await collection.aggregate.over_all(
                         group_by=GroupByAggregate(prop="chunk_lang"),
                         total_count=True
                     )
                 
                 if not result.groups:
+                    msg.info(f"  Query builder: agregação não retornou grupos (collection pode estar vazia ou chunk_lang não tem valores)")
                     return None
+                
+                # Log detalhado dos grupos encontrados
+                msg.info(f"  Query builder: grupos de idioma encontrados: {[(g.grouped_by.value if hasattr(g.grouped_by, 'value') else 'unknown', g.total_count) for g in result.groups]}")
                 
                 # Encontrar o grupo com maior total_count
                 dominant_group = max(result.groups, key=lambda g: g.total_count)
@@ -329,6 +335,82 @@ class QueryBuilderPlugin:
             return None
         
         return None
+    
+    async def _detect_language_from_quick_search(
+        self,
+        client,
+        collection_name: str,
+        query: str,
+        limit: int = 10
+    ) -> Optional[str]:
+        """
+        Tenta detectar o idioma dominante fazendo uma busca rápida inicial.
+        Útil quando a agregação não funciona ou quando não há filtros.
+        
+        Args:
+            client: Cliente Weaviate
+            collection_name: Nome da collection
+            query: Query do usuário
+            limit: Número de chunks para analisar (padrão: 10)
+            
+        Returns:
+            Código do idioma dominante (ex: "en", "pt") ou None se não conseguir detectar
+        """
+        try:
+            collection = client.collections.get(collection_name)
+            
+            # Verificar se chunk_lang existe no schema
+            try:
+                config = collection.config.get()
+                if hasattr(config, '__await__'):
+                    config = await config
+            except TypeError:
+                config = await collection.config.get()
+            
+            has_chunk_lang = any(prop.name == "chunk_lang" for prop in config.properties)
+            if not has_chunk_lang:
+                return None
+            
+            # Fazer busca híbrida rápida (BM25 + Vector se disponível)
+            # Usar apenas BM25 para ser mais rápido e não depender de embedder
+            from weaviate.classes.query import MetadataQuery, QueryReturn
+            
+            try:
+                # Busca híbrida simples (BM25 com alpha=0.0 = apenas keyword)
+                # Isso não requer vetor, então é mais rápido
+                results = await collection.query.hybrid(
+                    query=query,
+                    alpha=0.0,  # Apenas BM25 (keyword search)
+                    limit=limit,
+                    return_metadata=MetadataQuery(score=True),
+                    return_properties=["chunk_lang"]
+                )
+                
+                if not results.objects:
+                    return None
+                
+                # Contar idiomas dos chunks encontrados
+                lang_counts = {}
+                for obj in results.objects:
+                    chunk_lang = obj.properties.get("chunk_lang")
+                    if chunk_lang:
+                        lang_counts[chunk_lang] = lang_counts.get(chunk_lang, 0) + 1
+                
+                if not lang_counts:
+                    return None
+                
+                # Retornar idioma mais frequente
+                dominant_lang = max(lang_counts.items(), key=lambda x: x[1])[0]
+                msg.info(f"  Query builder: busca rápida encontrou {len(results.objects)} chunks, idiomas: {lang_counts}, dominante: {dominant_lang}")
+                return dominant_lang
+                
+            except Exception as e:
+                msg.debug(f"  Query builder: erro na busca rápida: {str(e)}")
+                return None
+                
+        except Exception as e:
+            msg.debug(f"  Query builder: erro ao fazer busca rápida para detectar idioma: {str(e)}")
+            return None
     
     def _get_default_schema(self) -> Dict[str, Any]:
         """Retorna schema padrão conhecido se não conseguir obter do Weaviate"""
@@ -425,13 +507,33 @@ class QueryBuilderPlugin:
         
         # Obter idioma dominante dos documentos filtrados (se disponível)
         # IMPORTANTE: Calcula apenas dos documentos que serão buscados (labels/document_uuids)
+        # Se não há filtros, calcula de toda a collection (pode não ser ideal, mas é melhor que nada)
         dominant_language = None
         try:
             dominant_language = await self.get_dominant_language(
                 client, collection_name, labels=labels, document_uuids=document_uuids
             )
+            if dominant_language:
+                msg.info(f"  Query builder: idioma dominante detectado: {dominant_language.upper()}")
+            else:
+                # Se não conseguiu detectar via agregação e não há filtros, tentar busca rápida
+                if not labels and not document_uuids:
+                    msg.info(f"  Query builder: agregação não detectou idioma, tentando busca rápida inicial...")
+                    try:
+                        dominant_language = await self._detect_language_from_quick_search(
+                            client, collection_name, user_query
+                        )
+                        if dominant_language:
+                            msg.info(f"  Query builder: idioma detectado via busca rápida: {dominant_language.upper()}")
+                        else:
+                            msg.info(f"  Query builder: busca rápida não encontrou chunks com chunk_lang")
+                    except Exception as e:
+                        msg.warn(f"  Query builder: busca rápida falhou: {str(e)}")
+                
+                if not dominant_language:
+                    msg.info(f"  Query builder: não foi possível detectar idioma dominante (pode ser normal se collection não tem chunk_lang ou está vazia)")
         except Exception as e:
-            msg.debug(f"  Query builder: não foi possível obter idioma dominante: {str(e)}")
+            msg.warn(f"  Query builder: erro ao obter idioma dominante: {str(e)}")
         
         # Chamar LLM para construir query
         try:
