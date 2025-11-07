@@ -78,17 +78,23 @@
 
 **Funcionalidades:**
 1. **Detecção automática de idioma:**
-   - Usa `langdetect` para detectar PT/EN
-   - Fallback heurístico se `langdetect` falhar
-   - Carrega modelo spaCy apropriado automaticamente
+   - Detector próprio (`code_switching_detector`) identifica PT, EN ou combinações `pt-en` / `en-pt`
+   - Usa `langdetect` como fallback e heurísticas simples para ambientes desconectados
+   - Carrega modelos spaCy automaticamente conforme a mistura detectada (cache global)
 
 2. **Extração de entidades sem gazetteer:**
    - Modo inteligente: extrai entidades diretamente do texto
+   - Quando detecta code-switching `pt-en`, roda spaCy **duas vezes** (pt_core_news_sm + en_core_web_sm) no mesmo chunk com deduplicação por span
    - Salva em `entity_mentions` como JSON: `[{text, label, confidence}, ...]`
    - Não requer gazetteer manual (funciona out-of-the-box)
    - Fallback para gazetteer se disponível (modo legado)
 
-3. **Suporte universal a embeddings:**
+3. **Detecção de code-switching (PT + EN):**
+   - Usa lista de 100+ termos técnicos (cash flow, EBITDA, KPI, forecast...) para classificar chunks com ≥12% de jargão EN
+   - Marca `chunk_lang` como `pt-en` (ou `en-pt`) sempre que detectar mistura relevante
+   - Permite que queries em inglês encontrem chunks escritos em PT com jargão EN (sem perder contexto)
+
+4. **Suporte universal a embeddings:**
    - ✅ Funciona com QUALQUER modelo (local ou API)
    - ✅ Detecta collection automaticamente: `VERBA_Embedding_*`
    - ✅ Recebe `collection_name` do hook para garantir collection correta
@@ -107,6 +113,8 @@
 [ETL] ✅ 93 chunks encontrados - executando ETL A2 (NER + Section Scope) em background
 [ETL] 🚀 Iniciando ETL A2 em background para 93 chunks
 [ETL] Collection detectada: VERBA_Embedding_all_MiniLM_L6_v2
+[ETL] Idioma detectado: pt-en (PT com jargão EN) → spaCy pt_core_news_sm + en_core_web_sm
+[ETL] chunk_lang atualizado para pt-en (code-switching)
 [ETL] Progresso: 100/93 chunks atualizados...
 [ETL] ✅ ETL A2 concluído para 93 chunks
 ```
@@ -114,6 +122,7 @@
 ### ✅ Status Atual:
 - ✅ **FUNCIONANDO!** ETL inteligente implementado
 - ✅ Multi-idioma (PT/EN) com detecção automática
+- ✅ Code-switching PT+EN detectado e tratado (chunk_lang = pt-en)
 - ✅ Sem gazetteer obrigatório (modo inteligente)
 - ✅ Suporte universal a embeddings
 - ✅ Collection correta sendo usada
@@ -135,6 +144,7 @@ Depois que os chunks estão enriquecidos pelo ETL inteligente, o fluxo de busca 
   - Aceita entidades fornecidas pelo Query Builder **com ou sem** prefixo `ent:`.
   - Reaproveita os textos tanto para dar boost semântico quanto para aplicar WHERE (`section_entity_ids`).
   - Apenas entidades **PERSON/PER** e **ORG** são usadas como filtros (coerência com ETL pós-chunking).
+  - Integra `bilingual_filter`: queries detectadas como `pt-en` ou `en-pt` aceitam chunks `['pt', 'en', 'pt-en', 'en-pt']` (sem perder contexto bilíngue).
 
 ### Fluxo Simplificado
 
@@ -147,6 +157,7 @@ Entity-Aware Retriever
   → Detecta entidades da query (spaCy inteligente)
   → Prioriza entidades vindas do Query Builder
   → Boost semântico + filtro WHERE section_entity_ids
+  → Filtro de idioma flexível: chunk_lang contains_any([...]) aceita chunks bilíngues
       ↓
 Chunks enriquecidos (com entity_mentions / section_entity_ids)
 ```

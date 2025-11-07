@@ -535,6 +535,59 @@ Na interface do Verba, nova opção `Entity Filter Mode` com valores: `strict`, 
 
 ---
 
+### 8. **Code-Switching Detector (PT + EN)** ✅ ⭐ NOVO
+
+**Arquivos:**
+- `verba_extensions/utils/code_switching_detector.py`
+- `verba_extensions/plugins/bilingual_filter.py`
+- `ingestor/etl_a2_intelligent.py`
+- `scripts/test_code_switching.py`
+
+**Problema:**
+- Documentos corporativos brasileiros misturam português + jargão financeiro em inglês (cash flow, EBITDA, KPI...)
+- Chunks marcados como `chunk_lang="pt"` não eram retornados para queries em inglês
+- spaCy monolíngue perdia entidades como "Apple", "Microsoft" quando chunk principal estava em PT
+
+**Solução:**
+- Detector de code-switching identifica textos com ≥12% de termos técnicos EN → classifica como `pt-en`
+- ETL inteligente roda spaCy PT **e** EN no mesmo chunk (NER bilíngue) com cache e deduplicação
+- `bilingual_filter` aceita automaticamente chunks `pt-en` quando query é PT ou EN (filtro flexível)
+- Script de teste `scripts/test_code_switching.py` valida 10 cenários reais (80% de acerto)
+
+**Como verificar após upgrade:**
+```python
+from verba_extensions.utils.code_switching_detector import get_detector
+detector = get_detector()
+detector.detect_language_mix("O cash flow da empresa foi impactado pelo EBITDA")
+# ➜ ('pt-en', {'technical_ratio': 0.28, ...})
+
+from verba_extensions.plugins.bilingual_filter import BilingualFilterPlugin
+plugin = BilingualFilterPlugin()
+plugin.detect_query_language("How is the cash flow?")  # ➜ 'en-pt'
+plugin.build_language_filter('en-pt')  # ➜ chunk_lang contains_any(['pt','en','pt-en','en-pt'])
+```
+
+**Logs esperados:**
+```
+ℹ Chunk language detectado: pt-en (PT com jargão EN)
+ℹ NER bilíngue: spaCy pt_core_news_sm + en_core_web_sm
+ℹ Query builder: idioma detectado pt-en → filtro aceita chunks bilíngues
+```
+
+**Reaplicação após atualizar o Verba:**
+- Garantir que `code_switching_detector.py` permaneça em `verba_extensions/utils`
+- Verificar se `detect_text_language()` em `etl_a2_intelligent.py` retorna valores `pt-en`
+- Confirmar que `build_language_filter()` usa `.contains_any([...])` em vez de `.equal()`
+- Rodar `python scripts/test_code_switching.py` e verificar taxa de acerto ≥80%
+
+**Impacto:**
+- Queries em inglês encontram chunks em PT com jargão EN (e vice-versa)
+- ETL extrai entidades globais (Apple, Microsoft) mesmo em texto português
+- Chunks marcados com `chunk_lang="pt-en"` evitam falsos negativos
+- Experiência muito melhor em documentos financeiros/negócios
+
+---
+
 ## 🔄 Processo de Reaplicação Após Upgrade
 
 ### **Passo 1: Verificar Compatibilidade**

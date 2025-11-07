@@ -129,6 +129,39 @@ Implementados **4 modos de filtro** configuráveis no Entity-Aware Retriever:
 
 ---
 
+### 6. **Code-Switching Detector (PT + EN)** ⭐ NOVO
+
+**Problema:**
+- Documentos corporativos em PT usam jargão EN (cash flow, EBITDA, KPI, forecast...)
+- Chunks marcados como `chunk_lang="pt"` não retornavam em queries EN
+- spaCy monolíngue perdia entidades em texto híbrido
+
+**Solução:**
+- Detector `code_switching_detector` marca textos com ≥12% de termos técnicos EN como `pt-en`
+- ETL inteligente roda spaCy PT **e** EN no mesmo chunk (cache global + deduplicação)
+- `bilingual_filter` aceita chunks `['pt', 'en', 'pt-en', 'en-pt']` conforme a query
+- Script `scripts/test_code_switching.py` valida 10 cenários reais (80% de acerto)
+
+**Arquivos modificados:**
+- `verba_extensions/utils/code_switching_detector.py`
+- `ingestor/etl_a2_intelligent.py`
+- `verba_extensions/plugins/bilingual_filter.py`
+- `scripts/test_code_switching.py`
+
+**Impacto:**
+- Queries EN agora retornam chunks PT com jargão EN (sem perder contexto)
+- Entidades globais (Apple, Microsoft) detectadas mesmo em texto PT
+- `chunk_lang` registra `pt-en`, permitindo filtros flexíveis no retriever
+
+**Logs esperados:**
+```
+ℹ Idioma detectado: pt-en (PT com jargão EN)
+ℹ NER bilíngue: spaCy pt_core_news_sm + en_core_web_sm
+ℹ Query builder: idioma detectado pt-en → filtro aceitará chunks bilíngues
+```
+
+---
+
 ## 🐛 Correções Críticas
 
 ### 1. **Bug: Collection Errada**

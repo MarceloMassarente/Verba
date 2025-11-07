@@ -202,35 +202,49 @@ Cada Chunk → ETL A2 Inteligente → Entidades + Seções → Atualiza Weaviate
 
 **O que acontece para CADA chunk:**
 
-#### **7.1. Detecção de Idioma e Extração de Entidades** ⭐ NOVO
+#### **7.1. Detecção de Idioma (PT, EN ou PT-EN) + NER Bilíngue** ⭐ NOVO
 
-Para o **Chunk 1**: `"Apple lança novo iPhone. A empresa americana anunciou..."`
+Para o **Chunk 1**: `"O cash flow da Apple foi impactado pelo EBITDA da Microsoft"`
 
-**⭐ NOVO: Detecção Automática de Idioma**
+**⭐ NOVO: Detector de Code-Switching**
 
 ```python
-# 1. Detecta idioma automaticamente
-from langdetect import detect
-language = detect("Apple lança novo iPhone...")  # Retorna "pt"
+from verba_extensions.utils.code_switching_detector import get_detector
 
-# 2. Carrega modelo spaCy apropriado
-if language == "pt":
-    nlp = spacy.load("pt_core_news_sm")
-elif language == "en":
-    nlp = spacy.load("en_core_web_sm")
-else:
-    nlp = spacy.load("pt_core_news_sm")  # Fallback
+detector = get_detector()
+language, stats = detector.detect_language_mix(
+    "O cash flow da Apple foi impactado pelo EBITDA da Microsoft"
+)
+# ➜ language = "pt-en" (português com ≥12% de termos técnicos EN)
+# ➜ stats = {"technical_ratio": 0.28, ...}
 
-# 3. Extrai entidades (modo inteligente - sem gazetteer obrigatório)
-doc = nlp("Apple lança novo iPhone. A empresa americana anunciou...")
-
-# Entidades encontradas (todas as labels):
-entity_mentions = [
-    {"text": "Apple", "label": "ORG", "confidence": 0.95},
-    {"text": "iPhone", "label": "MISC", "confidence": 0.80},
-    # Modo inteligente extrai TODAS as entidades, não apenas ORG+PERSON
-]
+languages = detector.get_language_list(language)
+# ➜ ["pt", "en"]
 ```
+
+**⭐ NOVO: spaCy bilíngue com deduplicação**
+
+```python
+seen_spans = set()
+all_entities = []
+
+for lang in languages:  # ➜ ["pt", "en"]
+    nlp = get_nlp_for_language(lang)  # Cache global (pt_core_news_sm / en_core_web_sm)
+    doc = nlp(text)
+    for ent in doc.ents:
+        if ent.label_ not in ("ORG", "PERSON", "PER"):
+            continue
+        span_key = (ent.start_char, ent.end_char, ent.text)
+        if span_key in seen_spans:
+            continue
+        seen_spans.add(span_key)
+        all_entities.append({"text": ent.text, "label": ent.label_, "confidence": 0.95})
+
+chunk_lang = language  # ➜ "pt-en"
+# Resultado: ['Apple', 'Microsoft'] detectados mesmo com texto híbrido
+```
+
+> **Importante:** Se o texto é puramente PT ou EN, `language` será "pt" ou "en" e o ETL roda spaCy apenas uma vez (mesma performance anterior).
 
 **⭐ NOVO: Modo Inteligente vs Modo Gazetteer**
 
@@ -313,6 +327,7 @@ await coll.data.update(
         "entity_mentions": json.dumps([
             {"text": "Apple", "label": "ORG", "confidence": 0.95}
         ]),
+        "chunk_lang": "pt-en",                     # ⭐ NOVO: chunk bilíngue (PT + jargão EN)
         # Modo legado (se gazetteer disponível):
         "entities_local_ids": ["Q312"],           # Entidades normalizadas
         "section_title": "Artigo 1: Apple...",
@@ -332,6 +347,7 @@ await coll.data.update(
             {"text": "Microsoft", "label": "ORG", "confidence": 0.95},
             {"text": "OpenAI", "label": "ORG", "confidence": 0.90}
         ]),
+        "chunk_lang": "pt-en",                     # Pode ser "pt", "en", "pt-en", "en-pt"
         # Modo legado (se gazetteer disponível):
         "entities_local_ids": ["Q2283"],          # Microsoft
         "section_title": "Artigo 2: Microsoft...",
@@ -470,6 +486,7 @@ Resultado:
 - **Import Weaviate**: 2-5s
 - **ETL Pós-Chunking (background)**: 10-30s
   - ⭐ **NOVO:** ETL inteligente multi-idioma (detecção automática PT/EN)
+  - ⭐ **NOVO:** Detector de code-switching marca chunks `pt-en` e roda NER bilíngue
   - ⭐ **NOVO:** Collection correta sendo usada (não mais "Passage")
 - **Total**: **26-64 segundos**
 
@@ -588,9 +605,10 @@ Query Builder → extrai entidades e conceitos → Entity-Aware Retriever
    - Modo legado: usa gazetteer se disponível para normalização
 3. **Performance**: ETL adiciona 10-30s por documento (pós-chunking, em background)
 4. **PDF Complexo**: Pode não separar artigos automaticamente (se forem contínuos)
-5. **Tipos de Entidades**: ⭐ **ATUALIZADO** - Modo inteligente extrai TODAS as labels
-   - Modo pré-chunking: apenas ORG + PERSON (otimização)
-   - Modo pós-chunking: todas as labels (ORG, PERSON, LOC, GPE, MISC, etc.)
+5. **Tipos de Entidades**: ⭐ **ATUALIZADO**
+   - Modo pré-chunking: apenas ORG + PERSON/PER (otimizado para chunking entity-aware)
+   - Modo pós-chunking inteligente: PERSON/PER + ORG (coerente com filtros do retriever)
+   - `entity_mentions` continua armazenando texto + label + confiança (para auditoria)
 
 ### 🚀 **Otimizações Implementadas:**
 1. **Binary Search**: Filtragem O(n²) → O(n log n) (6.7x mais rápido)
@@ -626,6 +644,18 @@ O Verba pode criar múltiplos documentos se houver quebras claras. Mas se tudo v
 }
 ```
 - Gazetteer é opcional - ETL funciona sem ele
+
+---
+
+### 🧪 Teste rápido do code-switching PT+EN
+
+```bash
+python scripts/test_code_switching.py
+```
+
+- Valida 10 cenários reais (PDFs, relatórios, e-mails corporativos)
+- Esperado: taxa de acerto ≥ 80% e logs indicando `chunk_lang = pt-en`
+- Confirma spaCy PT + EN instalados e filtro bilíngue ativo na busca
 
 ---
 
