@@ -18,16 +18,20 @@
    - Performance: 2-3s (vs 30s antes - 10-15x mais rápido!)
    ↓
 4. Embedding
-   - 2226 chunks finais (expandidos por plugins)
+   - 93 chunks finais (plugins de enriquecimento aplicados, mas sem re-chunking)
+   - ⚠️ **NOTA:** `recursive_document_splitter` foi removido (evita expansão desnecessária)
    ↓
 5. Import → Weaviate
    - Chunks inseridos no Weaviate
    ↓
-6. [ETL-POST] Processa chunks INDIVIDUAIS
-   - NER em cada chunk (apenas ORG + PERSON/PER)
+6. [ETL-POST] Processa chunks INDIVIDUAIS ⭐ ATUALIZADO
+   - NER inteligente multi-idioma em cada chunk
+   - Detecção automática de idioma (PT/EN)
+   - Extração sem gazetteer obrigatório (modo inteligente)
    - Section Scope (identifica seções)
-   - Normalização via gazetteer
-   - Atualiza Weaviate com metadados
+   - Normalização via gazetteer (se disponível, modo legado)
+   - Atualiza Weaviate com metadados (`entity_mentions`, `entities_local_ids`, etc.)
+   - ✅ Collection correta sendo usada (não mais "Passage")
 ```
 
 ---
@@ -59,27 +63,60 @@
 
 ---
 
-## 🔍 ETL Pós-Chunking (DEPOIS)
+## 🔍 ETL Pós-Chunking (DEPOIS) ⭐ ATUALIZADO
 
 **Quando:** Depois do import no Weaviate  
 **O que faz:** Processa chunks individuais  
 **Para que:** 
-- NER refinado em cada chunk
+- NER refinado em cada chunk (multi-idioma, inteligente)
 - Section Scope (identifica seções)
 - Atualiza metadados no Weaviate
+
+### ⭐ NOVO: ETL Inteligente Multi-idioma
+
+**Módulo:** `ingestor/etl_a2_intelligent.py`
+
+**Funcionalidades:**
+1. **Detecção automática de idioma:**
+   - Usa `langdetect` para detectar PT/EN
+   - Fallback heurístico se `langdetect` falhar
+   - Carrega modelo spaCy apropriado automaticamente
+
+2. **Extração de entidades sem gazetteer:**
+   - Modo inteligente: extrai entidades diretamente do texto
+   - Salva em `entity_mentions` como JSON: `[{text, label, confidence}, ...]`
+   - Não requer gazetteer manual (funciona out-of-the-box)
+   - Fallback para gazetteer se disponível (modo legado)
+
+3. **Suporte universal a embeddings:**
+   - ✅ Funciona com QUALQUER modelo (local ou API)
+   - ✅ Detecta collection automaticamente: `VERBA_Embedding_*`
+   - ✅ Recebe `collection_name` do hook para garantir collection correta
+   - ✅ Suporta: SentenceTransformers, OpenAI, Cohere, BGE, E5, Voyage AI, etc.
+
+**Correções críticas:**
+- ⚠️ **BUG CORRIGIDO:** ETL estava tentando atualizar collection `"Passage"` que não existe
+- ✅ **CORRIGIDO:** Agora detecta collection correta ou recebe via parâmetro
+- ✅ **CORRIGIDO:** Hook passa `collection_name` explicitamente
 
 ### Logs Esperados:
 ```
 [ETL-POST] Verificando ETL pós-chunking: enable_etl=True, doc_uuid=present
 [ETL-POST] ETL A2 habilitado - buscando chunks importados para doc_uuid: ...
 [ETL] Buscando passages no Weaviate após import...
-[ETL] ✅ 2226 chunks encontrados - executando ETL A2 (NER + Section Scope) em background
-[ETL] 🚀 Iniciando ETL A2 em background para 2226 chunks
-[ETL] ✅ ETL A2 concluído para 2226 chunks
+[ETL] ✅ 93 chunks encontrados - executando ETL A2 (NER + Section Scope) em background
+[ETL] 🚀 Iniciando ETL A2 em background para 93 chunks
+[ETL] Collection detectada: VERBA_Embedding_all_MiniLM_L6_v2
+[ETL] Progresso: 100/93 chunks atualizados...
+[ETL] ✅ ETL A2 concluído para 93 chunks
 ```
 
-### ❌ Status nos Seus Logs:
-- ❌ **NÃO APARECEU!** Nenhum desses logs foi visto
+### ✅ Status Atual:
+- ✅ **FUNCIONANDO!** ETL inteligente implementado
+- ✅ Multi-idioma (PT/EN) com detecção automática
+- ✅ Sem gazetteer obrigatório (modo inteligente)
+- ✅ Suporte universal a embeddings
+- ✅ Collection correta sendo usada
 
 ---
 

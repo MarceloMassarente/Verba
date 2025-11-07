@@ -192,56 +192,87 @@ import_document completo → Hook detecta → Prepara para ETL
 
 ---
 
-### **FASE 7: ETL Pós-Chunking Executa por Chunk** ⏱️ ~10-30s (background)
+### **FASE 7: ETL Pós-Chunking Executa por Chunk** ⏱️ ~10-30s (background) ⭐ ATUALIZADO
 
 ```
-Cada Chunk → ETL A2 → Entidades + Seções → Atualiza Weaviate
+Cada Chunk → ETL A2 Inteligente → Entidades + Seções → Atualiza Weaviate
 ```
+
+**⭐ NOVO: ETL Inteligente Multi-idioma**
 
 **O que acontece para CADA chunk:**
 
-#### **7.1. Extração de Entidades via SpaCy**
+#### **7.1. Detecção de Idioma e Extração de Entidades** ⭐ NOVO
 
 Para o **Chunk 1**: `"Apple lança novo iPhone. A empresa americana anunciou..."`
 
+**⭐ NOVO: Detecção Automática de Idioma**
+
 ```python
-nlp = spacy.load("pt_core_news_sm")
+# 1. Detecta idioma automaticamente
+from langdetect import detect
+language = detect("Apple lança novo iPhone...")  # Retorna "pt"
+
+# 2. Carrega modelo spaCy apropriado
+if language == "pt":
+    nlp = spacy.load("pt_core_news_sm")
+elif language == "en":
+    nlp = spacy.load("en_core_web_sm")
+else:
+    nlp = spacy.load("pt_core_news_sm")  # Fallback
+
+# 3. Extrai entidades (modo inteligente - sem gazetteer obrigatório)
 doc = nlp("Apple lança novo iPhone. A empresa americana anunciou...")
 
-# Entidades encontradas (apenas ORG e PERSON/PER):
-entidades_encontradas = [
-    {"text": "Apple", "label": "ORG"},      # Organização ✅
-    # "iPhone" não é extraído (MISC excluído)
-    # "americana" não é extraído (LOC/GPE excluído)
+# Entidades encontradas (todas as labels):
+entity_mentions = [
+    {"text": "Apple", "label": "ORG", "confidence": 0.95},
+    {"text": "iPhone", "label": "MISC", "confidence": 0.80},
+    # Modo inteligente extrai TODAS as entidades, não apenas ORG+PERSON
 ]
 ```
 
-**Nota**: ETL pós-chunking extrai apenas ORG e PERSON/PER (igual ao pré-chunking), para consistência.
+**⭐ NOVO: Modo Inteligente vs Modo Gazetteer**
+
+**Modo Inteligente (padrão):**
+- ✅ Extrai entidades diretamente do texto
+- ✅ Não requer gazetteer manual
+- ✅ Funciona out-of-the-box
+- ✅ Salva em `entity_mentions` como JSON
+
+**Modo Gazetteer (opcional):**
+- Usa gazetteer se disponível para normalização
+- Mapeia aliases para `entity_ids` canônicos
+- Salva em `entities_local_ids`
 
 **Resultado:**
-- ✅ Lista de entidades por chunk (texto + label)
+- ✅ Lista de entidades por chunk (`entity_mentions`)
+- ✅ Entidades normalizadas se gazetteer disponível (`entities_local_ids`)
 
 ---
 
-#### **7.2. Normalização via Gazetteer**
+#### **7.2. Normalização via Gazetteer (Opcional)**
 
 Para o **Chunk 1** com entidade `"Apple"`:
 
 ```python
-# Gazetteer mapeia aliases para entity_ids
+# Gazetteer mapeia aliases para entity_ids (se disponível)
 gazetteer = {
     "Q312": ["Apple", "Apple Inc", "Apple Computer"],
     "Q2283": ["Microsoft", "MSFT", "Microsoft Corporation"],
     "Q95": ["Google", "Google LLC", "Alphabet"]
 }
 
-# Busca "Apple" no gazetteer
-entity_ids = ["Q312"]  # Apple Inc
+# Busca "Apple" no gazetteer (se disponível)
+if gazetteer:
+    entity_ids = ["Q312"]  # Apple Inc (normalizado)
+else:
+    entity_ids = []  # Modo inteligente não requer normalização
 ```
 
 **Resultado:**
-- ✅ Entidades normalizadas para `entity_ids` canônicos
-- ✅ Aliases mapeados corretamente
+- ✅ Entidades normalizadas para `entity_ids` canônicos (se gazetteer disponível)
+- ✅ Modo inteligente funciona mesmo sem gazetteer
 
 ---
 
@@ -265,31 +296,48 @@ section_entity_ids = ["Q312"]  # Entidades mencionadas nesta seção
 
 ---
 
-#### **7.4. Atualização no Weaviate**
+#### **7.4. Atualização no Weaviate** ⭐ ATUALIZADO
 
-Para **cada chunk**, atualiza metadados:
+Para **cada chunk**, atualiza metadados na **collection correta**:
 
 ```python
+# ⭐ NOVO: Collection correta (não mais "Passage")
+collection_name = "VERBA_Embedding_all_MiniLM_L6_v2"  # Ou qualquer outro embedder
+coll = client.collections.get(collection_name)
+
 # Chunk 1
-passage_collection.data.update(
+await coll.data.update(
     uuid="chunk-1",
     properties={
-        "entities_local_ids": ["Q312"],           # Entidades neste chunk
+        # ⭐ NOVO: entity_mentions (modo inteligente)
+        "entity_mentions": json.dumps([
+            {"text": "Apple", "label": "ORG", "confidence": 0.95}
+        ]),
+        # Modo legado (se gazetteer disponível):
+        "entities_local_ids": ["Q312"],           # Entidades normalizadas
         "section_title": "Artigo 1: Apple...",
         "section_first_para": "A empresa...",
         "section_entity_ids": ["Q312"],          # Entidades da seção
-        "section_scope_confidence": 0.85
+        "section_scope_confidence": 0.85,
+        "etl_version": "entity_scope_intelligent_v2"  # ⭐ NOVO
     }
 )
 
 # Chunk 3 (sobre Microsoft)
-passage_collection.data.update(
+await coll.data.update(
     uuid="chunk-3",
     properties={
+        # ⭐ NOVO: entity_mentions (modo inteligente)
+        "entity_mentions": json.dumps([
+            {"text": "Microsoft", "label": "ORG", "confidence": 0.95},
+            {"text": "OpenAI", "label": "ORG", "confidence": 0.90}
+        ]),
+        # Modo legado (se gazetteer disponível):
         "entities_local_ids": ["Q2283"],          # Microsoft
         "section_title": "Artigo 2: Microsoft...",
         "section_first_para": "Microsoft anuncia...",
-        "section_entity_ids": ["Q2283", "Q199300"]  # Microsoft + OpenAI
+        "section_entity_ids": ["Q2283", "Q199300"],  # Microsoft + OpenAI
+        "etl_version": "entity_scope_intelligent_v2"  # ⭐ NOVO
     }
 )
 ```
@@ -340,23 +388,29 @@ VERBA_Document:
   - content: "[texto completo dos 3 artigos]"
 ```
 
-### **Chunks (Passages) com ETL:**
+### **Chunks (Passages) com ETL:** ⭐ ATUALIZADO
 ```
 Chunk 1 (Apple):
   - text: "Apple lança novo iPhone..."
-  - entities_local_ids: ["Q312"]              ← Apple Inc
+  - entity_mentions: [{"text": "Apple", "label": "ORG", "confidence": 0.95}]  ⭐ NOVO
+  - entities_local_ids: ["Q312"]              ← Apple Inc (se gazetteer disponível)
   - section_title: "Artigo 1: Apple..."
   - section_entity_ids: ["Q312"]
+  - etl_version: "entity_scope_intelligent_v2"  ⭐ NOVO
 
 Chunk 3 (Microsoft):
   - text: "Microsoft anuncia parceria..."
-  - entities_local_ids: ["Q2283"]            ← Microsoft
+  - entity_mentions: [{"text": "Microsoft", "label": "ORG", "confidence": 0.95}, {"text": "OpenAI", "label": "ORG", "confidence": 0.90}]  ⭐ NOVO
+  - entities_local_ids: ["Q2283"]            ← Microsoft (se gazetteer disponível)
   - section_entity_ids: ["Q2283", "Q199300"]  ← Microsoft + OpenAI
+  - etl_version: "entity_scope_intelligent_v2"  ⭐ NOVO
 
 Chunk 5 (Google):
   - text: "Google desenvolve IA..."
-  - entities_local_ids: ["Q95"]              ← Google
+  - entity_mentions: [{"text": "Google", "label": "ORG", "confidence": 0.95}]  ⭐ NOVO
+  - entities_local_ids: ["Q95"]              ← Google (se gazetteer disponível)
   - section_entity_ids: ["Q95"]
+  - etl_version: "entity_scope_intelligent_v2"  ⭐ NOVO
 ```
 
 ### **Article (se usar schema A2):**
@@ -412,8 +466,11 @@ Resultado:
 - **ETL Pré-Chunking**: 5-6s (otimizado: 71% menos entidades)
 - **Chunking Entity-Aware**: 2-3s (otimizado: binary search, 10-15x mais rápido)
 - **Embedding**: 5-15s
+  - ⚠️ **NOTA:** `recursive_document_splitter` foi removido (evita expansão 93 → 2379 chunks)
 - **Import Weaviate**: 2-5s
 - **ETL Pós-Chunking (background)**: 10-30s
+  - ⭐ **NOVO:** ETL inteligente multi-idioma (detecção automática PT/EN)
+  - ⭐ **NOVO:** Collection correta sendo usada (não mais "Passage")
 - **Total**: **26-64 segundos**
 
 **Antes das otimizações**: 30s+ apenas no chunking  
@@ -435,10 +492,15 @@ Resultado:
 
 ### ⚠️ **Limitações:**
 1. **SpaCy**: Requer modelo instalado (`pt_core_news_sm` ou `en_core_web_sm`)
-2. **Gazetteer**: Entidades precisam estar no arquivo JSON
+   - ⭐ **NOVO:** Modelo é carregado automaticamente baseado no idioma detectado
+2. **Gazetteer**: ⭐ **OPCIONAL** - ETL inteligente funciona sem gazetteer
+   - Modo inteligente: extrai entidades diretamente (não requer gazetteer)
+   - Modo legado: usa gazetteer se disponível para normalização
 3. **Performance**: ETL adiciona 10-30s por documento (pós-chunking, em background)
 4. **PDF Complexo**: Pode não separar artigos automaticamente (se forem contínuos)
-5. **Tipos de Entidades**: Apenas ORG e PERSON extraídas (LOC/GPE excluídos para performance)
+5. **Tipos de Entidades**: ⭐ **ATUALIZADO** - Modo inteligente extrai TODAS as labels
+   - Modo pré-chunking: apenas ORG + PERSON (otimização)
+   - Modo pós-chunking: todas as labels (ORG, PERSON, LOC, GPE, MISC, etc.)
 
 ### 🚀 **Otimizações Implementadas:**
 1. **Binary Search**: Filtragem O(n²) → O(n log n) (6.7x mais rápido)
@@ -460,13 +522,20 @@ O Verba pode criar múltiplos documentos se houver quebras claras. Mas se tudo v
 
 ### **Se alguma empresa não é detectada:**
 
-Adicione ao `gazetteer.json`:
+**⭐ NOVO: Modo Inteligente (sem gazetteer):**
+- ETL detecta entidades automaticamente via spaCy
+- Não requer gazetteer manual
+- Funciona out-of-the-box
+
+**Modo Legado (com gazetteer):**
+- Adicione ao `gazetteer.json` para normalização:
 ```json
 {
   "entity_id": "Q999",
   "aliases": ["Nome da Empresa", "Nome Alternativo", "Sigla"]
 }
 ```
+- Gazetteer é opcional - ETL funciona sem ele
 
 ---
 

@@ -360,44 +360,56 @@ print(f"Default embedder: {config['Embedder']['selected']}")  # Deve ser Sentenc
 
 ---
 
-### 5. **ETL A2 Hook (NER + Section Scope)** ✅
+### 5. **ETL A2 Hook (NER + Section Scope)** ✅ ⭐ ATUALIZADO
 
-**Arquivo:** `verba_extensions/plugins/a2_etl_hook.py`
+**Arquivo:** `verba_extensions/plugins/a2_etl_hook.py`  
+**Módulo ETL:** `ingestor/etl_a2_intelligent.py` ⭐ NOVO
 
 **O que faz:**
 - Executa ETL pós-chunking: extrai entidades (NER) e determina section scope para cada chunk
-- Atualiza chunks no Weaviate com propriedades ETL (`entities_local_ids`, `section_entity_ids`, etc.)
+- Atualiza chunks no Weaviate com propriedades ETL (`entity_mentions`, `entities_local_ids`, `section_entity_ids`, etc.)
 - Função principal: `run_etl_on_passages()` - chamada pelo import hook após importação
 
 **Funcionalidades:**
-1. **NER (Named Entity Recognition):**
-   - Extrai entidades do texto de cada chunk usando spaCy
-   - Normaliza entidades usando gazetteer (se disponível)
-   - Armazena em `entities_local_ids`
+1. **NER Inteligente Multi-idioma (NOVO):**
+   - Detecta idioma automaticamente (PT/EN) usando `langdetect`
+   - Carrega modelo spaCy apropriado (`pt_core_news_sm` ou `en_core_web_sm`)
+   - Extrai entidades SEM depender de gazetteer (modo inteligente)
+   - Armazena em `entity_mentions` como JSON: `[{text, label, confidence}, ...]`
+   - Fallback para gazetteer se disponível (modo legado)
 
 2. **Section Scope:**
    - Determina entidades relacionadas à seção baseado em título, primeiro parágrafo e entidades pai
    - Armazena em `section_entity_ids` com nível de confiança
 
+3. **Suporte Universal a Embeddings:**
+   - ✅ Funciona com QUALQUER modelo de embedding (local ou API)
+   - ✅ Detecta collection automaticamente: `VERBA_Embedding_*`
+   - ✅ Recebe `collection_name` do hook para garantir collection correta
+   - ✅ Suporta: SentenceTransformers, OpenAI, Cohere, BGE, E5, Voyage AI, etc.
+
 **Correções críticas:**
 - ⚠️ **CRÍTICO:** `coll.data.update()` é assíncrono e DEVE ser aguardado com `await`
-- Sem `await`, gera `RuntimeWarning: coroutine '_DataCollectionAsync.update' was never awaited`
-- Chunks não são atualizados se `await` não for usado (linha 238)
+- ⚠️ **BUG CORRIGIDO:** ETL estava tentando atualizar collection `"Passage"` que não existe
+- ✅ **CORRIGIDO:** Agora detecta collection correta (`VERBA_Embedding_*`) ou recebe via parâmetro
+- ✅ **CORRIGIDO:** Hook passa `collection_name` explicitamente para ETL inteligente
 
 **Como é chamado:**
 - Via hook `import.after` registrado em `verba_extensions/hooks.py`
 - Disparado automaticamente após `WeaviateManager.import_document()` (via import hook)
 - Executa em background (não bloqueia import)
+- Recebe `collection_name` do embedder via `embedding_table`
 
 **Como verificar após upgrade:**
 ```python
 # Verificar se função ainda existe:
 from verba_extensions.plugins.a2_etl_hook import run_etl_on_passages
+from ingestor.etl_a2_intelligent import run_etl_patch_for_passage_uuids
 # Se importar sem erro, está OK
 
-# Verificar se await está presente:
-# Linha ~238 deve ter: await coll.data.update(**update_kwargs)
-# NÃO deve ter apenas: coll.data.update(**update_kwargs)
+# Verificar se collection_name é passado:
+# Linha ~162 deve ter: collection_name=collection_name
+# ETL deve receber collection_name correto
 ```
 
 **Erros comuns:**
@@ -405,7 +417,11 @@ from verba_extensions.plugins.a2_etl_hook import run_etl_on_passages
   - **Solução:** Adicionar `await` antes de `coll.data.update()`
 - Chunks não têm propriedades ETL após import
   - **Verificar:** Logs mostram "[ETL] Progresso: X/Y chunks atualizados..."
-  - **Verificar:** `await` está presente na linha 238
+  - **Verificar:** `await` está presente na linha 256 de `etl_a2_intelligent.py`
+  - **Verificar:** Collection correta está sendo usada (não "Passage")
+- ETL roda mas não salva nada
+  - **Causa:** Collection errada (estava usando "Passage")
+  - **Solução:** Verificar se `collection_name` está sendo passado corretamente
 
 ---
 
@@ -697,12 +713,22 @@ Se após upgrade os patches não funcionarem:
   - Cleanup seguro (60 min timeout, auto-healing)
   - Reconexão automática durante import
   - Default embedder seguro (SentenceTransformers)
-- ✅ **ETL Pós-Chunking**: Mantido (já estava funcionando)
+- ✅ **ETL Pós-Chunking Inteligente**: ⭐ ATUALIZADO - Multi-idioma, sem gazetteer obrigatório
+  - Detecção automática de idioma (PT/EN)
+  - Extração de entidades sem gazetteer (modo inteligente)
+  - Suporte universal a qualquer modelo de embedding (API ou local)
+  - Correção crítica: collection correta (não mais "Passage")
+  - Salva `entity_mentions` em formato JSON
+- ✅ **RecursiveDocumentSplitter**: ⭐ REMOVIDO - Plugin redundante que expandia chunks desnecessariamente
+  - Removido da lista de plugins carregados
+  - Evita re-chunking desnecessário (93 → 2379 chunks)
+  - Chunking inicial já é bem feito, não precisa re-otimizar
 - ✅ **Componentes RAG2**: Integrados (TelemetryMiddleware, Embeddings Cache, etc.)
 - ✅ **Documentação**: Este arquivo
 
-**Última atualização:** Novembro 2025
-**Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)
+**Última atualização:** Novembro 2025  
+**Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)  
+**Mudanças recentes:** ETL inteligente multi-idioma, correção collection, suporte universal embeddings
 
 ---
 
