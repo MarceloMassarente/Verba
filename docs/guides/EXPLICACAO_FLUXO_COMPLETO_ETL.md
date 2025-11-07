@@ -481,6 +481,96 @@ Resultado:
 
 ---
 
+### **FASE 8: Busca Entity-Aware Multi-Modo** ⏱️ ~0.5-2s ⭐ NOVO
+
+```
+Pergunta do usuário → Query Builder → Entity-Aware Retriever (com modo) → Resposta final
+```
+
+#### **Estratégias de Filtro** (configurável via interface)
+
+O Entity-Aware Retriever agora suporta 4 modos de filtro para equilibrar precisão e recall:
+
+**1. STRICT (filtro duro)**
+- Retorna APENAS chunks que contêm a entidade detectada
+- Query: "resultados financeiros da Apple" → filtra por `section_entity_ids CONTAINS "Apple"`
+- Vantagem: Zero contaminação (não mistura Apple com Microsoft)
+- Desvantagem: Pode perder contexto relevante se chunks não mencionam a entidade explicitamente
+
+**2. BOOST (soft filter)**
+- Busca TODOS os chunks, mas dá boost de relevância para chunks com entidade
+- Query: "conceitos de inovação disruptiva" → busca tudo, mas prioriza chunks que mencionam entidades relevantes
+- Vantagem: Nunca perde contexto relevante
+- Desvantagem: Pode trazer chunks de outras entidades (contaminação)
+
+**3. ADAPTIVE (padrão recomendado)** ⭐
+- Começa com STRICT, se encontrar <3 chunks, automaticamente faz fallback para BOOST
+- Exemplo:
+  - Tenta filtro STRICT → encontra 2 chunks → FALLBACK
+  - Tenta modo BOOST → encontra 8 chunks → usa esses
+- Vantagem: Melhor dos dois mundos - precisão quando possível, recall quando necessário
+- Uso: Recomendado para uso geral
+
+**4. HYBRID (baseado em sintaxe)**
+- Detecta padrões na query para decidir automaticamente:
+  - "sobre Apple" → STRICT (foco claro em entidade)
+  - "inovação disruptiva" → BOOST (conceito exploratório)
+  - "Apple vs Microsoft" → STRICT (comparação entre entidades)
+- Padrões detectados: "sobre X", "da/do X", "X fez/tem/é", queries curtas com entidade
+- Vantagem: Adapta-se à intenção do usuário automaticamente
+
+#### **Logs Esperados**
+
+```
+🎯 Entity Filter Mode: adaptive
+ℹ Query builder: entidades detectadas: ['Apple']
+✅ Query com entidade explícita detectada: ['Apple']
+ℹ Modo ADAPTIVE: tentará filtro STRICT com fallback para BOOST
+ℹ Executando: Hybrid search com filtros combinados
+✅ Encontrados 2 chunks
+⚠️ ADAPTIVE FALLBACK: apenas 2 chunks com filtro strict, tentando modo BOOST...
+✅ ADAPTIVE FALLBACK: encontrados 8 chunks (vs 2 com filtro)
+```
+
+#### **Impacto no Usuário Final**
+
+- **Queries focadas** ("resultados da Apple"): Precisão máxima, sem contaminação
+- **Queries exploratórias** ("inovação disruptiva"): Recall máximo, contexto amplo
+- **Sistema adaptativo**: Escolhe automaticamente a melhor estratégia
+- **Nunca falha**: Se filtro restrito não encontra nada, sistema relaxa automaticamente
+
+---
+
+### **Detalhamento Técnico da Busca**
+
+```
+Query Builder → extrai entidades e conceitos → Entity-Aware Retriever
+```
+
+1. **Query Builder (LLM + fallback spaCy)**
+   - Expande a query no mesmo idioma (não traduz!).
+   - Identifica entidades PERSON/ORG e retorna **nomes diretos** em `filters.entities` (ex.: `["Apple", "Steve Jobs"]`).
+   - Fallback inteligente usa `extract_entities_from_query(query, use_gazetteer=False)` → dispensa gazetteer.
+
+2. **Entity-Aware Retriever**
+   - Prioriza entidades recebidas do Query Builder (IDs `ent:*` ou textos).
+   - Usa os textos para **boost semântico** e, se a query for explícita (“sobre Apple”), aplica filtro WHERE em `section_entity_ids`.
+   - Apenas PERSON/PER e ORG viram filtros (mesma política do ETL pós-chunking, evitando GPE/LOC genéricos).
+
+3. **Contexto gerado**
+   - Recupera apenas chunks cujo `section_entity_ids` contém as entidades relevantes (preenchidas pelo ETL inteligente).
+   - Logs exemplares:
+     ```
+     ℹ Query builder: entidades detectadas: ['Apple', 'Microsoft']
+     ✅ Query Builder forneceu textos de entidades: ['Apple', 'Microsoft']
+     ✅ Usando entidades para boostar busca: Apple Microsoft
+     ✅ Query com entidade explícita detectada, usando como filtro: ['Apple']
+     ```
+
+**Resultado:** Perguntas como “o que a Apple e a Microsoft discutem sobre IA?” retornam chunks corretos, mesmo sem gazetteer, porque Query Builder + Retriever falam o mesmo “idioma” das entidades geradas pelo ETL.
+
+---
+
 ## 💡 Pontos Importantes
 
 ### ✅ **Vantagens:**

@@ -120,6 +120,56 @@
 
 ---
 
+## 🎯 Recuperação Inteligente (Query Builder + Entity-Aware Retriever) ⭐ ATUALIZADO
+
+Depois que os chunks estão enriquecidos pelo ETL inteligente, o fluxo de busca também foi ajustado para aproveitar as novas propriedades de entidade.
+
+### Componentes envolvidos
+
+- **Query Builder (`verba_extensions/plugins/query_builder.py`)**
+  - Prompt atualizado para instruir o LLM a retornar entidades como **texto direto** (ex.: `"Apple"`, `"Steve Jobs"`).
+  - Fallback usa `extract_entities_from_query(..., use_gazetteer=False)` → não depende de gazetteer.
+  - Retorna filtros com `filters.entities = ["Apple", "Steve Jobs"]` e `filters.entity_property = "section_entity_ids"`.
+
+- **Entity-Aware Retriever (`verba_extensions/plugins/entity_aware_retriever.py`)**
+  - Aceita entidades fornecidas pelo Query Builder **com ou sem** prefixo `ent:`.
+  - Reaproveita os textos tanto para dar boost semântico quanto para aplicar WHERE (`section_entity_ids`).
+  - Apenas entidades **PERSON/PER** e **ORG** são usadas como filtros (coerência com ETL pós-chunking).
+
+### Fluxo Simplificado
+
+```
+Query do usuário → Query Builder
+  → semantic_query expandida (mesmo idioma)
+  → filters.entities = ["Apple", "Microsoft"]
+      ↓
+Entity-Aware Retriever
+  → Detecta entidades da query (spaCy inteligente)
+  → Prioriza entidades vindas do Query Builder
+  → Boost semântico + filtro WHERE section_entity_ids
+      ↓
+Chunks enriquecidos (com entity_mentions / section_entity_ids)
+```
+
+### Benefícios
+
+- Não requer gazetteer para alinhar query ↔ chunk (funciona apenas com spaCy).
+- Filtragem muito mais precisa (somente PERSON/ORG → evita poluição com países/cidades).
+- Query Builder e Retriever compartilham a mesma convenção (nomes diretos).
+- Logs claros indicam entidades usadas para boost e para filtro.
+
+### O que verificar após atualização do Verba
+
+```python
+from verba_extensions.plugins.query_builder import QueryBuilderPlugin
+from verba_extensions.plugins.entity_aware_retriever import EntityAwareRetriever
+
+# Query Builder fallback deve chamar extract_entities_from_query(..., use_gazetteer=False)
+# Entity-Aware Retriever deve aceitar textos no bloco `if builder_entities`.
+```
+
+---
+
 ## 🤔 Por Que ETL Pós Não Apareceu?
 
 ### Possíveis Causas:

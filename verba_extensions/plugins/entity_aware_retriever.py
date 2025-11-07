@@ -99,6 +99,12 @@ class EntityAwareRetriever(Retriever):
             description="Enable entity-aware pre-filtering",
             values=[],
         )
+        self.config["Entity Filter Mode"] = InputConfig(
+            type="dropdown",
+            value="adaptive",
+            description="Entity filter strategy: strict (hard filter), boost (soft boost), adaptive (fallback), hybrid (syntax-based)",
+            values=["strict", "boost", "adaptive", "hybrid"],
+        )
         self.config["Enable Semantic Search"] = InputConfig(
             type="bool",
             value=True,
@@ -141,6 +147,53 @@ class EntityAwareRetriever(Retriever):
             description="Name of the date field in Weaviate (default: chunk_date)",
             values=[],
         )
+    
+    def _detect_entity_focus_in_query(self, query: str, entities: List[str]) -> bool:
+        """
+        Detecta se a query tem foco explícito em entidades (para modo hybrid)
+        
+        Padrões que indicam foco em entidade:
+        - "sobre [entidade]"
+        - "da [entidade]"
+        - "[entidade] fez/tem/é"
+        - "comparar [entidade] com"
+        - apenas a entidade sem contexto
+        
+        Returns:
+            True se query tem foco explícito em entidade
+            False se query é exploratória/conceitual
+        """
+        if not entities:
+            return False
+        
+        query_lower = query.lower()
+        
+        # Padrões de foco explícito em entidade
+        explicit_patterns = [
+            r'\b(sobre|da|do|de)\s+{entity}',  # "sobre Apple"
+            r'\b{entity}\s+(fez|tem|é|foi|tinha|apresentou)',  # "Apple fez"
+            r'\b(comparar|compare|diferença|vs|versus)\s+{entity}',  # "comparar Apple"
+            r'\b{entity}\s+e\s+{entity}',  # "Apple e Microsoft"
+            r'^{entity}',  # Query começa com entidade
+            r'{entity}$',  # Query termina com entidade
+        ]
+        
+        import re
+        for entity in entities:
+            entity_escaped = re.escape(entity.lower())
+            for pattern in explicit_patterns:
+                pattern_filled = pattern.replace('{entity}', entity_escaped)
+                if re.search(pattern_filled, query_lower, re.IGNORECASE):
+                    return True
+        
+        # Se query é curta (<5 palavras) e contém entidade, assume foco
+        words = query_lower.split()
+        if len(words) <= 5:
+            for entity in entities:
+                if entity.lower() in query_lower:
+                    return True
+        
+        return False
     
     async def retrieve(
         self,
@@ -209,11 +262,14 @@ class EntityAwareRetriever(Retriever):
             "explanation": None,
         }
         enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
+        entity_filter_mode = config.get("Entity Filter Mode", {}).value if isinstance(config.get("Entity Filter Mode"), InputConfig) else "adaptive"
         enable_semantic = config.get("Enable Semantic Search", {}).value if isinstance(config.get("Enable Semantic Search"), InputConfig) else True
         enable_query_rewriting = config.get("Enable Query Rewriting", {}).value if isinstance(config.get("Enable Query Rewriting"), InputConfig) else False
         cache_ttl = int(config.get("Query Rewriter Cache TTL", {}).value) if isinstance(config.get("Query Rewriter Cache TTL"), InputConfig) else 3600
         enable_temporal_filter = config.get("Enable Temporal Filter", {}).value if isinstance(config.get("Enable Temporal Filter"), InputConfig) else True
         date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
+        
+        msg.info(f"🎯 Entity Filter Mode: {entity_filter_mode}")
         
         # 0. QUERY BUILDING (antes de parsing) - QueryBuilder inteligente com schema
         rewritten_query = query
@@ -765,48 +821,136 @@ class EntityAwareRetriever(Retriever):
             debug_info["rewritten_query"] = search_query
         debug_info["search_mode"] = search_mode
         
-        # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!)
+        # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!) - SUPORTE MULTI-MODO
         if search_mode == "Hybrid Search":
             try:
-                if combined_filter:
-                    # FILTRA por entidade + idioma, DEPOIS faz busca semântica
-                    msg.info(f"  Executando: Hybrid search com filtros combinados")
-                    # debug_info já foi atualizado acima
-                    
-                    chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                # Decidir estratégia baseado no modo
+                use_strict_filter = False
+                use_boost_only = False
+                
+                if not enable_entity_filter or not entity_filter:
+                    # Filtro desabilitado ou sem entidades - busca normal
+                    msg.info(f"  Modo: busca sem filtro (filtro desabilitado ou sem entidades)")
+                    use_strict_filter = False
+                    use_boost_only = False
+                
+                elif entity_filter_mode == "strict":
+                    # STRICT: Sempre filtro duro
+                    msg.info(f"  Modo STRICT: filtro duro (apenas chunks com entidade)")
+                    use_strict_filter = True
+                    use_boost_only = False
+                
+                elif entity_filter_mode == "boost":
+                    # BOOST: Nunca filtro, apenas boost
+                    msg.info(f"  Modo BOOST: soft filter (boost de score, sem exclusão)")
+                    use_strict_filter = False
+                    use_boost_only = True
+                
+                elif entity_filter_mode == "hybrid":
+                    # HYBRID: Detecta sintaxe da query para decidir
+                    has_entity_focus = self._detect_entity_focus_in_query(query, entity_texts)
+                    if has_entity_focus:
+                        msg.info(f"  Modo HYBRID: query com foco em entidade → filtro STRICT")
+                        use_strict_filter = True
+                        use_boost_only = False
+                    else:
+                        msg.info(f"  Modo HYBRID: query exploratória → modo BOOST")
+                        use_strict_filter = False
+                        use_boost_only = True
+                
+                elif entity_filter_mode == "adaptive":
+                    # ADAPTIVE: Começa strict, faz fallback para boost se poucos resultados
+                    msg.info(f"  Modo ADAPTIVE: tentará filtro STRICT com fallback para BOOST")
+                    use_strict_filter = True
+                    use_boost_only = False
+                
+                # Executar busca baseado na estratégia escolhida
+                chunks = []
+                
+                if use_boost_only:
+                    # MODO BOOST: Busca SEM filtro + boost na query
+                    # Entidades já foram adicionadas à search_query (linha 758)
+                    msg.info(f"  Executando: Hybrid search com BOOST (sem filtro)")
+                    chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
                         embedder=embedder,
-                        query=search_query,        # ← Query semântica ou completa
-                        vector=vector,              # ← Vetor da query
-                        limit_mode=limit_mode,
-                        limit=limit,
-                        labels=labels,
-                        document_uuids=document_uuids,
-                        filters=combined_filter,   # ← FILTRA por entidade + idioma PRIMEIRO
-                        alpha=rewritten_alpha,     # ← Alpha ajustado pelo query rewriting
-                    )
-                elif entity_filter and enable_entity_filter:
-                    # FILTRA apenas por entidade
-                    msg.info(f"  Executando: Hybrid search com entity filter")
-                    # debug_info já foi atualizado acima
-                    
-                    chunks = await weaviate_manager.hybrid_chunks_with_filter(
-                        client=client,
-                        embedder=embedder,
-                        query=search_query,
+                        query=search_query,  # Já inclui entity_boost
                         vector=vector,
                         limit_mode=limit_mode,
                         limit=limit,
                         labels=labels,
                         document_uuids=document_uuids,
-                        filters=entity_filter,
-                        alpha=rewritten_alpha,     # ← Alpha ajustado pelo query rewriting
+                        alpha=rewritten_alpha,
                     )
+                
+                elif use_strict_filter:
+                    # MODO STRICT (ou ADAPTIVE tentativa 1): Busca COM filtro
+                    if combined_filter:
+                        msg.info(f"  Executando: Hybrid search com filtros combinados")
+                        chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                            client=client,
+                            embedder=embedder,
+                            query=search_query,
+                            vector=vector,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            filters=combined_filter,
+                            alpha=rewritten_alpha,
+                        )
+                    elif entity_filter:
+                        msg.info(f"  Executando: Hybrid search com entity filter")
+                        chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                            client=client,
+                            embedder=embedder,
+                            query=search_query,
+                            vector=vector,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            filters=entity_filter,
+                            alpha=rewritten_alpha,
+                        )
+                    else:
+                        # Sem filtros disponíveis
+                        msg.info(f"  Executando: Hybrid search sem filtros")
+                        chunks = await weaviate_manager.hybrid_chunks(
+                            client=client,
+                            embedder=embedder,
+                            query=search_query,
+                            vector=vector,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            alpha=rewritten_alpha,
+                        )
+                    
+                    # ADAPTIVE FALLBACK: Se poucos resultados (<3), tentar modo BOOST
+                    if entity_filter_mode == "adaptive" and len(chunks) < 3:
+                        msg.warn(f"  ⚠️ ADAPTIVE FALLBACK: apenas {len(chunks)} chunks com filtro strict, tentando modo BOOST...")
+                        chunks_boost = await weaviate_manager.hybrid_chunks(
+                            client=client,
+                            embedder=embedder,
+                            query=search_query,  # Já inclui entity_boost
+                            vector=vector,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            alpha=rewritten_alpha,
+                        )
+                        if len(chunks_boost) > len(chunks):
+                            msg.good(f"  ✅ ADAPTIVE FALLBACK: encontrados {len(chunks_boost)} chunks (vs {len(chunks)} com filtro)")
+                            chunks = chunks_boost
+                        else:
+                            msg.info(f"  ADAPTIVE FALLBACK: mantendo {len(chunks)} chunks originais")
+                
                 else:
                     # Sem filtros: busca normal
                     msg.info(f"  Executando: Hybrid search sem filtros")
-                    # debug_info já foi atualizado acima
-                    
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
                         embedder=embedder,
@@ -816,8 +960,9 @@ class EntityAwareRetriever(Retriever):
                         limit=limit,
                         labels=labels,
                         document_uuids=document_uuids,
-                        alpha=rewritten_alpha,  # ← Alpha também aplicado quando não há filtros
+                        alpha=rewritten_alpha,
                     )
+            
             except Exception as e:
                 msg.fail(f"Erro na busca híbrida: {str(e)}")
                 # Fallback

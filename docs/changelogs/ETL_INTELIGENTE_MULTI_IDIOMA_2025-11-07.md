@@ -67,6 +67,68 @@ Implementação completa do **ETL Inteligente Multi-idioma** que detecta entidad
 
 ---
 
+### 4. **Alinhamento Query Builder + Entity-Aware Retriever** ⭐ NOVO
+
+**Problema:**
+- Query Builder retornava textos de entidades, mas o Retriever esperava IDs `ent:*`, resultando em filtros ignorados.
+- Fallback do Query Builder dependia de gazetteer para gerar IDs, incompatível com o modo inteligente.
+
+**Solução:**
+- Prompt do Query Builder atualizado para instruir o LLM a retornar nomes diretos (PERSON/ORG).
+- Fallback agora usa `extract_entities_from_query(..., use_gazetteer=False)`.
+- Entity-Aware Retriever aceita tanto IDs quanto textos vindos do builder e os usa para boost + filtros (`section_entity_ids`).
+- Filtros continuam restritos a PERSON/ORG (coerência com ETL pós-chunking).
+
+**Arquivos modificados:**
+- `verba_extensions/plugins/query_builder.py`
+- `verba_extensions/plugins/entity_aware_retriever.py`
+
+**Impacto:**
+- Busca entity-aware funciona sem gazetteer.
+- Filtros WHERE usam os metadados gerados pelo ETL inteligente (`section_entity_ids`).
+- Logs deixam claro quais entidades foram detectadas/filtradas.
+
+---
+
+### 5. **Entity Filter Modes (Multi-Strategy Retrieval)** ⭐ NOVO
+
+**Problema:**
+- Filtro entity-aware era binário: filtro duro (pode perder contexto) ou desligado (contaminação)
+- Queries exploratórias perdiam chunks relevantes que não mencionavam entidades explicitamente
+- Queries focadas precisavam de precisão máxima para evitar misturar entidades
+
+**Solução:**
+Implementados **4 modos de filtro** configuráveis no Entity-Aware Retriever:
+
+1. **STRICT**: Filtro duro - apenas chunks com entidade (máxima precisão, risco de perder contexto)
+2. **BOOST**: Soft filter - busca tudo, prioriza chunks com entidade (máximo recall, risco de contaminação)
+3. **ADAPTIVE**: Começa STRICT, fallback para BOOST se <3 chunks (equilibrado, recomendado) ⭐
+4. **HYBRID**: Detecta sintaxe da query para decidir estratégia (inteligente, adapta-se à intenção)
+
+**Implementação:**
+- Nova configuração: `Entity Filter Mode` (dropdown: strict/boost/adaptive/hybrid)
+- Método auxiliar: `_detect_entity_focus_in_query()` para modo hybrid (detecta padrões como "sobre X", "da empresa Y")
+- Lógica de busca refatorada para suportar os 4 modos com fallback automático (adaptive)
+
+**Arquivos modificados:**
+- `verba_extensions/plugins/entity_aware_retriever.py`
+
+**Impacto:**
+- **Queries focadas**: Precisão máxima sem contaminação ("resultados da Apple" não traz Microsoft)
+- **Queries exploratórias**: Recall máximo com contexto amplo ("inovação disruptiva" traz tudo relevante)
+- **Adaptativo**: Sistema escolhe automaticamente a melhor estratégia (modo adaptive/hybrid)
+- **Robustez**: Nunca falha por falta de resultados - sistema relaxa filtros automaticamente
+
+**Logs esperados:**
+```
+🎯 Entity Filter Mode: adaptive
+ℹ Modo ADAPTIVE: tentará filtro STRICT com fallback para BOOST
+⚠️ ADAPTIVE FALLBACK: apenas 2 chunks com filtro strict, tentando modo BOOST...
+✅ ADAPTIVE FALLBACK: encontrados 8 chunks (vs 2 com filtro)
+```
+
+---
+
 ## 🐛 Correções Críticas
 
 ### 1. **Bug: Collection Errada**
