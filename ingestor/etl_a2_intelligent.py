@@ -12,23 +12,36 @@ from typing import List, Callable, Dict, Optional
 _nlp_models = {}
 
 def detect_text_language(text: str) -> str:
-    """Detecta idioma do texto (pt, en, etc.)"""
+    """
+    Detecta idioma do texto com suporte a code-switching (PT+EN)
+    
+    Returns:
+        "pt", "en", "pt-en", ou "en-pt"
+    """
     try:
-        from langdetect import detect
-        lang = detect(text)
-        if lang in ["pt", "pt-BR", "pt-PT"]:
-            return "pt"
-        elif lang in ["en", "en-US", "en-GB"]:
-            return "en"
-        return lang
-    except:
-        # Fallback: heurística simples
-        text_lower = text.lower()
-        pt_words = ["de", "da", "do", "em", "para", "com", "que", "não", "é", "são"]
-        en_words = ["the", "of", "to", "in", "for", "with", "that", "not", "is", "are"]
-        pt_count = sum(1 for word in pt_words if word in text_lower)
-        en_count = sum(1 for word in en_words if word in text_lower)
-        return "pt" if pt_count > en_count else ("en" if en_count > pt_count else "pt")
+        # Tentar detector de code-switching primeiro (melhor para textos corporativos)
+        from verba_extensions.utils.code_switching_detector import get_detector
+        detector = get_detector()
+        language_code, stats = detector.detect_language_mix(text)
+        return language_code
+    except Exception:
+        # Fallback 1: langdetect (sem code-switching)
+        try:
+            from langdetect import detect
+            lang = detect(text)
+            if lang in ["pt", "pt-BR", "pt-PT"]:
+                return "pt"
+            elif lang in ["en", "en-US", "en-GB"]:
+                return "en"
+            return lang
+        except:
+            # Fallback 2: heurística simples
+            text_lower = text.lower()
+            pt_words = ["de", "da", "do", "em", "para", "com", "que", "não", "é", "são"]
+            en_words = ["the", "of", "to", "in", "for", "with", "that", "not", "is", "are"]
+            pt_count = sum(1 for word in pt_words if word in text_lower)
+            en_count = sum(1 for word in en_words if word in text_lower)
+            return "pt" if pt_count > en_count else ("en" if en_count > pt_count else "pt")
 
 def get_nlp_for_language(language: str):
     """Carrega modelo spaCy apropriado para o idioma"""
@@ -76,37 +89,103 @@ def load_gazetteer(path: str = "ingestor/resources/gazetteer.json") -> Dict:
 def extract_entities_intelligent(text: str) -> List[Dict]:
     """
     Detecta entidades de forma inteligente, adaptável ao idioma do texto
+    ⭐ NOVO: Suporta code-switching (PT+EN) com NER bilíngue
+    
     Retorna lista de {text, label, confidence} sem depender de gazetteer
     
     Returns:
-        [{"text": "China", "label": "GPE", "confidence": 0.95}, ...]
+        [{"text": "Apple", "label": "ORG", "confidence": 0.95}, ...]
     """
     if not text or len(text.strip()) < 10:
         return []
     
-    # Detectar idioma do texto
+    # Detectar idioma do texto (pode retornar "pt-en" ou "en-pt")
     language = detect_text_language(text)
     
-    # Carregar modelo spaCy apropriado
-    nlp_model = get_nlp_for_language(language)
-    if not nlp_model:
-        return []
-    
+    # Verificar se é code-switching (bilíngue)
     try:
-        doc = nlp_model(text)
-        entities = [
-            {
-                "text": e.text,
-                "label": e.label_,
-                "confidence": 0.95  # spaCy confidence is not directly available, use default
-            }
-            for e in doc.ents
-            if e.label_ in ("ORG", "PERSON", "GPE", "LOC")
-        ]
-        return entities
-    except Exception as e:
-        print(f"Erro ao extrair entidades: {str(e)}")
-        return []
+        from verba_extensions.utils.code_switching_detector import get_detector
+        detector = get_detector()
+        is_bilingual = detector.is_bilingual(language)
+        
+        if is_bilingual:
+            # MODO BILÍNGUE: Usar NER de ambos idiomas e combinar resultados
+            languages = detector.get_language_list(language)
+            all_entities = []
+            seen_spans = set()  # Evitar duplicatas
+            
+            for lang in languages:
+                nlp_model = get_nlp_for_language(lang)
+                if not nlp_model:
+                    continue
+                
+                try:
+                    doc = nlp_model(text)
+                    for e in doc.ents:
+                        # Filtrar apenas PERSON e ORG
+                        if e.label_ not in ("ORG", "PERSON", "PER"):
+                            continue
+                        
+                        # Evitar duplicatas por span (start, end, text)
+                        span_key = (e.start_char, e.end_char, e.text)
+                        if span_key in seen_spans:
+                            continue
+                        seen_spans.add(span_key)
+                        
+                        all_entities.append({
+                            "text": e.text,
+                            "label": e.label_,
+                            "confidence": 0.95
+                        })
+                except Exception as e:
+                    print(f"⚠️ Erro ao extrair entidades com modelo {lang}: {str(e)}")
+                    continue
+            
+            return all_entities
+        
+        else:
+            # MODO MONOLÍNGUE: Usar apenas 1 modelo NER
+            nlp_model = get_nlp_for_language(language)
+            if not nlp_model:
+                return []
+            
+            try:
+                doc = nlp_model(text)
+                entities = [
+                    {
+                        "text": e.text,
+                        "label": e.label_,
+                        "confidence": 0.95
+                    }
+                    for e in doc.ents
+                    if e.label_ in ("ORG", "PERSON", "PER")  # Filtrar apenas PERSON e ORG
+                ]
+                return entities
+            except Exception as e:
+                print(f"Erro ao extrair entidades: {str(e)}")
+                return []
+    
+    except Exception:
+        # Fallback: modo monolíngue simples
+        nlp_model = get_nlp_for_language(language if language in ["pt", "en"] else "pt")
+        if not nlp_model:
+            return []
+        
+        try:
+            doc = nlp_model(text)
+            entities = [
+                {
+                    "text": e.text,
+                    "label": e.label_,
+                    "confidence": 0.95
+                }
+                for e in doc.ents
+                if e.label_ in ("ORG", "PERSON", "PER")
+            ]
+            return entities
+        except Exception as e:
+            print(f"Erro ao extrair entidades: {str(e)}")
+            return []
 
 def extract_entities_with_gazetteer(text: str, gaz: Dict) -> List[str]:
     """
