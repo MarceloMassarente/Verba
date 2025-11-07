@@ -303,18 +303,42 @@ async def run_etl_patch_for_passage_uuids(
 
     # Busca objetos - usando apenas propriedades garantidas no schema
     try:
-        # Tentar com as propriedades esperadas (ETL-aware schema)
-        fetch_kwargs = {
-            "limit": len(uuids),
-            "return_properties": [
-                "content",
-                "section_title",
-                "section_first_para",
-                "parent_entities",
-            ],
-        }
+        requested_props = [
+            "content",
+            "section_title",
+            "section_first_para",
+            "parent_entities",
+            "text",
+            "chunk_text",
+        ]
+        schema_props = set()
+        try:
+            config = await coll.config.get()
+            schema_props = {
+                prop.name
+                for prop in getattr(config, "properties", [])
+                if getattr(prop, "name", None)
+            }
+        except Exception as schema_err:
+            print(f"⚠️ Não foi possível obter propriedades do schema ({collection_name}): {schema_err}")
+
+        return_props = [
+            prop for prop in requested_props if not schema_props or prop in schema_props
+        ]
+        missing_props = [
+            prop for prop in requested_props if schema_props and prop not in schema_props
+        ]
+        if missing_props:
+            print(
+                f"⚠️ Propriedades ausentes na collection {collection_name}: "
+                + ", ".join(missing_props)
+            )
+
+        fetch_kwargs = {"limit": len(uuids)}
         if tenant:
             fetch_kwargs["tenant"] = tenant
+        if return_props:
+            fetch_kwargs["return_properties"] = return_props
 
         try:
             res = await coll.query.fetch_objects(**fetch_kwargs)

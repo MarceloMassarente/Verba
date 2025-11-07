@@ -82,6 +82,21 @@ def get_etl_properties():
             description="Entity IDs localizadas no chunk (ETL pré-chunking) - opcional",
             index_filterable=True  # ⚡ Otimização: crítico para entity filtering e agregações
         ),
+        Property(
+            name="entity_mentions",
+            data_type=DataType.TEXT,
+            description="JSON array de entidades detectadas (modo inteligente): [{text, label, confidence}] - opcional",
+        ),
+        Property(
+            name="section_first_para",
+            data_type=DataType.TEXT,
+            description="Primeiro parágrafo da seção (contexto para Section Scope) - opcional",
+        ),
+        Property(
+            name="parent_entities",
+            data_type=DataType.TEXT_ARRAY,
+            description="Entity IDs do documento pai (herança para Section Scope) - opcional",
+        ),
         
         # ETL pós-chunking
         Property(
