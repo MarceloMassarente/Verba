@@ -212,13 +212,34 @@ async def run_etl_patch_for_passage_uuids(
     
     coll = client.collections.get(collection_name)
     gaz = load_gazetteer()
-    
+
     changed = 0
-    
+
     # Busca objetos
     try:
-        res = coll.query.fetch_objects(limit=len(uuids), tenant=tenant)
-        objs = {o.uuid: o for o in res.objects if o.uuid in uuids}
+        fetch_kwargs = {
+            "limit": len(uuids),
+            "return_properties": [
+                "content",
+                "text",
+                "section_title",
+                "section_first_para",
+                "parent_entities",
+            ],
+        }
+        if tenant:
+            fetch_kwargs["tenant"] = tenant
+
+        try:
+            res = await coll.query.fetch_objects(**fetch_kwargs)
+        except TypeError as err:
+            # Algumas versões do client ainda não expõem o parâmetro tenant
+            if "tenant" in fetch_kwargs and "tenant" in str(err):
+                fetch_kwargs.pop("tenant", None)
+                res = await coll.query.fetch_objects(**fetch_kwargs)
+            else:
+                raise
+        objs = {str(o.uuid): o for o in res.objects if str(o.uuid) in uuids}
     except Exception as e:
         print(f"Erro ao buscar passages: {str(e)}")
         return {"patched": 0, "error": str(e)}
@@ -230,7 +251,7 @@ async def run_etl_patch_for_passage_uuids(
         
         try:
             p = o.properties
-            text = p.get("text") or ""
+            text = p.get("content") or p.get("text") or ""
             sect_title = p.get("section_title") or ""
             first_para = p.get("section_first_para") or ""
             parent_ents = p.get("parent_entities") or []
@@ -242,6 +263,11 @@ async def run_etl_patch_for_passage_uuids(
             local_ids = []
             if gaz:
                 local_ids = extract_entities_with_gazetteer(text, gaz)
+            
+            # MODO INTELIGENTE: Se não há gazetteer, usar textos das entidades diretamente
+            # Isso permite que o retriever filtre por entidades mesmo sem gazetteer
+            if not local_ids and entity_mentions:
+                local_ids = [m["text"] for m in entity_mentions]
             
             # SectionScope (heading > first_para > parent)
             sect_ids = []
@@ -257,6 +283,11 @@ async def run_etl_patch_for_passage_uuids(
                     sect_ids, scope_conf = fp_hits, 0.7
                 elif parent_ents:
                     sect_ids, scope_conf = parent_ents, 0.6
+            else:
+                # MODO INTELIGENTE: Sem gazetteer, usar textos das entidades do chunk
+                if entity_mentions:
+                    sect_ids = [m["text"] for m in entity_mentions]
+                    scope_conf = 0.85  # Alta confiança pois vem diretamente do chunk
             
             # Primary entity + focus score
             primary = local_ids[0] if local_ids else (sect_ids[0] if sect_ids else None)
@@ -275,7 +306,21 @@ async def run_etl_patch_for_passage_uuids(
                 "etl_version": "entity_scope_intelligent_v2"
             }
             
-            coll.data.update(uuid=uid, properties=props, tenant=tenant)
+            update_kwargs = {
+                "uuid": uid,
+                "properties": props,
+            }
+            if tenant:
+                update_kwargs["tenant"] = tenant
+
+            try:
+                await coll.data.update(**update_kwargs)
+            except TypeError as err:
+                if "tenant" in update_kwargs and "tenant" in str(err):
+                    update_kwargs.pop("tenant", None)
+                    await coll.data.update(**update_kwargs)
+                else:
+                    raise
             changed += 1
             
             time.sleep(0.002)  # Rate limiting
