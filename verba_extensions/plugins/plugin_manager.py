@@ -53,6 +53,11 @@ class PluginManager:
         ]
         
         for plugin_name in known_plugins:
+            # Pular plugin removido
+            if plugin_name == "recursive_document_splitter":
+                logger.info(f"Plugin {plugin_name} desabilitado - pulando")
+                continue
+                
             try:
                 module_path = f"verba_extensions.plugins.{plugin_name}"
                 module = importlib.import_module(module_path)
