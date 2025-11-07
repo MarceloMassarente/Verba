@@ -427,15 +427,20 @@ class EntityAwareRetriever(Retriever):
         
         # Combinar entidades do builder (se houver)
         if builder_entities:
-            # APENAS usar entity_ids validados (formato ent:type:id)
-            # Ignorar textos genéricos para evitar filtros restritivos indevidos
+            # Query Builder é mais inteligente (conhece schema) - SEMPRE priorizar suas entidades
+            # Pode retornar entity_ids formatados (ent:*) ou textos de entidades (PERSON/ORG)
             if all(isinstance(eid, str) and eid.startswith("ent:") for eid in builder_entities):
+                # Entity IDs formatados do gazetteer
                 entity_ids = builder_entities
-                msg.info(f"  Builder forneceu entity_ids validados: {entity_ids}")
+                msg.info(f"  ✅ Query Builder forneceu entity_ids validados: {entity_ids}")
+            elif all(isinstance(e, str) for e in builder_entities):
+                # Textos de entidades (modo inteligente) - ACEITAR como entity_texts
+                # Query Builder é confiável pois analisa schema e contexto
+                entity_texts = builder_entities
+                msg.info(f"  ✅ Query Builder forneceu textos de entidades: {entity_texts}")
             else:
-                # Builder retornou textos (não entity_ids) - NÃO usar como filtro
-                # Textos podem ser usados para boost semântico, mas não para filtro restritivo
-                msg.info(f"  Builder forneceu textos (não entity_ids), ignorando para evitar filtros indevidos: {builder_entities}")
+                # Formato misto ou inválido
+                msg.warn(f"  ⚠️ Query Builder retornou formato inválido: {builder_entities}")
         
         # Log final
         if entity_texts:

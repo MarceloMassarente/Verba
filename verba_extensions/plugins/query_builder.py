@@ -704,6 +704,10 @@ REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
 IMPORTANTE:
 - Use propriedades do schema para filtros (entities_local_ids, section_entity_ids, chunk_lang, chunk_date, etc.)
 - Se mencionar empresa/pessoa, use filtro de entidade (entities_local_ids ou section_entity_ids)
+  - NOVO: Use NOMES DIRETOS das entidades (ex: ["Apple", "Microsoft"]) em vez de IDs
+  - O sistema detecta automaticamente PERSON e ORG usando NER inteligente
+  - Exemplo: "sobre Apple" → entities: ["Apple"]
+  - Exemplo: "Steve Jobs e Microsoft" → entities: ["Steve Jobs", "Microsoft"]
 - Se mencionar data/ano, use filtro temporal (chunk_date)
 - Se mencionar idioma, use filtro de idioma (chunk_lang)
 - **SEMPRE expanda a query semântica** - adicione termos relacionados, sinônimos, conceitos
@@ -711,8 +715,8 @@ IMPORTANTE:
 
 FILTROS HIERÁRQUICOS (se necessário):
 - Se query menciona "documentos que falam sobre X, depois chunks sobre Y":
-  - document_level_entities: ["Q312"]  // Filtrar documentos com Apple
-  - entities: ["Q2283"]  // Filtrar chunks com Microsoft dentro desses documentos
+  - document_level_entities: ["Apple"]  // Filtrar documentos que mencionam Apple
+  - entities: ["Microsoft"]  // Depois filtrar chunks sobre Microsoft dentro desses documentos
 
 FILTROS POR FREQUÊNCIA (se necessário):
 - Se query menciona "entidade dominante", "mais frequente", "principal":
@@ -720,7 +724,7 @@ FILTROS POR FREQUÊNCIA (se necessário):
   - min_frequency: 5  // Frequência mínima (opcional)
   - dominant_only: true  // Apenas entidade dominante (opcional)
 - Se query menciona "mais que X", "aparece mais que Y":
-  - frequency_comparison: {{"entity_1": "Q312", "entity_2": "Q2283", "min_ratio": 1.5}}
+  - frequency_comparison: {{"entity_1": "Apple", "entity_2": "Microsoft", "min_ratio": 1.5}}
 
 Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
 {{
@@ -728,7 +732,7 @@ Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
     "keyword_query": "query otimizada para BM25",
     "intent": "search|comparison|description",
     "filters": {{
-        "entities": ["Q312", "Q2283"],
+        "entities": ["Apple", "Microsoft"],
         "entity_property": "section_entity_ids",
         "document_level_entities": [],
         "filter_by_frequency": false,
@@ -837,13 +841,14 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
         """Resposta de fallback se LLM falhar - ainda tenta extrair entidades"""
         msg.warn(f"  Query builder: usando fallback (LLM não disponível ou erro)")
         
-        # Tentar extrair entidades mesmo no fallback usando spaCy + Gazetteer
+        # Tentar extrair entidades mesmo no fallback usando spaCy (modo inteligente)
         entity_ids = []
         try:
             from verba_extensions.plugins.entity_aware_query_orchestrator import extract_entities_from_query
-            entity_ids = extract_entities_from_query(query)
+            # MODO INTELIGENTE: detecta PERSON/ORG sem precisar de gazetteer
+            entity_ids = extract_entities_from_query(query, use_gazetteer=False)
             if entity_ids:
-                msg.info(f"  Query builder (fallback): entidades detectadas: {entity_ids}")
+                msg.info(f"  Query builder (fallback): entidades detectadas (modo inteligente): {entity_ids}")
         except Exception as e:
             msg.info(f"  Query builder (fallback): erro ao extrair entidades: {str(e)}")
         
