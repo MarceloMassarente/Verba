@@ -158,7 +158,8 @@ async def run_etl_on_passages(
             result = await run_etl_intelligent(
                 lambda: client,
                 passage_uuids,
-                tenant
+                tenant,
+                collection_name=collection_name  # Passar collection_name correto para qualquer modelo de embedding
             )
             msg.good(f"✅ ETL inteligente concluído: {result.get('patched', 0)} chunks processados")
             return result
