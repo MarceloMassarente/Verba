@@ -923,8 +923,7 @@ class EntityAwareRetriever(Retriever):
                     else:
                         top_k_for_rerank = min(reranker_top_k, num_chunks)  # Usar config ou todos, o que for menor
                     
-                    msg.good(f"  🔄 RERANKER INPUT: {num_chunks} chunks recuperados, top_k={top_k_for_rerank} (limit={limit} busca inicial, reranker_top_k={reranker_top_k})")
-                    msg.info(f"  Reranker config: top_k={top_k_for_rerank}, query='{query[:50]}...'")
+                    # Log reduzido - apenas mostrar resumo (removido para reduzir verbosidade)
                     
                     reranked_objects = await reranker.process_chunks(
                         chunk_objects,
@@ -932,18 +931,17 @@ class EntityAwareRetriever(Retriever):
                         config={"top_k": top_k_for_rerank}
                     )
                     
-                    msg.info(f"  Reranker retornou {len(reranked_objects)} chunks (esperado: {top_k_for_rerank})")
+                    # Logs reduzidos - apenas mostrar se houver problema
                     if len(reranked_objects) < top_k_for_rerank:
                         msg.warn(f"  ⚠️ Reranker retornou menos chunks ({len(reranked_objects)}) do que esperado ({top_k_for_rerank})")
-                    if len(reranked_objects) > 0:
-                        msg.info(f"  Primeiro chunk rerankado: chunk_id={reranked_objects[0].chunk_id}, content_preview='{reranked_objects[0].content[:50]}...'")
+                    # Removidos logs verbosos de cada chunk rerankado
                     
                     # Reconstrói chunks Weaviate a partir dos rerankeados
                     # IMPORTANTE: chunk.chunk_id é str(chunk.uuid) do objeto Weaviate original
                     reranked_uuids = {str(chunk.chunk_id) for chunk in reranked_objects}
                     chunks_filtered = [c for c in chunks if str(c.uuid) in reranked_uuids]
                     
-                    msg.info(f"  Chunks filtrados: {len(chunks_filtered)} de {len(chunks)} originais")
+                    # Log removido para reduzir verbosidade
                     
                     # Reordena conforme reranking
                     uuid_to_chunk = {str(c.uuid): c for c in chunks_filtered}
@@ -1080,7 +1078,7 @@ class EntityAwareRetriever(Retriever):
         chunk_window = int(chunk_window_config.value) if hasattr(chunk_window_config, 'value') else 0
         
         # Gerar contexto combinado (isso filtra chunks de baixa qualidade)
-        context, filtered_context_documents = self.combine_context(sorted_context_documents, chunk_window=chunk_window)
+        context, filtered_context_documents, filter_info = self.combine_context(sorted_context_documents, chunk_window=chunk_window)
         
         # IMPORTANTE: Atualizar documents para refletir chunks filtrados
         # Isso garante que o frontend mostre os mesmos chunks que foram enviados ao LLM
@@ -1116,16 +1114,19 @@ class EntityAwareRetriever(Retriever):
                 total_chunks_before += len(doc["chunks"])
                 # Não adicionar ao updated_documents
         
-        # Adicionar informação sobre filtragem ao debug_info
-        chunks_filtered = total_chunks_before - total_chunks_after
-        if chunks_filtered > 0:
-            debug_info["chunks_filtered"] = {
-                "total_before": total_chunks_before,
-                "total_after": total_chunks_after,
-                "filtered_count": chunks_filtered,
-                "message": f"{chunks_filtered} chunks filtrados por baixa qualidade"
-            }
-            msg.warn(f"  ⚠️ {chunks_filtered}/{total_chunks_before} chunks filtrados - frontend atualizado para mostrar apenas chunks válidos")
+        # Adicionar informação sobre filtragem ao debug_info (usar filter_info se disponível)
+        if filter_info and not filter_info.get('fallback_used', False):
+            # Apenas mostrar se não foi usado fallback (evitar logs redundantes)
+            chunks_filtered = filter_info.get('filtered_count', total_chunks_before - total_chunks_after)
+            if chunks_filtered > 0 and chunks_filtered < total_chunks_before * 0.5:
+                # Apenas logar se menos de 50% foram filtrados (casos normais)
+                debug_info["chunks_filtered"] = {
+                    "total_before": filter_info.get('total_count', total_chunks_before),
+                    "total_after": filter_info.get('final_count', total_chunks_after),
+                    "filtered_count": chunks_filtered,
+                    "message": f"{chunks_filtered} chunks filtrados por baixa qualidade"
+                }
+                # Log removido para reduzir verbosidade
         
         # Adicionar informações de debug ao contexto (formato JSON no final)
         debug_summary = f"\n\n[DEBUG INFO]\n"
@@ -1164,7 +1165,7 @@ class EntityAwareRetriever(Retriever):
         else:
             chunk_window = 1  # Default
         
-        msg.info(f"  📦 Chunk Window: {chunk_window} (vai combinar chunks adjacentes)")
+        # Log removido para reduzir verbosidade (chunk window é aplicado silenciosamente)
         
         if chunk_window > 0 and chunks:
             # Agrupa chunks adjacentes com window, evitando repetição excessiva
@@ -1203,7 +1204,7 @@ class EntityAwareRetriever(Retriever):
                         max_repetition = max(seq_counts.values()) if seq_counts else 0
                         # Se há muita repetição (mais de 5x), usar apenas o chunk central
                         if max_repetition > 5:
-                            msg.warn(f"  ⚠️ Chunk Window: repetição detectada ({max_repetition}x) ao combinar chunks, usando apenas chunk central")
+                            # Log removido para reduzir verbosidade (chunk window aplicado silenciosamente)
                             central_content = context_chunks[len(context_chunks)//2]
                             combined_content = central_content.properties["content"] if hasattr(central_content, "properties") else central_content.get("content", "")
                 
@@ -1306,7 +1307,7 @@ class EntityAwareRetriever(Retriever):
             
             # Limpar espaços múltiplos
             content_for_repetition_check = re.sub(r'\s+', ' ', content_for_repetition_check).strip()
-            msg.info(f"  ℹ️ Cabeçalhos/rodapés detectados e ignorados: {len(potential_headers_footers)} padrões")
+            # Log removido para reduzir verbosidade (cabeçalhos detectados silenciosamente)
         
         # Se após remover cabeçalhos/rodapés o conteúdo ficou muito pequeno, usar conteúdo original
         if len(content_for_repetition_check.split()) < 5:
@@ -1391,11 +1392,10 @@ class EntityAwareRetriever(Retriever):
             # Filtrar apenas se repetição é alta E ocupa mais de 40% do chunk (sem cabeçalhos/rodapés)
             # (permite repetição moderada em chunks longos)
             if repeated_fraction > 0.4:
-                msg.warn(f"  ⚠️ Chunk filtrado: conteúdo repetitivo detectado (sequência de {max_repetition_seq_length} palavras repetida {max_repetition} vezes, {int(repeated_fraction * 100)}% do conteúdo útil, threshold={threshold})")
+                # Log removido para reduzir verbosidade (filtros são contabilizados ao final)
                 return False
             else:
                 # Repetição alta mas não ocupa tanto espaço - provavelmente OK
-                msg.info(f"  ℹ️ Repetição moderada detectada ({max_repetition}x), mas apenas {int(repeated_fraction * 100)}% do conteúdo útil - mantendo")
                 return True
         
         # Verificação adicional: detectar repetição de frases completas (não apenas sequências curtas)
@@ -1450,7 +1450,7 @@ class EntityAwareRetriever(Retriever):
                     
                     # Usar words_for_repetition para calcular fração (ignora cabeçalhos/rodapés)
                     if phrase_count >= min_repetitions and (phrase_count * seq_length) / len(words_for_repetition) > threshold_ratio:
-                        msg.warn(f"  ⚠️ Chunk filtrado: frase repetitiva detectada ('{phrase_text[:60]}...' aparece {phrase_count} vezes, {int((phrase_count * seq_length) / len(words_for_repetition) * 100)}% do conteúdo útil, {seq_length} palavras, min_repetitions={min_repetitions}, threshold_ratio={threshold_ratio:.2f})")
+                        # Log removido para reduzir verbosidade (filtros são contabilizados ao final)
                         return False
         
         # Detectar fragmentação: chunk começa ou termina no meio de palavra
@@ -1460,12 +1460,12 @@ class EntityAwareRetriever(Retriever):
             last_word = words[-1]
             # Palavras muito curtas no início/fim podem ser fragmentos
             if len(first_word) < 3 and len(words) > 1:
-                msg.warn(f"  ⚠️ Chunk filtrado: possível fragmentação detectada (começa com palavra muito curta: '{first_word}')")
+                # Log removido para reduzir verbosidade (filtros são contabilizados ao final)
                 return False
         
         return True
     
-    def combine_context(self, documents: list[dict], chunk_window: int = 0) -> tuple[str, list[dict]]:
+    def combine_context(self, documents: list[dict], chunk_window: int = 0) -> tuple[str, list[dict], dict]:
         """Combina contexto dos documentos, filtrando chunks de baixa qualidade
         
         Args:
@@ -1473,7 +1473,8 @@ class EntityAwareRetriever(Retriever):
             chunk_window: Tamanho do chunk window usado (para ajustar thresholds de qualidade)
         
         Returns:
-            tuple: (context_string, filtered_documents)
+            tuple: (context_string, filtered_documents, filter_info)
+                filter_info: dict com informações sobre filtragem {'fallback_used': bool, 'filtered_count': int, 'total_count': int}
         """
         from goldenverba.components.retriever.WindowRetriever import WindowRetriever
         
@@ -1481,6 +1482,7 @@ class EntityAwareRetriever(Retriever):
         filtered_documents = []
         total_chunks = 0
         filtered_chunks = 0
+        fallback_used = False
         
         for document in documents:
             filtered_chunks_list = []
@@ -1500,8 +1502,8 @@ class EntityAwareRetriever(Retriever):
         
         # FALLBACK 1: Se mais de 80% dos chunks foram filtrados, tentar novamente com thresholds mais relaxados
         if total_chunks > 0 and filtered_chunks / total_chunks > 0.8:
-            msg.warn(f"  ⚠️ ATENÇÃO: {filtered_chunks}/{total_chunks} chunks filtrados ({int(filtered_chunks/total_chunks*100)}%)")
-            msg.warn(f"  ⚠️ Tentando modo emergência: relaxando thresholds de qualidade")
+            # Log consolidado - apenas uma mensagem ao invés de múltiplas
+            msg.warn(f"  ⚠️ {filtered_chunks}/{total_chunks} chunks filtrados - ativando modo emergência")
             
             # Segunda passada com modo emergência (thresholds mais relaxados)
             filtered_documents_emergency = []
@@ -1534,30 +1536,47 @@ class EntityAwareRetriever(Retriever):
             
             # Se modo emergência conseguiu salvar alguns chunks, usar eles
             if len(filtered_documents_emergency) > 0:
-                msg.warn(f"  ⚠️ Modo emergência: {len(filtered_documents_emergency)} documentos salvos ({total_chunks - filtered_chunks_emergency} chunks válidos)")
+                # Log reduzido
+                msg.info(f"  ✅ Modo emergência: {total_chunks - filtered_chunks_emergency}/{total_chunks} chunks mantidos")
                 filtered_documents = filtered_documents_emergency
                 filtered_chunks = filtered_chunks_emergency
+                fallback_used = True
             else:
                 # Modo emergência também falhou, usar todos os chunks originais
-                msg.warn(f"  ⚠️ Modo emergência também falhou. Usando TODOS os chunks originais (sem filtro)")
+                msg.warn(f"  ⚠️ Modo emergência falhou - usando todos os chunks originais")
                 filtered_documents = documents
                 filtered_chunks = 0
+                fallback_used = True
         
         # FALLBACK 2: Se ainda não há documentos, usar todos os chunks originais
         if len(filtered_documents) == 0 and len(documents) > 0:
-            msg.warn(f"  ⚠️ ATENÇÃO: Todos os {total_chunks} chunks foram filtrados!")
-            msg.warn(f"  ⚠️ Usando fallback final: mantendo todos os chunks originais (sem filtro de qualidade)")
+            # Log consolidado
+            msg.warn(f"  ⚠️ Todos os {total_chunks} chunks filtrados - usando fallback final")
             filtered_documents = documents
             filtered_chunks = 0
+            fallback_used = True
         
-        if filtered_chunks > 0:
-            msg.warn(f"  ⚠️ {filtered_chunks}/{total_chunks} chunks filtrados por baixa qualidade")
+        # Mostrar mensagem de filtragem apenas se não foi usado fallback (log reduzido)
+        if filtered_chunks > 0 and not fallback_used and filtered_chunks < total_chunks * 0.5:
+            # Apenas logar se menos de 50% foram filtrados (casos normais)
+            pass  # Log removido para reduzir verbosidade
+        elif fallback_used:
+            # Log já foi feito acima, não repetir
+            pass
         
         # Usar método do WindowRetriever para combinar contexto
         window_retriever = WindowRetriever()
         context = window_retriever.combine_context(filtered_documents)
         
-        return (context, filtered_documents)
+        # Informações sobre filtragem
+        filter_info = {
+            'fallback_used': fallback_used,
+            'filtered_count': filtered_chunks,
+            'total_count': total_chunks,
+            'final_count': sum(len(doc['chunks']) for doc in filtered_documents)
+        }
+        
+        return (context, filtered_documents, filter_info)
 
 
 def register():
