@@ -176,7 +176,8 @@ def _normalize_mentions(mentions: List[Dict], gaz: Dict) -> List[str]:
 async def run_etl_patch_for_passage_uuids(
     get_weaviate: Callable,
     uuids: List[str],
-    tenant: str
+    tenant: str,
+    collection_name: Optional[str] = None
 ) -> Dict:
     """
     Executa ETL A2 inteligente em uma lista de passage UUIDs
@@ -186,9 +187,30 @@ async def run_etl_patch_for_passage_uuids(
     - Sem gazetteer obrigatório (usa modo inteligente)
     - Salva entidades em `entity_mentions` com estrutura {text, label, confidence}
     - Mantém compatibilidade com gazetteer se existir (salva também `entities_local_ids`)
+    
+    Args:
+        get_weaviate: Função que retorna cliente Weaviate
+        uuids: Lista de UUIDs dos chunks
+        tenant: Tenant do Weaviate
+        collection_name: Nome da collection (opcional, tenta detectar se não fornecido)
     """
     client = get_weaviate()
-    coll = client.collections.get("Passage")
+    
+    # Tentar obter collection name se não fornecido
+    if not collection_name:
+        try:
+            all_collections = await client.collections.list_all()
+            embedding_collections = [c for c in all_collections if "VERBA_Embedding" in c]
+            if embedding_collections:
+                collection_name = embedding_collections[0]
+                print(f"[ETL] Collection detectada: {collection_name}")
+            else:
+                # Fallback para "Passage" se nenhuma collection VERBA_Embedding encontrada
+                collection_name = "Passage"
+        except:
+            collection_name = "Passage"
+    
+    coll = client.collections.get(collection_name)
     gaz = load_gazetteer()
     
     changed = 0
