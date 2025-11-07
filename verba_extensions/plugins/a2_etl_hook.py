@@ -10,6 +10,7 @@ from wasabi import msg
 
 # Importações do ETL inteligente
 _etl_module = None
+_nlp = None  # Cache global para modelo spaCy
 
 def get_etl_module():
     """Carrega módulo ETL inteligente com lazy import"""
