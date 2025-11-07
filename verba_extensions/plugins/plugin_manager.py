@@ -43,9 +43,12 @@ class PluginManager:
             return
         
         # Plugins conhecidos para carregar
+        # NOTA: recursive_document_splitter removido pois fazia re-chunking redundante
+        # O chunker inicial (RecursiveChunker, SentenceChunker) já divide bem
+        # O plugin gerava 25x mais chunks (93 → 2379), desperdiçando recursos
         known_plugins = [
             "llm_metadata_extractor",
-            "recursive_document_splitter",
+            # "recursive_document_splitter",  # Desabilitado - re-chunking redundante
             "reranker",
         ]
         
