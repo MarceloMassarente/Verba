@@ -18,7 +18,8 @@ RUN pip install --no-cache-dir '.'
 # Instala dependências das extensões
 RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 
-# Baixa dados do NLTK
+# Baixa modelos do spaCy e dados do NLTK para execução local
+RUN python -m spacy download pt_core_news_sm en_core_web_sm || true
 RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 
 EXPOSE 8000

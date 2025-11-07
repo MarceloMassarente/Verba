@@ -183,7 +183,7 @@ $ python scripts/check_dependencies.py
 ✅ fastapi: 0.111.1 (OK)
 ✅ sentence-transformers: 2.2.0 (OK)
 ⚠️  spacy: 3.7.0 (instalado, mas modelo pt_core_news_sm não encontrado)
-   Execute: python -m spacy download pt_core_news_sm
+   Execute: python -m spacy download pt_core_news_sm en_core_web_sm
 ```
 
 ---

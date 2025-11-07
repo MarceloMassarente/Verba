@@ -123,7 +123,7 @@
 ```bash
 # Dependências
 pip install -r requirements-extensions.txt
-python -m spacy download pt_core_news_sm
+python -m spacy download pt_core_news_sm en_core_web_sm
 
 # Cria schema
 python scripts/create_schema.py

@@ -81,7 +81,7 @@ Import → Chunking → Embedding → Import no Weaviate → [Hook ETL] → Patc
 pip install -r requirements-extensions.txt
 
 # Modelo spaCy (opcional, só se usar ETL)
-python -m spacy download pt_core_news_sm
+python -m spacy download pt_core_news_sm en_core_web_sm
 ```
 
 ### 2. Configuração

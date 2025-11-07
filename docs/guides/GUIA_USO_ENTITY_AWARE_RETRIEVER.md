@@ -168,7 +168,7 @@ Para o EntityAwareRetriever funcionar completamente:
 1. ✅ **Retriever registrado** (já está)
 2. ✅ **ETL executado** (entidades nos chunks via ETL A2)
 3. ✅ **Orquestrador registrado** (plugin criado)
-4. ✅ **SpaCy instalado** (`python -m spacy download pt_core_news_sm`)
+4. ✅ **SpaCy instalado** (`python -m spacy download pt_core_news_sm en_core_web_sm`)
 5. ✅ **Gazetteer configurado** (`verba_extensions/resources/gazetteer.json`)
 
 ---

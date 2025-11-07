@@ -25,7 +25,7 @@ RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 RUN pip install --no-cache-dir pandas openpyxl xlrd || true
 
 # Baixa modelos do spaCy (para ETL A2 e EntityAware Retriever)
-RUN python -m spacy download pt_core_news_sm || true
+RUN python -m spacy download pt_core_news_sm en_core_web_sm || true
 
 # Baixa dados do NLTK (para chunker)
 RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true

@@ -208,7 +208,7 @@ O Universal A2 Reader já está incluído nas extensões. Certifique-se de que:
 
 1. ✅ Extensões estão carregadas (ver logs do Railway)
 2. ✅ SpaCy está instalado: `pip install spacy`
-3. ✅ Modelo SpaCy está instalado: `python -m spacy download pt_core_news_sm`
+3. ✅ Modelos SpaCy instalados: `python -m spacy download pt_core_news_sm en_core_web_sm`
 4. ✅ **Tika (opcional mas recomendado):**
    - Servidor Tika rodando em `TIKA_SERVER_URL` (padrão: `http://localhost:9998`)
    - Ou configurar via variável de ambiente: `export TIKA_SERVER_URL="http://192.168.1.197:9998"`

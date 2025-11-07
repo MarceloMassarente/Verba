@@ -44,10 +44,10 @@ Sistema completo de extensões para o Verba que permite:
 # Instala dependências de extensões
 pip install -r requirements-extensions.txt
 
-# Instala modelos spaCy (PT)
-python -m spacy download pt_core_news_sm
+# Instala modelos spaCy (PT + EN para code-switching)
+python -m spacy download pt_core_news_sm en_core_web_sm
 
-# OU para melhor qualidade (mais pesado)
+# OU para melhor qualidade (mais pesado em PT)
 python -m spacy download pt_core_news_lg
 ```
 

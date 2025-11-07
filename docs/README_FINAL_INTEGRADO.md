@@ -27,7 +27,7 @@ pip install httpx trafilatura
 
 # Se usar ETL (opcional)
 pip install spacy
-python -m spacy download pt_core_news_sm
+python -m spacy download pt_core_news_sm en_core_web_sm
 ```
 
 ### 2. Inicialização

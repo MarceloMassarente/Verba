@@ -8,6 +8,13 @@ import time
 import json
 from typing import List, Callable, Dict, Optional
 
+
+# Labels de entidades considerados relevantes para entity-aware retrieval
+PRIMARY_ENTITY_LABELS = {"ORG", "PERSON", "PER", "GPE", "LOC"}
+# Alguns modelos classificam empresas ou produtos como FAC/PRODUCT/EVENT – manter numa lista separada
+SECONDARY_ENTITY_LABELS = {"FAC", "PRODUCT", "EVENT"}
+ALLOWED_ENTITY_LABELS = PRIMARY_ENTITY_LABELS | SECONDARY_ENTITY_LABELS
+
 # Cache de modelos spaCy por idioma
 _nlp_models = {}
 
@@ -122,8 +129,8 @@ def extract_entities_intelligent(text: str) -> List[Dict]:
                 try:
                     doc = nlp_model(text)
                     for e in doc.ents:
-                        # Filtrar apenas PERSON e ORG
-                        if e.label_ not in ("ORG", "PERSON", "PER"):
+                        # Filtrar apenas labels relevantes (inclui LOC/GPE por causa de falsos-positivos do spaCy-PT)
+                        if e.label_ not in ALLOWED_ENTITY_LABELS:
                             continue
                         
                         # Evitar duplicatas por span (start, end, text)
@@ -158,7 +165,7 @@ def extract_entities_intelligent(text: str) -> List[Dict]:
                         "confidence": 0.95
                     }
                     for e in doc.ents
-                    if e.label_ in ("ORG", "PERSON", "PER")  # Filtrar apenas PERSON e ORG
+                    if e.label_ in ALLOWED_ENTITY_LABELS  # Filtrar apenas labels com alto sinal empresarial
                 ]
                 return entities
             except Exception as e:
@@ -180,7 +187,7 @@ def extract_entities_intelligent(text: str) -> List[Dict]:
                     "confidence": 0.95
                 }
                 for e in doc.ents
-                if e.label_ in ("ORG", "PERSON", "PER")
+                if e.label_ in ALLOWED_ENTITY_LABELS
             ]
             return entities
         except Exception as e:
@@ -344,12 +351,12 @@ async def run_etl_patch_for_passage_uuids(
                 local_ids = extract_entities_with_gazetteer(text, gaz)
             
             # MODO INTELIGENTE: Se não há gazetteer, usar textos das entidades diretamente
-            # IMPORTANTE: Filtrar apenas PERSON e ORG (alto valor, específicas)
-            # Evitar GPE/LOC/MISC que são genéricas e poluem os filtros
+            # IMPORTANTE: Priorizar labels com alto valor empresarial (ORG/PER/LOC/GPE)
+            # Mantemos LOC/GPE porque spaCy-pt costuma classificar empresas brasileiras como locais
             if not local_ids and entity_mentions:
                 local_ids = [
                     m["text"] for m in entity_mentions 
-                    if m.get("label") in ("PERSON", "PER", "ORG")
+                    if m.get("label") in PRIMARY_ENTITY_LABELS
                 ]
             
             # SectionScope (heading > first_para > parent)
@@ -368,11 +375,11 @@ async def run_etl_patch_for_passage_uuids(
                     sect_ids, scope_conf = parent_ents, 0.6
             else:
                 # MODO INTELIGENTE: Sem gazetteer, usar textos das entidades do chunk
-                # IMPORTANTE: Apenas PERSON e ORG (específicas), não GPE/LOC (genéricas)
+                # IMPORTANTE: Priorizar labels empresariais (ver PRIMARY_ENTITY_LABELS)
                 if entity_mentions:
                     sect_ids = [
                         m["text"] for m in entity_mentions 
-                        if m.get("label") in ("PERSON", "PER", "ORG")
+                        if m.get("label") in PRIMARY_ENTITY_LABELS
                     ]
                     scope_conf = 0.85 if sect_ids else 0.0  # Alta confiança pois vem diretamente do chunk
             
