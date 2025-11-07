@@ -301,13 +301,13 @@ async def run_etl_patch_for_passage_uuids(
 
     changed = 0
 
-    # Busca objetos
+    # Busca objetos - usando apenas propriedades garantidas no schema
     try:
+        # Tentar com as propriedades esperadas (ETL-aware schema)
         fetch_kwargs = {
             "limit": len(uuids),
             "return_properties": [
                 "content",
-                "text",
                 "section_title",
                 "section_first_para",
                 "parent_entities",
@@ -325,6 +325,14 @@ async def run_etl_patch_for_passage_uuids(
                 res = await coll.query.fetch_objects(**fetch_kwargs)
             else:
                 raise
+        except Exception as prop_err:
+            # Se falhou por propriedade inexistente, tentar sem return_properties (retorna todas)
+            print(f"⚠️ Erro ao buscar com propriedades específicas, tentando sem filtro: {str(prop_err)}")
+            fetch_kwargs = {"limit": len(uuids)}
+            if tenant:
+                fetch_kwargs["tenant"] = tenant
+            res = await coll.query.fetch_objects(**fetch_kwargs)
+        
         objs = {str(o.uuid): o for o in res.objects if str(o.uuid) in uuids}
     except Exception as e:
         print(f"Erro ao buscar passages: {str(e)}")
@@ -337,7 +345,7 @@ async def run_etl_patch_for_passage_uuids(
         
         try:
             p = o.properties
-            text = p.get("content") or p.get("text") or ""
+            text = p.get("content") or p.get("text") or p.get("chunk_text") or ""
             sect_title = p.get("section_title") or ""
             first_para = p.get("section_first_para") or ""
             parent_ents = p.get("parent_entities") or []
