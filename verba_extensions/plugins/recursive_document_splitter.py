@@ -95,13 +95,19 @@ class RecursiveDocumentSplitterPlugin:
         
         config = config or {}
         chunk_size = config.get("chunk_size", self.default_chunk_size)
+        # Usar max_chunk_size como threshold - apenas dividir se MUITO grande
+        max_chunk_size = config.get("max_chunk_size", self.max_chunk_size)
         
         # Agrupa chunks grandes que precisam ser re-chunked
+        # IMPORTANTE: Apenas dividir se chunk é MAIOR que max_chunk_size (não apenas chunk_size)
+        # Isso evita re-chunking desnecessário quando chunking inicial já foi bem feito
         chunks_to_split = []
         optimized_chunks = []
         
         for chunk in chunks:
-            if len(chunk.content) > chunk_size:
+            # Apenas dividir se chunk é REALMENTE muito grande (acima de max_chunk_size)
+            # Chunks entre chunk_size e max_chunk_size são aceitos sem divisão
+            if len(chunk.content) > max_chunk_size:
                 chunks_to_split.append(chunk)
             else:
                 optimized_chunks.append(chunk)
@@ -118,7 +124,9 @@ class RecursiveDocumentSplitterPlugin:
         # Combina chunks otimizados + splits
         result = optimized_chunks + split_chunks
         
-        logger.info(f"RecursiveDocumentSplitter: {len(chunks)} chunks → {len(result)} chunks optimized")
+        # Log apenas se houve mudança significativa
+        if len(result) != len(chunks):
+            logger.info(f"RecursiveDocumentSplitter: {len(chunks)} chunks → {len(result)} chunks (divided {len(chunks_to_split)} large chunks)")
         
         return result
     
