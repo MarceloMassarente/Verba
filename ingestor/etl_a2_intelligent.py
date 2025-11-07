@@ -265,9 +265,13 @@ async def run_etl_patch_for_passage_uuids(
                 local_ids = extract_entities_with_gazetteer(text, gaz)
             
             # MODO INTELIGENTE: Se não há gazetteer, usar textos das entidades diretamente
-            # Isso permite que o retriever filtre por entidades mesmo sem gazetteer
+            # IMPORTANTE: Filtrar apenas PERSON e ORG (alto valor, específicas)
+            # Evitar GPE/LOC/MISC que são genéricas e poluem os filtros
             if not local_ids and entity_mentions:
-                local_ids = [m["text"] for m in entity_mentions]
+                local_ids = [
+                    m["text"] for m in entity_mentions 
+                    if m.get("label") in ("PERSON", "PER", "ORG")
+                ]
             
             # SectionScope (heading > first_para > parent)
             sect_ids = []
@@ -285,9 +289,13 @@ async def run_etl_patch_for_passage_uuids(
                     sect_ids, scope_conf = parent_ents, 0.6
             else:
                 # MODO INTELIGENTE: Sem gazetteer, usar textos das entidades do chunk
+                # IMPORTANTE: Apenas PERSON e ORG (específicas), não GPE/LOC (genéricas)
                 if entity_mentions:
-                    sect_ids = [m["text"] for m in entity_mentions]
-                    scope_conf = 0.85  # Alta confiança pois vem diretamente do chunk
+                    sect_ids = [
+                        m["text"] for m in entity_mentions 
+                        if m.get("label") in ("PERSON", "PER", "ORG")
+                    ]
+                    scope_conf = 0.85 if sect_ids else 0.0  # Alta confiança pois vem diretamente do chunk
             
             # Primary entity + focus score
             primary = local_ids[0] if local_ids else (sect_ids[0] if sect_ids else None)

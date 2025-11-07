@@ -113,10 +113,14 @@ def load_gazetteer(path: str = None) -> Dict:
 
 
 def classify_token(token) -> str:
-    """Classifica um token em: ENTITY, SEMANTIC, CONNECTOR, OTHER"""
+    """Classifica um token em: ENTITY, SEMANTIC, CONNECTOR, OTHER
     
-    # 1. NER labels
-    if token.ent_type_ in ["ORG", "PERSON", "GPE", "LOC"]:
+    IMPORTANTE: Filtra apenas PERSON e ORG (alto valor, específicas)
+    Evita GPE/LOC/MISC que são genéricas e causam filtros muito restritivos
+    """
+    
+    # 1. NER labels - apenas PERSON e ORG
+    if token.ent_type_ in ["ORG", "PERSON", "PER"]:
         return "ENTITY"
     
     # 2. Proper nouns (mesmo sem NER)

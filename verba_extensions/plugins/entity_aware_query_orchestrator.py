@@ -159,9 +159,11 @@ def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List
     
     try:
         doc = nlp_model(query)
+        # IMPORTANTE: Filtrar apenas PERSON e ORG (alto valor, específicas)
+        # Evitar GPE/LOC/MISC que são genéricas e causam filtros muito restritivos
         mentions = [
             {"text": e.text, "label": e.label_} for e in doc.ents 
-            if e.label_ in ("ORG", "PERSON", "GPE", "LOC")
+            if e.label_ in ("ORG", "PERSON", "PER")
         ]
         
         # Log detalhado das menções detectadas pelo spaCy

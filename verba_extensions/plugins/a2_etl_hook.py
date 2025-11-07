@@ -97,7 +97,11 @@ def match_aliases(text: str, gaz: Dict) -> List[str]:
     return sorted(set(hits))
 
 def extract_entities_nlp(text: str) -> List[Dict]:
-    """Extrai entidades via spaCy NER"""
+    """Extrai entidades via spaCy NER
+    
+    IMPORTANTE: Filtra apenas PERSON e ORG (alto valor, específicas)
+    Evita GPE/LOC/MISC que são genéricas e poluem os filtros
+    """
     nlp_model = get_nlp()
     if not nlp_model:
         return []
@@ -106,7 +110,7 @@ def extract_entities_nlp(text: str) -> List[Dict]:
     return [
         {"text": e.text, "label": e.label_}
         for e in doc.ents
-        if e.label_ in ("ORG", "PERSON", "PER", "GPE", "LOC")  # PER para modelos PT
+        if e.label_ in ("ORG", "PERSON", "PER")  # PER para modelos PT, PERSON para EN
     ]
 
 def normalize_entities(mentions: List[Dict], gaz: Dict) -> List[str]:

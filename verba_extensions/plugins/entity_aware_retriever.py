@@ -427,12 +427,15 @@ class EntityAwareRetriever(Retriever):
         
         # Combinar entidades do builder (se houver)
         if builder_entities:
-            # Se builder retornou entity_ids, usar eles
-            if all(eid.startswith("ent:") for eid in builder_entities):
+            # APENAS usar entity_ids validados (formato ent:type:id)
+            # Ignorar textos genéricos para evitar filtros restritivos indevidos
+            if all(isinstance(eid, str) and eid.startswith("ent:") for eid in builder_entities):
                 entity_ids = builder_entities
+                msg.info(f"  Builder forneceu entity_ids validados: {entity_ids}")
             else:
-                # Se builder retornou textos, usar eles
-                entity_texts = builder_entities
+                # Builder retornou textos (não entity_ids) - NÃO usar como filtro
+                # Textos podem ser usados para boost semântico, mas não para filtro restritivo
+                msg.info(f"  Builder forneceu textos (não entity_ids), ignorando para evitar filtros indevidos: {builder_entities}")
         
         # Log final
         if entity_texts:
@@ -447,8 +450,48 @@ class EntityAwareRetriever(Retriever):
             entity_boost = " ".join(entity_texts)
             msg.info(f"  ✅ Usando entidades para boostar busca: {entity_boost}")
         
-        # Para compatibilidade: usar entity_ids se disponível, senão usar entity_texts
-        final_entity_ids = entity_ids if entity_ids else entity_texts
+        # NOVA ESTRATÉGIA: Aplicar filtro de entidade APENAS quando:
+        # 1. Há entity_ids validados (formato ent:*) do gazetteer, OU
+        # 2. Há entity_texts E a query usa sintaxe explícita ("sobre X", "de X", "da X", etc.)
+        
+        # Detectar se query usa sintaxe explícita de entidade
+        # Padrões: "sobre [entidade]", "da [entidade]", "de [entidade]", "na [entidade]", etc.
+        explicit_entity_patterns = [
+            r'\bsobre\s+([A-Z][a-zA-Z\s]+)',  # "sobre Apple"
+            r'\bda\s+([A-Z][a-zA-Z\s]+)',      # "da Microsoft"
+            r'\bde\s+([A-Z][a-zA-Z\s]+)',      # "de Google"
+            r'\bna\s+([A-Z][a-zA-Z\s]+)',      # "na China"
+            r'\babout\s+([A-Z][a-zA-Z\s]+)',   # "about Apple"
+            r'\bfrom\s+([A-Z][a-zA-Z\s]+)',    # "from Microsoft"
+            r'\bat\s+([A-Z][a-zA-Z\s]+)',      # "at Google"
+        ]
+        
+        import re
+        has_explicit_entity = False
+        if entity_texts:
+            for pattern in explicit_entity_patterns:
+                matches = re.findall(pattern, query)
+                if matches:
+                    # Verificar se alguma menção detectada está nos matches
+                    for match in matches:
+                        if any(entity.lower() in match.lower() or match.lower() in entity.lower() 
+                               for entity in entity_texts):
+                            has_explicit_entity = True
+                            break
+                if has_explicit_entity:
+                    break
+        
+        # DECISÃO: Usar entity_texts como filtro APENAS se sintaxe explícita
+        final_entity_ids = entity_ids  # entity_ids do gazetteer (formato ent:*)
+        if not entity_ids and entity_texts and has_explicit_entity:
+            # Usuário mencionou explicitamente entidade ("sobre Apple", "da Microsoft")
+            # Seguro usar entity_texts como filtro
+            final_entity_ids = entity_texts
+            msg.info(f"  ✅ Query com entidade explícita detectada, usando como filtro: {entity_texts}")
+        elif entity_texts and not has_explicit_entity:
+            # spaCy detectou entidade mas sintaxe não é explícita
+            # Usar apenas para boost semântico, NÃO para filtro
+            msg.info(f"  ℹ️ Entidades detectadas mas sem sintaxe explícita, usando apenas para boost: {entity_texts}")
         
         # Obter termos semânticos
         parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
@@ -457,17 +500,12 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
         
-        # DIAGNÓSTICO: Se não encontrou entidades, mostrar por quê
-        if not final_entity_ids:
-            msg.warn(f"  ⚠️ DIAGNÓSTICO: Nenhuma entidade detectada na query: '{query}'")
-            msg.warn(f"  💡 Verifique se a query contém nomes próprios (empresas, pessoas, lugares)")
-        
-        # Se não há entidades, usar entity_ids para compatibilidade
+        # Para compatibilidade: entity_ids usado para filtro
         entity_ids = final_entity_ids
         
-        # Se não há entidades, avisar que filtros restritivos serão ignorados
+        # Se não há entity_ids, não aplicar filtro de entidade
         if not entity_ids:
-            msg.info(f"  ⚠️ NENHUMA entidade detectada - filtros restritivos serão ignorados para busca mais ampla")
+            msg.info(f"  ℹ️ Nenhum filtro de entidade será aplicado (busca semântica ampla)")
         
         # Atualizar debug info com entidades e termos semânticos
         if not debug_info["entities_detected"]:
@@ -530,6 +568,10 @@ class EntityAwareRetriever(Retriever):
                 # Padrão: section_entity_ids para evitar contaminação entre entidades
                 # (ex: documento fala de 10 empresas, busca por empresa 2 não deve pegar empresa 8)
                 entity_property = query_filters_from_builder.get("entity_property", "section_entity_ids")
+                # CORREÇÃO: Se entity_property vier vazio, usar fallback
+                if not entity_property or entity_property.strip() == "":
+                    entity_property = "section_entity_ids"
+                    msg.warn(f"  entity_property vazio, usando fallback: {entity_property}")
                 entity_filter = Filter.by_property(entity_property).contains_any(chunk_level_entities)
                 msg.good(f"  Aplicando filtro de chunk: {entity_property} = {chunk_level_entities}")
         
