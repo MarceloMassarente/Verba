@@ -517,14 +517,17 @@ class EntityAwareRetriever(Retriever):
         
         # Detectar se query usa sintaxe explícita de entidade
         # Padrões: "sobre [entidade]", "da [entidade]", "de [entidade]", "na [entidade]", etc.
+        # MELHORADO: Inclui artigos opcionais ("sobre a X", "sobre o X")
         explicit_entity_patterns = [
-            r'\bsobre\s+([A-Z][a-zA-Z\s]+)',  # "sobre Apple"
-            r'\bda\s+([A-Z][a-zA-Z\s]+)',      # "da Microsoft"
-            r'\bde\s+([A-Z][a-zA-Z\s]+)',      # "de Google"
-            r'\bna\s+([A-Z][a-zA-Z\s]+)',      # "na China"
-            r'\babout\s+([A-Z][a-zA-Z\s]+)',   # "about Apple"
-            r'\bfrom\s+([A-Z][a-zA-Z\s]+)',    # "from Microsoft"
-            r'\bat\s+([A-Z][a-zA-Z\s]+)',      # "at Google"
+            r'\bsobre\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',  # "sobre Apple", "sobre a Egon Zehnder"
+            r'\bda\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "da Microsoft", "da empresa X"
+            r'\bde\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "de Google", "de uma empresa"
+            r'\bna\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "na China", "na empresa X"
+            r'\babout\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',         # "about Apple", "about the company"
+            r'\bfrom\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',           # "from Microsoft", "from the company"
+            r'\bat\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',             # "at Google", "at the company"
+            r'\bcompara\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)', # "compara Egon Zehnder"
+            r'\bcompare\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',        # "compare Apple"
         ]
         
         import re

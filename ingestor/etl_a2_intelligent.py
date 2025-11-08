@@ -4,9 +4,10 @@ Detecta entidades sem depender de gazetteer, adaptável ao idioma do chunk
 """
 
 import os
+import re
 import time
 import json
-from typing import List, Callable, Dict, Optional
+from typing import List, Callable, Dict, Optional, Set
 
 
 # Labels de entidades considerados relevantes para entity-aware retrieval
@@ -301,6 +302,9 @@ async def run_etl_patch_for_passage_uuids(
 
     changed = 0
 
+    schema_props: Set[str] = set()
+    missing_update_notified: Set[str] = set()
+
     # Busca objetos - usando apenas propriedades garantidas no schema
     try:
         requested_props = [
@@ -322,16 +326,24 @@ async def run_etl_patch_for_passage_uuids(
         except Exception as schema_err:
             print(f"⚠️ Não foi possível obter propriedades do schema ({collection_name}): {schema_err}")
 
-        return_props = [
-            prop for prop in requested_props if not schema_props or prop in schema_props
-        ]
-        missing_props = [
-            prop for prop in requested_props if schema_props and prop not in schema_props
-        ]
-        if missing_props:
+        if schema_props:
+            return_props = [prop for prop in requested_props if prop in schema_props]
+            missing_props = [prop for prop in requested_props if prop not in schema_props]
+            if missing_props:
+                print(
+                    f"⚠️ Propriedades ausentes na collection {collection_name}: "
+                    + ", ".join(missing_props)
+                )
+            if not return_props:
+                print(
+                    f"⚠️ Nenhuma das propriedades solicitadas está presente em {collection_name}. "
+                    "A busca retornará todos os campos disponíveis."
+                )
+        else:
+            return_props = []
             print(
-                f"⚠️ Propriedades ausentes na collection {collection_name}: "
-                + ", ".join(missing_props)
+                f"⚠️ Schema da collection {collection_name} não pôde ser determinado - "
+                "buscando chunks sem limitar propriedades"
             )
 
         fetch_kwargs = {"limit": len(uuids)}
@@ -420,7 +432,7 @@ async def run_etl_patch_for_passage_uuids(
             focus = 1.0 if primary and primary in local_ids else (0.7 if primary else 0.0)
             
             # Prepara properties para salvar
-            props = {
+            full_props = {
                 # NOVO: Salvar menções inteligentes
                 "entity_mentions": json.dumps(entity_mentions) if entity_mentions else "[]",
                 # Modo legado: entity_ids se gazetteer disponível
@@ -431,6 +443,32 @@ async def run_etl_patch_for_passage_uuids(
                 "entity_focus_score": focus,
                 "etl_version": "entity_scope_intelligent_v2"
             }
+
+            if schema_props:
+                props = {
+                    key: value for key, value in full_props.items() if key in schema_props
+                }
+                skipped = [
+                    key
+                    for key in full_props.keys()
+                    if key not in schema_props and key not in missing_update_notified
+                ]
+                if skipped:
+                    missing_update_notified.update(skipped)
+                    print(
+                        f"⚠️ Collection {collection_name} não possui campos "
+                        + ", ".join(skipped)
+                        + " - ignorando nos updates ETL."
+                    )
+            else:
+                props = full_props
+
+            if not props:
+                print(
+                    f"⚠️ Nenhuma propriedade ETL disponível no schema de {collection_name}; "
+                    f"chunk {uid[:8]} não será atualizado."
+                )
+                continue
             
             update_kwargs = {
                 "uuid": uid,
@@ -445,6 +483,35 @@ async def run_etl_patch_for_passage_uuids(
                 if "tenant" in update_kwargs and "tenant" in str(err):
                     update_kwargs.pop("tenant", None)
                     await coll.data.update(**update_kwargs)
+                else:
+                    raise
+            except Exception as update_err:
+                err_text = str(update_err)
+                err_lower = err_text.lower()
+                if "no such prop" in err_lower and update_kwargs.get("properties"):
+                    missing_field = None
+                    match = re.search(r"'([^']+)'", err_text)
+                    if match:
+                        missing_field = match.group(1)
+                    if missing_field:
+                        if missing_field in update_kwargs["properties"]:
+                            update_kwargs["properties"].pop(missing_field, None)
+                        if missing_field not in missing_update_notified:
+                            missing_update_notified.add(missing_field)
+                            print(
+                                f"⚠️ Ignorando campo {missing_field} no update do chunk {uid[:8]} "
+                                f"porque não existe em {collection_name}."
+                            )
+                    if update_kwargs["properties"]:
+                        await coll.data.update(**update_kwargs)
+                        # Reutiliza props filtradas para futuros logs
+                        props = update_kwargs["properties"]
+                    else:
+                        print(
+                            f"⚠️ Nenhuma propriedade restante para atualizar o chunk {uid[:8]} "
+                            f"após remover campos inexistentes."
+                        )
+                        continue
                 else:
                     raise
             changed += 1

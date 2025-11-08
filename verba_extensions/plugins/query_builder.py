@@ -626,6 +626,30 @@ class QueryBuilderPlugin:
         
         # Detectar idioma da query
         query_language = detect_language(user_query)
+        
+        # CORREÇÃO: langdetect pode confundir português com espanhol
+        # Se detectou "es" (espanhol), verificar se é realmente português
+        if query_language == "es":
+            # Verificar palavras específicas do português que não existem em espanhol
+            query_lower = user_query.lower()
+            pt_indicators = [
+                "que", "qual", "como", "onde", "quando",  # Interrogativas
+                "sobre", "documento", "fala", "falam",     # Palavras comuns em PT
+                "ele", "ela", "eles", "elas",              # Pronomes
+                "com", "sem", "para", "por",               # Preposições
+            ]
+            es_indicators = [
+                "qué", "cuál", "cómo", "dónde", "cuándo",  # Interrogativas em ES
+                "sobre", "documento", "habla", "hablan",  # Palavras comuns em ES
+            ]
+            pt_count = sum(1 for word in pt_indicators if word in query_lower)
+            es_count = sum(1 for word in es_indicators if word in query_lower)
+            
+            # Se há mais indicadores de português, assumir português
+            if pt_count > es_count:
+                query_language = "pt"
+                msg.info(f"  Query builder: corrigido idioma de ES para PT (indicadores PT={pt_count}, ES={es_count})")
+        
         if query_language == "unknown":
             query_language = "en"  # Default para inglês se não detectar
         msg.info(f"  Query builder: idioma da query: {query_language.upper()}")

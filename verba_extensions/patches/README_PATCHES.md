@@ -393,6 +393,7 @@ print(f"Default embedder: {config['Embedder']['selected']}")  # Deve ser Sentenc
 - ⚠️ **BUG CORRIGIDO:** ETL estava tentando atualizar collection `"Passage"` que não existe
 - ✅ **CORRIGIDO:** Agora detecta collection correta (`VERBA_Embedding_*`) ou recebe via parâmetro
 - ✅ **CORRIGIDO:** Hook passa `collection_name` explicitamente para ETL inteligente
+- ✅ **Atualização 2025-11-08:** Orquestrador de queries (`entity_aware_query_orchestrator.py`) ganhou correção de idioma (PT ≠ ES), heurística limitada (máx. 5 entidades / fallback só para queries curtas) e padrões mais ricos para sintaxe explícita; reduz falsos positivos sem explodir metadados nos chunks
 
 **Como é chamado:**
 - Via hook `import.after` registrado em `verba_extensions/hooks.py`

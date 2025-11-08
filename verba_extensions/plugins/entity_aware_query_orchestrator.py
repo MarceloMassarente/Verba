@@ -125,10 +125,20 @@ def get_nlp(language: str = None):
         return None
 
 def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List[str]:
-    """Extrai entidades da query usando SpaCy (inteligente, sem gazetteer obrigatório)
+    """Extrai entidades da QUERY usando SpaCy (inteligente, sem gazetteer obrigatório)
+    
+    ⚠️ IMPORTANTE: Esta função é APENAS para queries (textos curtos do usuário).
+    NÃO é usada para processar chunks durante o ETL. Os chunks usam extract_entities_intelligent()
+    que tem filtros e limites diferentes.
     
     NOVO: Modo inteligente que detecta entidades automaticamente sem precisar de gazetteer.
     Retorna as menções de texto diretamente para fazer match com conteúdo dos chunks.
+    
+    LIMITES DE SEGURANÇA:
+    - Máximo 5 entidades por query (evita filtros muito restritivos)
+    - Prioriza PERSON/ORG sobre GPE/LOC
+    - Heurística de fallback apenas para queries curtas (< 50 palavras)
+    - Máximo 3 entidades por heurística
     
     Suporta:
     - Entidades nomeadas (ORG, PERSON, GPE, LOC): "Apple", "China", "São Paulo"
@@ -138,7 +148,7 @@ def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List
     - Modo gazetteer (opcional): retorna entity_ids se gazetteer disponível
     
     Args:
-        query: Query do usuário
+        query: Query do usuário (texto curto, não chunk completo)
         use_gazetteer: Se True, tenta mapear para entity_ids via gazetteer (modo legado)
     
     Returns:
@@ -159,19 +169,61 @@ def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List
     
     try:
         doc = nlp_model(query)
-        # IMPORTANTE: Filtrar apenas PERSON e ORG (alto valor, específicas)
-        # Evitar GPE/LOC/MISC que são genéricas e causam filtros muito restritivos
-        mentions = [
+        
+        # IMPORTANTE: Para queries, priorizar entidades de alto valor (PERSON, ORG)
+        # GPE/LOC só são incluídas se não houver PERSON/ORG (evitar poluição)
+        # Isso mantém filtros precisos e evita explosão de entidades
+        
+        # Primeiro: buscar apenas PERSON e ORG (alto valor, específicas)
+        high_value_mentions = [
             {"text": e.text, "label": e.label_} for e in doc.ents 
             if e.label_ in ("ORG", "PERSON", "PER")
         ]
+        
+        # Se não encontrou PERSON/ORG, então incluir GPE/LOC (útil para queries geográficas)
+        if high_value_mentions:
+            mentions = high_value_mentions
+        else:
+            # Incluir GPE/LOC apenas se não há PERSON/ORG
+            mentions = [
+                {"text": e.text, "label": e.label_} for e in doc.ents 
+                if e.label_ in ("GPE", "LOC")
+            ]
         
         # Log detalhado das menções detectadas pelo spaCy
         if mentions:
             msg.info(f"  🔍 Menções detectadas pelo spaCy: {[m['text'] for m in mentions]} (labels: {[m['label'] for m in mentions]})")
         else:
             msg.info(f"  ⚠️ Nenhuma menção detectada pelo spaCy na query: '{query}'")
+            # Heurística de fallback APENAS para queries curtas (< 50 palavras)
+            # e apenas se não há menções do spaCy (evitar falsos positivos)
+            query_words = query.split()
+            if len(query_words) < 50:  # Apenas queries curtas
+                capitalized_words = [w for w in query_words if w and w[0].isupper() and len(w) > 2]
+                if capitalized_words:
+                    msg.info(f"  💡 Tentando heurística (query curta): palavras capitalizadas encontradas: {capitalized_words}")
+                    # Filtrar palavras comuns que não são entidades
+                    common_words = {"O", "A", "Os", "As", "De", "Da", "Do", "Das", "Dos", "Em", "No", "Na", "Nos", "Nas", "Para", "Por", "Com", "Sem", "Sobre", "Como", "Que", "Qual", "Onde", "Quando", "The", "A", "An", "Of", "In", "On", "At", "To", "For", "With", "From"}
+                    potential_entities = [w for w in capitalized_words if w not in common_words]
+                    # LIMITE: máximo 3 entidades por heurística (evitar explosão)
+                    if potential_entities:
+                        potential_entities = potential_entities[:3]
+                        msg.info(f"  💡 Possíveis entidades (heurística, limitado a 3): {potential_entities}")
+                        # Retornar como menções se não há menções do spaCy
+                        mentions = [{"text": e, "label": "UNKNOWN"} for e in potential_entities]
+        
+        if not mentions:
             return []
+        
+        # LIMITE DE SEGURANÇA: máximo 5 entidades por query (evitar filtros muito restritivos)
+        if len(mentions) > 5:
+            # Priorizar PERSON/ORG sobre GPE/LOC
+            priority_mentions = [m for m in mentions if m["label"] in ("ORG", "PERSON", "PER")]
+            if priority_mentions:
+                mentions = priority_mentions[:5]
+            else:
+                mentions = mentions[:5]
+            msg.info(f"  ⚠️ Limite de 5 entidades aplicado (havia {len(mentions)}), priorizando PERSON/ORG")
         
         # MODO INTELIGENTE (padrão): Retornar menções de texto diretamente
         # Isso permite fazer match com conteúdo dos chunks sem precisar de gazetteer

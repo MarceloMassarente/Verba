@@ -25,6 +25,8 @@
 - ✅ Pre-filter antes do ANN/HNSW
 - ✅ Anti-contaminação (evita chunks da empresa B quando pergunta sobre A)
 - ✅ Compatível com interface padrão do Verba
+- ✅ **Atualização 2025-11-08:** Query Builder agora corrige detecções falsas de idioma (PT vs ES), mantém expansão semântica no idioma correto e aplica heurísticas seguras (máx. 5 entidades) para queries ambíguas
+- ✅ **Atualização 2025-11-08:** Padrões de sintaxe explícita melhorados (`sobre a Egon Zehnder`, `compara Spencer Stuart`) e detecção de entidades mais conservadora (prioriza ORG/PER, fallback opcional e limitado)
 
 ### 3. Minisserviço de Ingestão
 
