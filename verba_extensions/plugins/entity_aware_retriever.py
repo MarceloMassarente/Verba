@@ -518,11 +518,16 @@ class EntityAwareRetriever(Retriever):
         # Detectar se query usa sintaxe explícita de entidade
         # Padrões: "sobre [entidade]", "da [entidade]", "de [entidade]", "na [entidade]", etc.
         # MELHORADO: Inclui artigos opcionais ("sobre a X", "sobre o X")
+        # NOVO: Expandido para incluir "menções à", "menções de", "fala sobre", etc.
         explicit_entity_patterns = [
             r'\bsobre\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',  # "sobre Apple", "sobre a Egon Zehnder"
             r'\bda\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "da Microsoft", "da empresa X"
             r'\bde\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "de Google", "de uma empresa"
             r'\bna\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',      # "na China", "na empresa X"
+            r'\bmenções?\s+(?:à|a|de|do|da|das|dos)\s+([A-Z][a-zA-Z\s]+)',  # "menções à China", "menção de Apple"
+            r'\bmenciona\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',  # "menciona China"
+            r'\bfala\s+(?:sobre|de|da|do)\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',  # "fala sobre Apple", "fala da China"
+            r'\bfalam\s+(?:sobre|de|da|do)\s+(?:a|o|as|os|a\s+)?([A-Z][a-zA-Z\s]+)',  # "falam sobre Apple"
             r'\babout\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',         # "about Apple", "about the company"
             r'\bfrom\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',           # "from Microsoft", "from the company"
             r'\bat\s+(?:the\s+)?([A-Z][a-zA-Z\s]+)',             # "at Google", "at the company"
@@ -888,6 +893,11 @@ class EntityAwareRetriever(Retriever):
                 
                 elif use_strict_filter:
                     # MODO STRICT (ou ADAPTIVE tentativa 1): Busca COM filtro
+                    # Obter entity_property antes de usar no fallback
+                    entity_property = query_filters_from_builder.get("entity_property", "section_entity_ids")
+                    if not entity_property or entity_property.strip() == "":
+                        entity_property = "section_entity_ids"
+                    
                     if combined_filter:
                         msg.info(f"  Executando: Hybrid search com filtros combinados")
                         chunks = await weaviate_manager.hybrid_chunks_with_filter(
@@ -932,24 +942,67 @@ class EntityAwareRetriever(Retriever):
                         )
                     
                     # ADAPTIVE FALLBACK: Se poucos resultados (<3), tentar modo BOOST
+                    # NOVO: Também tentar entities_local_ids se section_entity_ids não encontrou resultados
                     if entity_filter_mode == "adaptive" and len(chunks) < 3:
-                        msg.warn(f"  ⚠️ ADAPTIVE FALLBACK: apenas {len(chunks)} chunks com filtro strict, tentando modo BOOST...")
-                        chunks_boost = await weaviate_manager.hybrid_chunks(
-                            client=client,
-                            embedder=embedder,
-                            query=search_query,  # Já inclui entity_boost
-                            vector=vector,
-                            limit_mode=limit_mode,
-                            limit=limit,
-                            labels=labels,
-                            document_uuids=document_uuids,
-                            alpha=rewritten_alpha,
-                        )
-                        if len(chunks_boost) > len(chunks):
-                            msg.good(f"  ✅ ADAPTIVE FALLBACK: encontrados {len(chunks_boost)} chunks (vs {len(chunks)} com filtro)")
-                            chunks = chunks_boost
-                        else:
-                            msg.info(f"  ADAPTIVE FALLBACK: mantendo {len(chunks)} chunks originais")
+                        msg.warn(f"  ⚠️ ADAPTIVE FALLBACK: apenas {len(chunks)} chunks com filtro strict, tentando alternativas...")
+                        
+                        # Tentativa 1: Tentar entities_local_ids se estava usando section_entity_ids
+                        if entity_property == "section_entity_ids" and chunk_level_entities:
+                            try:
+                                msg.info(f"  💡 Tentando filtro alternativo: entities_local_ids (em vez de section_entity_ids)")
+                                fallback_filter = Filter.by_property("entities_local_ids").contains_any(chunk_level_entities)
+                                # Combinar com outros filtros se houver
+                                fallback_filters_list = [fallback_filter]
+                                if lang_filter and has_entities:
+                                    fallback_filters_list.append(lang_filter)
+                                if temporal_filter:
+                                    fallback_filters_list.append(temporal_filter)
+                                
+                                if len(fallback_filters_list) == 1:
+                                    combined_fallback_filter = fallback_filter
+                                else:
+                                    combined_fallback_filter = Filter.all_of(fallback_filters_list)
+                                
+                                chunks_fallback = await weaviate_manager.hybrid_chunks_with_filter(
+                                    client=client,
+                                    embedder=embedder,
+                                    query=search_query,
+                                    vector=vector,
+                                    limit_mode=limit_mode,
+                                    limit=limit,
+                                    labels=labels,
+                                    document_uuids=document_uuids,
+                                    filters=combined_fallback_filter,
+                                    alpha=rewritten_alpha,
+                                )
+                                
+                                if len(chunks_fallback) > len(chunks):
+                                    msg.good(f"  ✅ ADAPTIVE FALLBACK: encontrados {len(chunks_fallback)} chunks com entities_local_ids (vs {len(chunks)} com section_entity_ids)")
+                                    chunks = chunks_fallback
+                                else:
+                                    msg.info(f"  ADAPTIVE FALLBACK: entities_local_ids também não encontrou mais resultados ({len(chunks_fallback)} chunks)")
+                            except Exception as e:
+                                msg.warn(f"  ⚠️ Erro ao tentar fallback entities_local_ids: {str(e)}")
+                        
+                        # Tentativa 2: Se ainda não encontrou, tentar modo BOOST (sem filtro)
+                        if len(chunks) < 3:
+                            msg.info(f"  💡 Tentando modo BOOST (sem filtro, apenas boost semântico)")
+                            chunks_boost = await weaviate_manager.hybrid_chunks(
+                                client=client,
+                                embedder=embedder,
+                                query=search_query,  # Já inclui entity_boost
+                                vector=vector,
+                                limit_mode=limit_mode,
+                                limit=limit,
+                                labels=labels,
+                                document_uuids=document_uuids,
+                                alpha=rewritten_alpha,
+                            )
+                            if len(chunks_boost) > len(chunks):
+                                msg.good(f"  ✅ ADAPTIVE FALLBACK: encontrados {len(chunks_boost)} chunks com BOOST (vs {len(chunks)} com filtro)")
+                                chunks = chunks_boost
+                            else:
+                                msg.info(f"  ADAPTIVE FALLBACK: mantendo {len(chunks)} chunks originais")
                 
                 else:
                     # Sem filtros: busca normal

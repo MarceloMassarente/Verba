@@ -625,10 +625,27 @@ class QueryBuilderPlugin:
         """Chama LLM para construir query conhecendo o schema"""
         
         # Detectar idioma da query
-        query_language = detect_language(user_query)
+        # NOVO: Tentar code-switching detector primeiro (melhor para queries bilíngues PT+EN)
+        query_language = None
+        try:
+            from verba_extensions.utils.code_switching_detector import get_detector
+            detector = get_detector()
+            language_code, stats = detector.detect_language_mix(user_query)
+            # Extrair idioma primário (pode ser "pt-en" → "pt")
+            query_language = detector.get_primary_language(language_code)
+            if detector.is_bilingual(language_code):
+                msg.info(f"  Query builder: detectado code-switching {language_code} (stats: PT={stats.get('pt_ratio', 0):.2f}, EN={stats.get('en_ratio', 0):.2f}, Technical={stats.get('technical_ratio', 0):.2f})")
+        except Exception:
+            # Fallback para langdetect se code-switching detector não disponível
+            query_language = detect_language(user_query)
+        
+        # Se ainda não detectou ou detectou "unknown", usar langdetect
+        if not query_language or query_language == "unknown":
+            query_language = detect_language(user_query)
         
         # CORREÇÃO: langdetect pode confundir português com espanhol
         # Se detectou "es" (espanhol), verificar se é realmente português
+        # MELHORADO: Também verificar se há termos técnicos em inglês (comum em queries bilíngues PT+EN)
         if query_language == "es":
             # Verificar palavras específicas do português que não existem em espanhol
             query_lower = user_query.lower()
@@ -637,6 +654,9 @@ class QueryBuilderPlugin:
                 "sobre", "documento", "fala", "falam",     # Palavras comuns em PT
                 "ele", "ela", "eles", "elas",              # Pronomes
                 "com", "sem", "para", "por",               # Preposições
+                "menções", "menção", "menciona",           # Palavras específicas PT
+                "mas", "na", "no", "nas", "nos",          # Conjunções/preposições PT específicas
+                "da", "do", "das", "dos",                  # Contração de preposições PT
             ]
             es_indicators = [
                 "qué", "cuál", "cómo", "dónde", "cuándo",  # Interrogativas em ES
@@ -645,10 +665,23 @@ class QueryBuilderPlugin:
             pt_count = sum(1 for word in pt_indicators if word in query_lower)
             es_count = sum(1 for word in es_indicators if word in query_lower)
             
-            # Se há mais indicadores de português, assumir português
-            if pt_count > es_count:
+            # NOVO: Verificar se há termos técnicos em inglês (comum em queries bilíngues PT+EN)
+            # Se há termos técnicos EN + palavras PT, provavelmente é PT com jargão EN, não ES
+            technical_en_terms = [
+                "production", "pulp", "market", "demand", "supply", "capacity",
+                "revenue", "profit", "margin", "ebitda", "roi", "kpi",
+                "business", "strategy", "management", "governance",
+                "logistics", "supply chain", "inventory", "efficiency"
+            ]
+            has_technical_en = any(term in query_lower for term in technical_en_terms)
+            
+            # Se há mais indicadores de português OU há termos técnicos EN + palavras PT, assumir português
+            if pt_count > es_count or (has_technical_en and pt_count > 0):
                 query_language = "pt"
-                msg.info(f"  Query builder: corrigido idioma de ES para PT (indicadores PT={pt_count}, ES={es_count})")
+                reason = f"indicadores PT={pt_count}, ES={es_count}"
+                if has_technical_en:
+                    reason += f", termos técnicos EN detectados"
+                msg.info(f"  Query builder: corrigido idioma de ES para PT ({reason})")
         
         if query_language == "unknown":
             query_language = "en"  # Default para inglês se não detectar
@@ -665,8 +698,31 @@ class QueryBuilderPlugin:
         available_filters = ", ".join(schema_info["available_filters"])
         
         # Instrução sobre idioma baseada apenas no idioma da query
+        # NOVO: Suporte para queries bilíngues PT+EN (code-switching)
         language_instruction = ""
-        if query_language == "en":
+        
+        # Verificar se é code-switching PT+EN
+        is_bilingual_pt_en = False
+        try:
+            from verba_extensions.utils.code_switching_detector import get_detector
+            detector = get_detector()
+            language_code, stats = detector.detect_language_mix(user_query)
+            is_bilingual_pt_en = language_code in ["pt-en", "en-pt"]
+        except:
+            pass
+        
+        if is_bilingual_pt_en:
+            # Query bilíngue PT+EN: manter termos técnicos em inglês, expandir em português
+            language_instruction = """
+REGRA CRÍTICA - IDIOMA (QUERY BILÍNGUE PT+EN):
+- A query do usuário está em PORTUGUÊS com termos técnicos em INGLÊS (code-switching)
+- Você DEVE manter os termos técnicos em INGLÊS (ex: "pulp production", "supply chain", "EBITDA")
+- Você DEVE expandir os termos em PORTUGUÊS quando apropriado
+- NÃO traduza termos técnicos em inglês para português ou espanhol
+- Exemplo: "mas e sobre pulp production na China?" → "produção de celulose na China, fabricação de celulose, indústria de celulose, mercado de celulose, produção de pulpa, capacidade de produção de celulose" (termos técnicos mantidos em inglês se necessário, mas expansão em português)
+- Exemplo: "oportunidades de ganho e ROI" → "oportunidades de ganho retorno lucro benefício maximização valor receita ROI retorno sobre investimento" (ROI mantido em inglês, expansão em português)
+"""
+        elif query_language == "en":
             language_instruction = """
 REGRA CRÍTICA - IDIOMA:
 - A query do usuário está em INGLÊS
@@ -718,12 +774,14 @@ Sua tarefa:
 REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
 - A query semântica DEVE ser EXPANDIDA, não apenas repetir a query original
 - Adicione sinônimos, termos relacionados, conceitos semânticos **NO MESMO IDIOMA DA QUERY ORIGINAL**
+- Para queries bilíngues PT+EN: mantenha termos técnicos em inglês, expanda em português
 - Exemplo (português): "oportunidades de ganho" → "oportunidades de ganho retorno lucro benefício maximização valor receita"
 - Exemplo (português): "revisão tarifária" → "revisão tarifária tarifa distribuidora energia elétrica ANEEL receita requerida"
+- Exemplo (português + inglês): "pulp production na China" → "produção de celulose na China, fabricação de celulose, indústria de celulose, mercado de celulose, produção de pulpa, capacidade de produção"
 - Exemplo (inglês): "which companies" → "which companies corporations firms businesses organizations enterprises"
 - Exemplo (inglês): "adding capacity" → "adding capacity expanding production increasing output building new facilities"
 - NUNCA retorne a query original sem expansão
-- NUNCA traduza a query para outro idioma
+- NUNCA traduza a query para outro idioma (exceto manter termos técnicos em inglês em queries PT+EN)
 
 IMPORTANTE:
 - Use propriedades do schema para filtros (entities_local_ids, section_entity_ids, chunk_lang, chunk_date, etc.)
