@@ -309,10 +309,22 @@ def patch_weaviate_manager():
                                                 msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
                                             except Exception as etl_error:
                                                 error_str = str(etl_error).lower()
-                                                if "closed" in error_str or "not connected" in error_str:
-                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução")
+                                                # Categoriza erros para logging apropriado
+                                                if "closed" in error_str or "not connected" in error_str or "disconnect" in error_str:
+                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou: cliente desconectado durante execução (não crítico)")
+                                                elif any(keyword in error_str for keyword in [
+                                                    "property", "schema", "field", "missing", "not found",
+                                                    "does not exist", "unknown property", "attributeerror"
+                                                ]):
+                                                    # Erros de schema/propriedades - são esperados e não críticos
+                                                    msg.info(f"[ETL] ⚠️ ETL A2 pulado: schema/propriedade não encontrada (não crítico)")
                                                 else:
-                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {str(etl_error)}")
+                                                    # Outros erros - logar mas não falhar
+                                                    import traceback
+                                                    msg.warn(f"[ETL] ⚠️ ETL A2 falhou (não crítico): {type(etl_error).__name__}: {str(etl_error)[:200]}")
+                                                    # Log traceback apenas para erros não esperados
+                                                    if "schema" not in error_str and "property" not in error_str:
+                                                        msg.warn(f"[ETL] Traceback: {traceback.format_exc()[:500]}")
                                             finally:
                                                 # Remove da lista de execuções em progresso
                                                 _etl_executions_in_progress.discard(doc_uuid)
@@ -334,11 +346,21 @@ def patch_weaviate_manager():
                     # Não falha o import se ETL der erro
                     import traceback
                     error_str = str(e).lower()
-                    if "closed" in error_str or "not connected" in error_str:
+                    # Categoriza erros para logging apropriado
+                    if "closed" in error_str or "not connected" in error_str or "disconnect" in error_str:
                         msg.warn("[ETL-POST] Cliente desconectado - ETL pós-chunking não executado (não crítico)")
+                    elif any(keyword in error_str for keyword in [
+                        "property", "schema", "field", "missing", "not found",
+                        "does not exist", "unknown property", "attributeerror"
+                    ]):
+                        # Erros de schema/propriedades - são esperados e não críticos
+                        msg.info("[ETL-POST] ETL A2 pulado: schema/propriedade não encontrada (não crítico)")
                     else:
-                        msg.warn(f"[ETL-POST] ETL A2 não executado (não crítico): {type(e).__name__}: {str(e)}")
-                        msg.warn(f"[ETL-POST] Traceback: {traceback.format_exc()}")
+                        # Outros erros - logar mas não falhar
+                        msg.warn(f"[ETL-POST] ETL A2 não executado (não crítico): {type(e).__name__}: {str(e)[:200]}")
+                        # Log traceback apenas para erros não esperados
+                        if "schema" not in error_str and "property" not in error_str:
+                            msg.warn(f"[ETL-POST] Traceback: {traceback.format_exc()[:500]}")
             else:
                 if not enable_etl:
                     msg.info(f"[ETL-POST] ETL pós-chunking não habilitado (enable_etl=False)")

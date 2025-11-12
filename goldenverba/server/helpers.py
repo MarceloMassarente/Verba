@@ -39,52 +39,47 @@ class LoggerManager:
         if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
             msg.info(f"{status} | {file_Id} | {message} | {took}")
         # Skip logging for intermediate statuses to reduce log spam
-        if self.socket is not None:
-            # Verifica se WebSocket está pronto antes de tentar enviar
-            if not self._is_websocket_ready():
-                # Only log disconnection for important statuses to avoid spam
+        
+        if self.socket is None:
+            return
+        
+        # Try to send even if WebSocket check fails - the actual send will handle errors
+        # This ensures progress updates are sent when possible
+        try:
+            payload: StatusReport = {
+                "fileID": file_Id,
+                "status": status,
+                "message": message,
+                "took": took,
+            }
+            # Attempt to send - don't pre-check, let the actual send handle errors
+            await self.socket.send_json(payload)
+        except (RuntimeError, ConnectionError, OSError) as e:
+            error_str = str(e).lower()
+            # WebSocket foi fechado pelo cliente - é normal em imports longos
+            # Client pode ter timeout (~30s) enquanto o servidor ainda está processando (pode ser >150s)
+            if any(keyword in error_str for keyword in [
+                "close message has been sent", 
+                "cannot call", 
+                "not connected", 
+                "need to call",
+                "websocket is not connected",
+                "connection closed",
+                "connection lost"
+            ]):
+                # Não logar como erro - é comportamento esperado em imports longos
+                # Apenas logar para status importantes para evitar spam
                 if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
-                    state_info = "unknown"
-                    try:
-                        state_info = str(self.socket.application_state)
-                    except:
-                        pass
-                    msg.info(f"[WEBSOCKET] WebSocket not ready (state: {state_info}) - skipping report: {message}")
-                return
-            
-            try:
-                payload: StatusReport = {
-                    "fileID": file_Id,
-                    "status": status,
-                    "message": message,
-                    "took": took,
-                }
-                await self.socket.send_json(payload)
-            except (RuntimeError, ConnectionError, OSError) as e:
-                error_str = str(e).lower()
-                # WebSocket foi fechado pelo cliente - é normal em imports longos
-                # Client pode ter timeout (~30s) enquanto o servidor ainda está processando (pode ser >150s)
-                if any(keyword in error_str for keyword in [
-                    "close message has been sent", 
-                    "cannot call", 
-                    "not connected", 
-                    "need to call",
-                    "websocket is not connected",
-                    "connection closed",
-                    "connection lost"
-                ]):
-                    # Não logar como erro - é comportamento esperado em imports longos
-                    if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
-                        msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
-                else:
-                    # Outros RuntimeErrors - logar como warning
-                    if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
-                        msg.warn(f"[WEBSOCKET] RuntimeError sending report: {type(e).__name__}: {str(e)}")
-            except Exception as e:
-                # Outros erros - log apenas para não quebrar o processamento
-                # Não logar como erro crítico - apenas como info para imports intermediários
+                    msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
+            else:
+                # Outros RuntimeErrors - logar como warning apenas para status importantes
                 if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
-                    msg.warn(f"[WEBSOCKET] Failed to send report to client: {type(e).__name__}: {str(e)}")
+                    msg.warn(f"[WEBSOCKET] RuntimeError sending report: {type(e).__name__}: {str(e)}")
+        except Exception as e:
+            # Outros erros - log apenas para não quebrar o processamento
+            # Não logar como erro crítico - apenas como info para imports intermediários
+            if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+                msg.warn(f"[WEBSOCKET] Failed to send report to client: {type(e).__name__}: {str(e)}")
 
     async def create_new_document(
         self, new_file_id: str, document_name: str, original_file_id: str

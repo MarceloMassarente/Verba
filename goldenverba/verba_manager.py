@@ -110,6 +110,34 @@ class VerbaManager:
     async def import_document(
         self, client, fileConfig: FileConfig, logger: LoggerManager = LoggerManager()
     ):
+        # Validate fileConfig before proceeding
+        if fileConfig is None:
+            msg.fail("[IMPORT] ❌ fileConfig is None - cannot proceed with import")
+            try:
+                await logger.send_report(
+                    "unknown",
+                    status=FileStatus.ERROR,
+                    message="Import failed: fileConfig is None",
+                    took=0,
+                )
+            except Exception:
+                pass
+            return
+        
+        if not hasattr(fileConfig, 'fileID') or not hasattr(fileConfig, 'filename'):
+            msg.fail(f"[IMPORT] ❌ Invalid fileConfig: missing fileID or filename attributes")
+            try:
+                file_id = getattr(fileConfig, 'fileID', 'unknown')
+                await logger.send_report(
+                    file_id,
+                    status=FileStatus.ERROR,
+                    message="Import failed: Invalid fileConfig (missing attributes)",
+                    took=0,
+                )
+            except Exception:
+                pass
+            return
+        
         try:
             loop = asyncio.get_running_loop()
             start_time = loop.time()
@@ -212,6 +240,34 @@ class VerbaManager:
         fileConfig: FileConfig,
         logger: LoggerManager,
     ):
+        # Validate fileConfig before proceeding
+        if fileConfig is None:
+            msg.fail("[PROCESS] ❌ fileConfig is None - cannot process document")
+            try:
+                await logger.send_report(
+                    "unknown",
+                    status=FileStatus.ERROR,
+                    message="Processing failed: fileConfig is None",
+                    took=0,
+                )
+            except Exception:
+                pass
+            raise Exception("fileConfig is None - cannot process document")
+        
+        if not hasattr(fileConfig, 'fileID') or not hasattr(fileConfig, 'filename'):
+            msg.fail(f"[PROCESS] ❌ Invalid fileConfig: missing fileID or filename attributes")
+            try:
+                file_id = getattr(fileConfig, 'fileID', 'unknown')
+                await logger.send_report(
+                    file_id,
+                    status=FileStatus.ERROR,
+                    message="Processing failed: Invalid fileConfig (missing attributes)",
+                    took=0,
+                )
+            except Exception:
+                pass
+            raise Exception("Invalid fileConfig - missing required attributes")
+        
         loop = asyncio.get_running_loop()
         start_time = loop.time()
 

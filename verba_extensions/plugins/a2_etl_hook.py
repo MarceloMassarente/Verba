@@ -235,6 +235,33 @@ async def run_etl_on_passages(
             msg.warn(f"Erro ao buscar passages para ETL: {str(e)}")
             return {"patched": 0, "error": str(e)}
         
+        # Verifica schema UMA VEZ no início para garantir que tem propriedades ETL
+        # Collections criadas pelo Verba agora sempre têm schema ETL-aware completo
+        existing_prop_names = set()
+        try:
+            collection_config = await coll.config.get()
+            existing_prop_names = {p.name for p in collection_config.properties}
+            msg.info(f"[ETL] Schema verificado: {len(existing_prop_names)} propriedades encontradas")
+            
+            # Verifica se tem propriedades ETL (para collections antigas que podem não ter)
+            etl_prop_names = {
+                "entities_local_ids", "section_entity_ids", "section_scope_confidence",
+                "primary_entity_id", "entity_focus_score", "etl_version"
+            }
+            has_etl_props = any(prop in existing_prop_names for prop in etl_prop_names)
+            
+            if not has_etl_props:
+                msg.warn(f"[ETL] ⚠️ Collection não tem propriedades ETL no schema (collection antiga)")
+                msg.warn(f"[ETL] 💡 Delete e recrie a collection para ter schema ETL-aware completo")
+                msg.warn(f"[ETL] 📝 ETL não será executado (chunks serão importados normalmente)")
+                msg.warn(f"[ETL] 💡 Collections novas são criadas automaticamente com schema ETL-aware")
+                return {"patched": 0, "total": len(passage_uuids), "error": "Schema não tem propriedades ETL (collection antiga)"}
+        except Exception as schema_error:
+            # Se não conseguir obter schema, assume que nenhuma propriedade existe
+            msg.warn(f"[ETL] ⚠️ Não foi possível verificar schema da collection: {str(schema_error)[:100]}")
+            msg.warn(f"[ETL] 💡 ETL não será executado - verifique se a collection existe e está acessível")
+            return {"patched": 0, "total": len(passage_uuids), "error": f"Erro ao verificar schema: {str(schema_error)[:100]}"}
+        
         for uid_str in passage_uuids:
             # Tenta encontrar objeto
             obj = None
@@ -249,11 +276,35 @@ async def run_etl_on_passages(
             try:
                 p = obj.properties
                 # Safely access properties that may not exist in the schema
-                # Use .get() with default values to avoid errors
-                text = p.get("text") or p.get("chunk_text") or ""
-                sect_title = p.get("section_title") or ""
-                first_para = p.get("section_first_para") or ""
-                parent_ents = p.get("parent_entities") or []
+                # Handle both dict-like and object-like properties
+                def safe_get(prop_name, default=""):
+                    """Safely get property value, handling both dict and object access"""
+                    try:
+                        if isinstance(p, dict):
+                            return p.get(prop_name, default)
+                        else:
+                            # Object with attributes - use getattr with default
+                            return getattr(p, prop_name, default)
+                    except (AttributeError, KeyError, TypeError):
+                        return default
+                
+                # Safely access properties
+                text = safe_get("text") or safe_get("chunk_text") or ""
+                sect_title = safe_get("section_title") or ""
+                first_para = safe_get("section_first_para") or ""
+                parent_ents = safe_get("parent_entities") or []
+                
+                # Handle case where parent_ents might be a string or other type
+                if not isinstance(parent_ents, list):
+                    if isinstance(parent_ents, str):
+                        # Try to parse as JSON if it's a string
+                        try:
+                            import json
+                            parent_ents = json.loads(parent_ents) if parent_ents else []
+                        except (json.JSONDecodeError, TypeError):
+                            parent_ents = []
+                    else:
+                        parent_ents = []
                 
                 # If text is empty, skip this chunk (no content to process)
                 if not text:
@@ -281,8 +332,9 @@ async def run_etl_on_passages(
                 primary = local_ids[0] if local_ids else (sect_ids[0] if sect_ids else None)
                 focus = 1.0 if primary and primary in local_ids else (0.7 if primary else 0.0)
                 
-                # Patch
-                props = {
+                # Constrói props apenas com propriedades que existem no schema (já verificamos acima)
+                props = {}
+                etl_properties = {
                     "entities_local_ids": local_ids,
                     "section_entity_ids": sect_ids,
                     "section_scope_confidence": scope_conf,
@@ -290,6 +342,17 @@ async def run_etl_on_passages(
                     "entity_focus_score": focus,
                     "etl_version": "entity_scope_v1"
                 }
+                
+                # Adiciona apenas propriedades que existem no schema
+                for prop_name, prop_value in etl_properties.items():
+                    if prop_name in existing_prop_names:
+                        props[prop_name] = prop_value
+                    # Se propriedade não existe, simplesmente não adiciona (não é erro)
+                
+                # Se não há propriedades para atualizar, pula este chunk
+                if not props:
+                    # Isso não deveria acontecer se verificamos acima, mas é uma segurança extra
+                    continue
                 
                 update_kwargs = {"uuid": obj.uuid, "properties": props}
                 if tenant:
@@ -302,21 +365,19 @@ async def run_etl_on_passages(
                         msg.info(f"[ETL] Progresso: {changed}/{len(passage_uuids)} chunks atualizados...")
                 except Exception as update_error:
                     error_str = str(update_error).lower()
-                    # Silently handle missing properties or schema mismatches
-                    # These are expected if schema hasn't been updated yet
-                    if any(keyword in error_str for keyword in [
-                        "property", "schema", "field", "missing", "not found",
-                        "does not exist", "unknown property"
-                    ]):
-                        # Schema mismatch - silently skip (not an error)
-                        continue
-                    # Log other errors but continue processing
+                    # Log erros reais (não de schema, pois já filtramos)
                     if changed % 100 == 0:  # Only log periodically to avoid spam
-                        msg.warn(f"[ETL] Erro ao atualizar chunk (pode ser schema mismatch): {str(update_error)[:100]}")
+                        msg.warn(f"[ETL] Erro ao atualizar chunk: {type(update_error).__name__}: {str(update_error)[:100]}")
                     # Continua mesmo se falhar
                 
             except Exception as e:
-                msg.warn(f"Erro ao processar passage {uid_str}: {str(e)}")
+                error_str = str(e).lower()
+                # Only log non-schema errors to avoid spam
+                if not any(keyword in error_str for keyword in [
+                    "property", "schema", "field", "missing", "not found",
+                    "does not exist", "unknown property", "attributeerror"
+                ]):
+                    msg.warn(f"[ETL] Erro ao processar passage {uid_str[:20]}...: {type(e).__name__}: {str(e)[:100]}")
                 continue
         
         if changed > 0:

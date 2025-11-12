@@ -145,14 +145,24 @@ const IngestionView: React.FC<IngestionViewProps> = ({
   };
 
   const updateStatus = (data: StatusReport) => {
+    console.log("[UPDATE-STATUS] Received status update:", data);
+    
     if (data.status === "DONE") {
       addStatusMessage("File " + data.fileID + " imported", "SUCCESS");
     }
     if (data.status === "ERROR") {
       addStatusMessage("File " + data.fileID + " import failed", "ERROR");
     }
+    
     setFileMap((prevFileMap) => {
-      if (data && data.fileID in prevFileMap) {
+      if (!data || !data.fileID) {
+        console.warn("[UPDATE-STATUS] Invalid data or missing fileID:", data);
+        return prevFileMap;
+      }
+      
+      // Try exact match first
+      if (data.fileID in prevFileMap) {
+        console.log("[UPDATE-STATUS] Found exact match for fileID:", data.fileID);
         const newFileData: FileData = JSON.parse(
           JSON.stringify(prevFileMap[data.fileID])
         );
@@ -160,8 +170,29 @@ const IngestionView: React.FC<IngestionViewProps> = ({
         newFileData.status = data.status;
         newFileData.status_report[data.status] = data;
         newFileMap[data.fileID] = newFileData;
+        console.log("[UPDATE-STATUS] Updated status to:", data.status);
         return newFileMap;
       }
+      
+      // Try to find by partial match (in case fileID was modified)
+      const matchingKey = Object.keys(prevFileMap).find(key => 
+        key.startsWith(data.fileID) || data.fileID.startsWith(key)
+      );
+      
+      if (matchingKey) {
+        console.log("[UPDATE-STATUS] Found partial match:", matchingKey, "for", data.fileID);
+        const newFileData: FileData = JSON.parse(
+          JSON.stringify(prevFileMap[matchingKey])
+        );
+        const newFileMap: FileMap = { ...prevFileMap };
+        newFileData.status = data.status;
+        newFileData.status_report[data.status] = data;
+        newFileMap[matchingKey] = newFileData;
+        console.log("[UPDATE-STATUS] Updated status to:", data.status);
+        return newFileMap;
+      }
+      
+      console.warn("[UPDATE-STATUS] FileID not found in fileMap:", data.fileID, "Available keys:", Object.keys(prevFileMap));
       return prevFileMap;
     });
   };

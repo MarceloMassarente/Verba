@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
 import asyncio
+import copy
 import warnings
 
 # Suppress websockets deprecation warnings from uvicorn
@@ -395,11 +396,21 @@ async def websocket_import_files(websocket: WebSocket):
                     msg.warn(f"[WEBSOCKET] ⚠️ Last chunk order ({batch_data.order + 1}) doesn't match total ({batch_data.total})")
             
             if fileConfig is not None:
-                msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import for: {fileConfig.filename[:50]}...")
+                # CRITICAL: Create a local copy of fileConfig to prevent race conditions
+                # when multiple files are processed simultaneously. Each async task needs
+                # its own copy to avoid None reference errors.
+                local_fileConfig = copy.deepcopy(fileConfig)
+                
+                # Validate fileConfig before proceeding
+                if local_fileConfig is None or not hasattr(local_fileConfig, 'fileID') or not hasattr(local_fileConfig, 'filename'):
+                    msg.fail(f"[WEBSOCKET] ❌ Invalid fileConfig received: {type(local_fileConfig)}")
+                    continue
+                
+                msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import for: {local_fileConfig.filename[:50]}...")
                 # Send STARTING status immediately to update frontend
                 try:
                     await logger.send_report(
-                        fileConfig.fileID,
+                        local_fileConfig.fileID,
                         status=FileStatus.STARTING,
                         message="Starting import...",
                         took=0,
@@ -420,19 +431,27 @@ async def websocket_import_files(websocket: WebSocket):
                         raise Exception("Failed to reconnect to Weaviate")
                 
                 # Task de keep-alive para manter WebSocket vivo durante import longo
+                # Use local_fileConfig to avoid race conditions
                 async def keep_alive_task():
                     """Envia pings periódicos para manter WebSocket conectado"""
                     try:
+                        update_count = 0
+                        # Use local_fileConfig from outer scope (captured by closure)
+                        current_fileConfig = local_fileConfig
                         while True:
-                            await asyncio.sleep(30)  # Ping a cada 30 segundos
+                            await asyncio.sleep(5)  # Atualiza a cada 5 segundos (mais frequente)
                             if websocket.application_state != WebSocketState.CONNECTED:
                                 break
                             try:
-                                # Envia status de progresso para manter conexão viva
+                                # Validate fileConfig before using
+                                if current_fileConfig is None or not hasattr(current_fileConfig, 'fileID'):
+                                    break
+                                update_count += 1
+                                # Envia status de progresso para manter conexão viva e mostrar progresso
                                 await logger.send_report(
-                                    fileConfig.fileID,
+                                    current_fileConfig.fileID,
                                     status=FileStatus.INGESTING,
-                                    message="Processando...",
+                                    message=f"Processando... ({update_count * 5}s)",
                                     took=0,
                                 )
                             except Exception:
@@ -448,17 +467,33 @@ async def websocket_import_files(websocket: WebSocket):
                 
                 # Start import task in background - DON'T await it, let it run while we continue receiving batches
                 # This allows multiple files to be imported sequentially
+                # Use local_fileConfig to avoid race conditions
                 async def import_with_cleanup():
                     """Wrapper para import com cleanup do keep-alive"""
+                    # Use local_fileConfig from outer scope (captured by closure)
+                    current_fileConfig = local_fileConfig
                     try:
-                        await manager.import_document(client, fileConfig, logger)
-                        msg.info(f"[IMPORT] ✅ Import completed: {fileConfig.filename[:50]}...")
+                        # Validate fileConfig before using
+                        if current_fileConfig is None or not hasattr(current_fileConfig, 'fileID') or not hasattr(current_fileConfig, 'filename'):
+                            msg.fail(f"[IMPORT] ❌ Invalid fileConfig in import_with_cleanup: {type(current_fileConfig)}")
+                            return
+                        
+                        await manager.import_document(client, current_fileConfig, logger)
+                        msg.info(f"[IMPORT] ✅ Import completed: {current_fileConfig.filename[:50]}...")
                     except Exception as e:
-                        msg.fail(f"[IMPORT] ❌ Import failed for {fileConfig.filename[:50]}...: {type(e).__name__}: {str(e)}")
+                        # Validate fileConfig before using in error handling
+                        file_id = "unknown"
+                        filename = "unknown"
+                        if current_fileConfig is not None and hasattr(current_fileConfig, 'fileID'):
+                            file_id = current_fileConfig.fileID
+                        if current_fileConfig is not None and hasattr(current_fileConfig, 'filename'):
+                            filename = current_fileConfig.filename[:50] if len(current_fileConfig.filename) > 50 else current_fileConfig.filename
+                        
+                        msg.fail(f"[IMPORT] ❌ Import failed for {filename}...: {type(e).__name__}: {str(e)}")
                         # Try to send error report to client if WebSocket is still open
                         try:
                             await logger.send_report(
-                                fileConfig.fileID,
+                                file_id,
                                 status=FileStatus.ERROR,
                                 message=f"Import failed: {str(e)}",
                                 took=0,

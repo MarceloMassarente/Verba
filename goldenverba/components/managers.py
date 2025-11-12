@@ -602,11 +602,47 @@ class WeaviateManager:
             msg.info(
                 f"Collection: {collection_name} does not exist, creating new collection."
             )
-            returned_collection = await client.collections.create(name=collection_name)
-            if returned_collection:
-                return True
+            
+            # Se é uma collection de embedding, cria com schema ETL-aware completo
+            if "VERBA_Embedding" in collection_name:
+                try:
+                    # Tenta importar schema updater para criar com propriedades ETL
+                    from verba_extensions.integration.schema_updater import get_all_embedding_properties
+                    all_properties = get_all_embedding_properties()
+                    msg.info(f"🔧 Criando collection {collection_name} com schema ETL-aware completo ({len(all_properties)} propriedades)")
+                    returned_collection = await client.collections.create(
+                        name=collection_name,
+                        properties=all_properties
+                    )
+                    if returned_collection:
+                        msg.good(f"✅ Collection {collection_name} criada com schema ETL-aware completo!")
+                        return True
+                    else:
+                        return False
+                except ImportError:
+                    # Se schema updater não estiver disponível, cria collection padrão
+                    msg.warn(f"⚠️ Schema updater não disponível - criando collection padrão (sem propriedades ETL)")
+                    returned_collection = await client.collections.create(name=collection_name)
+                    if returned_collection:
+                        return True
+                    else:
+                        return False
+                except Exception as e:
+                    # Se falhar, tenta criar collection padrão como fallback
+                    msg.warn(f"⚠️ Erro ao criar collection com schema ETL-aware: {str(e)}")
+                    msg.warn(f"   💡 Tentando criar collection padrão como fallback...")
+                    returned_collection = await client.collections.create(name=collection_name)
+                    if returned_collection:
+                        return True
+                    else:
+                        return False
             else:
-                return False
+                # Para collections não-embedding, cria normalmente
+                returned_collection = await client.collections.create(name=collection_name)
+                if returned_collection:
+                    return True
+                else:
+                    return False
         else:
             return True
 
@@ -1646,22 +1682,34 @@ class EmbeddingManager:
                 """Send periodic progress updates during vectorization"""
                 total = len(batches)
                 last_reported = 0
+                update_interval = 1.0  # Send update every 1 second (mais frequente)
                 while completed_count["count"] < total:
-                    await asyncio.sleep(2)  # Send update every 2 seconds
+                    await asyncio.sleep(update_interval)
                     current = completed_count["count"]
-                    if current > last_reported and logger and file_id:
+                    # Send update if progress changed OR every 3 seconds to keep connection alive
+                    if (current > last_reported or (current == last_reported and current < total)) and logger and file_id:
                         progress = round((current / total) * 100, 1) if total > 0 else 0
                         try:
                             await logger.send_report(
                                 file_id,
                                 FileStatus.EMBEDDING,
-                                f"Vectorizing: {current}/{total} batches completed ({progress}%)",
+                                f"Vectorizing: {current}/{total} batches ({progress}%)",
                                 took=0,
                             )
-                            last_reported = current
+                            if current > last_reported:
+                                last_reported = current
                         except Exception as e:
                             # Log but don't fail if WebSocket is closed
-                            msg.warn(f"[BATCH_VECTORIZE] Failed to send progress update: {str(e)}")
+                            # Only log if it's a real error (not just disconnection)
+                            error_str = str(e).lower()
+                            if not any(keyword in error_str for keyword in [
+                                "close message has been sent", 
+                                "cannot call", 
+                                "not connected", 
+                                "websocket is not connected",
+                                "connection closed"
+                            ]):
+                                msg.warn(f"[BATCH_VECTORIZE] Failed to send progress update: {str(e)}")
             
             # Start progress monitoring (will run until all tasks complete)
             progress_task = asyncio.create_task(send_progress_updates())
