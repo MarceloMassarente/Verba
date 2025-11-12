@@ -688,9 +688,24 @@ class WeaviateManager:
     async def verify_embedding_collection(self, client: WeaviateAsyncClient, embedder):
         if embedder not in self.embedding_table:
             normalized = self._normalize_embedder_name(embedder)
-            self.embedding_table[embedder] = "VERBA_Embedding_" + normalized
-            return await self.verify_collection(client, self.embedding_table[embedder])
+            collection_name = "VERBA_Embedding_" + normalized
+            
+            # Validação: garante que nome da collection é válido
+            if not collection_name or "http://" in collection_name or "https://" in collection_name:
+                msg.warn(f"⚠️ Invalid collection name gerado: {collection_name}, usando fallback")
+                collection_name = "VERBA_Embedding_default"
+            
+            self.embedding_table[embedder] = collection_name
+            return await self.verify_collection(client, collection_name)
         else:
+            # Validação extra: verifica se collection_name ainda é válida
+            collection_name = self.embedding_table[embedder]
+            if not collection_name or "http://" in collection_name:
+                msg.warn(f"⚠️ Corrupção detectada em embedding_table para '{embedder}': {collection_name}")
+                normalized = self._normalize_embedder_name(embedder)
+                collection_name = "VERBA_Embedding_" + normalized
+                self.embedding_table[embedder] = collection_name
+            
             return True
 
     async def verify_cache_collection(self, client: WeaviateAsyncClient, embedder):

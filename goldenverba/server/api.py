@@ -61,6 +61,15 @@ from goldenverba.server.types import (
 
 load_dotenv()
 
+# ============================================================================
+# SEMÁFORO PARA CONTROLAR IMPORTS SEQUENCIAIS
+# ============================================================================
+# Limita a 1 import por vez para evitar race conditions quando múltiplos
+# arquivos são enviados em rápida sequência
+_import_semaphore = asyncio.Semaphore(1)
+
+# ============================================================================
+
 # Carrega extensões ANTES de criar managers
 # Isso garante que plugins apareçam na lista de componentes
 try:
@@ -407,12 +416,18 @@ async def websocket_import_files(websocket: WebSocket):
                     continue
                 
                 msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import for: {local_fileConfig.filename[:50]}...")
+                
+                # Log file size information for debugging
+                file_size_mb = (local_fileConfig.file_size / (1024 * 1024)) if hasattr(local_fileConfig, 'file_size') and local_fileConfig.file_size else 0
+                msg.info(f"[IMPORT] File size: {file_size_mb:.1f}MB ({local_fileConfig.file_size} bytes)")
+                msg.info(f"[IMPORT] Estimated processing time: {max(60, file_size_mb * 60)}s (~{max(1, file_size_mb)}m)")
+                
                 # Send STARTING status immediately to update frontend
                 try:
                     await logger.send_report(
                         local_fileConfig.fileID,
                         status=FileStatus.STARTING,
-                        message="Starting import...",
+                        message=f"Starting import ({file_size_mb:.1f}MB)...",
                         took=0,
                     )
                 except Exception as e:
@@ -438,29 +453,53 @@ async def websocket_import_files(websocket: WebSocket):
                         update_count = 0
                         # Use local_fileConfig from outer scope (captured by closure)
                         current_fileConfig = local_fileConfig
+                        
+                        # Calcular intervalo de keep-alive baseado no tamanho do arquivo
+                        # Arquivos grandes precisam de mais frequência para evitar timeout
+                        file_size_mb = (current_fileConfig.file_size / (1024 * 1024)) if hasattr(current_fileConfig, 'file_size') and current_fileConfig.file_size else 0
+                        
+                        if file_size_mb > 5:
+                            keep_alive_interval = 1  # 1 segundo para arquivos > 5MB
+                            msg.info(f"[KEEP-ALIVE] Arquivo grande ({file_size_mb:.1f}MB) - usando intervalo de 1s")
+                        elif file_size_mb > 1:
+                            keep_alive_interval = 2  # 2 segundos para arquivos > 1MB
+                            msg.info(f"[KEEP-ALIVE] Arquivo médio ({file_size_mb:.1f}MB) - usando intervalo de 2s")
+                        else:
+                            keep_alive_interval = 5  # 5 segundos padrão
+                            msg.info(f"[KEEP-ALIVE] Arquivo pequeno ({file_size_mb:.1f}MB) - usando intervalo padrão de 5s")
+                        
+                        # Estimativa de tempo total de processamento
+                        # Baseado em benchmarks: ~100KB por segundo em média
+                        estimated_seconds = max(60, file_size_mb * 60)  # Mínimo 60s
+                        msg.info(f"[KEEP-ALIVE] Tempo estimado: {estimated_seconds}s ({estimated_seconds/60:.1f} minutos)")
+                        
                         while True:
-                            await asyncio.sleep(5)  # Atualiza a cada 5 segundos (mais frequente)
+                            await asyncio.sleep(keep_alive_interval)
                             if websocket.application_state != WebSocketState.CONNECTED:
+                                msg.warn(f"[KEEP-ALIVE] WebSocket desconectado")
                                 break
                             try:
                                 # Validate fileConfig before using
                                 if current_fileConfig is None or not hasattr(current_fileConfig, 'fileID'):
                                     break
                                 update_count += 1
+                                elapsed_time = update_count * keep_alive_interval
+                                
                                 # Envia status de progresso para manter conexão viva e mostrar progresso
                                 await logger.send_report(
                                     current_fileConfig.fileID,
                                     status=FileStatus.INGESTING,
-                                    message=f"Processando... ({update_count * 5}s)",
+                                    message=f"Processing ({elapsed_time}s / ~{estimated_seconds}s) - {file_size_mb:.1f}MB",
                                     took=0,
                                 )
-                            except Exception:
-                                # Se falhar, para o keep-alive
+                            except Exception as e:
+                                # Se falhar, para o keep-alive mas não quebra o import
+                                msg.warn(f"[KEEP-ALIVE] Erro ao enviar keep-alive: {str(e)[:100]}")
                                 break
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
-                        pass  # Silently handle keep-alive errors
+                        msg.warn(f"[KEEP-ALIVE] Erro na task: {str(e)[:100]}")  # Silently handle keep-alive errors
                 
                 # Cria task de keep-alive
                 keep_alive = asyncio.create_task(keep_alive_task())
@@ -470,43 +509,67 @@ async def websocket_import_files(websocket: WebSocket):
                 # Use local_fileConfig to avoid race conditions
                 async def import_with_cleanup():
                     """Wrapper para import com cleanup do keep-alive"""
+                    import time
                     # Use local_fileConfig from outer scope (captured by closure)
                     current_fileConfig = local_fileConfig
-                    try:
-                        # Validate fileConfig before using
-                        if current_fileConfig is None or not hasattr(current_fileConfig, 'fileID') or not hasattr(current_fileConfig, 'filename'):
-                            msg.fail(f"[IMPORT] ❌ Invalid fileConfig in import_with_cleanup: {type(current_fileConfig)}")
-                            return
+                    
+                    # SEMÁFORO: Aguarda que não haja outro import em progresso
+                    # Isso evita race conditions quando múltiplos arquivos são enviados rapidamente
+                    msg.info(f"[IMPORT] ⏳ Aguardando vez na fila (semáforo)... {current_fileConfig.filename[:50]}...")
+                    async with _import_semaphore:
+                        msg.info(f"[IMPORT] ✓ Adquiriu semáforo, iniciando import: {current_fileConfig.filename[:50]}...")
                         
-                        await manager.import_document(client, current_fileConfig, logger)
-                        msg.info(f"[IMPORT] ✅ Import completed: {current_fileConfig.filename[:50]}...")
-                    except Exception as e:
-                        # Validate fileConfig before using in error handling
-                        file_id = "unknown"
-                        filename = "unknown"
-                        if current_fileConfig is not None and hasattr(current_fileConfig, 'fileID'):
-                            file_id = current_fileConfig.fileID
-                        if current_fileConfig is not None and hasattr(current_fileConfig, 'filename'):
-                            filename = current_fileConfig.filename[:50] if len(current_fileConfig.filename) > 50 else current_fileConfig.filename
+                        start_time = time.time()
+                        try:
+                            # Validate fileConfig before using
+                            if current_fileConfig is None or not hasattr(current_fileConfig, 'fileID') or not hasattr(current_fileConfig, 'filename'):
+                                msg.fail(f"[IMPORT] ❌ Invalid fileConfig in import_with_cleanup: {type(current_fileConfig)}")
+                                return
+                            
+                            msg.info(f"[IMPORT] 🚀 Starting import: {current_fileConfig.filename[:50]}...")
+                            await manager.import_document(client, current_fileConfig, logger)
                         
-                        msg.fail(f"[IMPORT] ❌ Import failed for {filename}...: {type(e).__name__}: {str(e)}")
-                        # Try to send error report to client if WebSocket is still open
-                        try:
-                            await logger.send_report(
-                                file_id,
-                                status=FileStatus.ERROR,
-                                message=f"Import failed: {str(e)}",
-                                took=0,
-                            )
-                        except Exception:
-                            pass  # WebSocket may be closed, ignore
-                    finally:
-                        # Cancela keep-alive após import concluir
-                        keep_alive.cancel()
-                        try:
-                            await keep_alive
-                        except asyncio.CancelledError:
-                            pass
+                            elapsed_time = time.time() - start_time
+                            msg.info(f"[IMPORT] ✅ Import completed: {current_fileConfig.filename[:50]}... (took {elapsed_time:.1f}s)")
+                            
+                            # Send completion status with timing info
+                            try:
+                                await logger.send_report(
+                                    current_fileConfig.fileID,
+                                    status=FileStatus.DONE,
+                                    message=f"Import completed ({elapsed_time:.1f}s)",
+                                    took=elapsed_time,
+                                )
+                            except Exception:
+                                pass
+                        except Exception as e:
+                            elapsed_time = time.time() - start_time
+                            # Validate fileConfig before using in error handling
+                            file_id = "unknown"
+                            filename = "unknown"
+                            if current_fileConfig is not None and hasattr(current_fileConfig, 'fileID'):
+                                file_id = current_fileConfig.fileID
+                            if current_fileConfig is not None and hasattr(current_fileConfig, 'filename'):
+                                filename = current_fileConfig.filename[:50] if len(current_fileConfig.filename) > 50 else current_fileConfig.filename
+                            
+                            msg.fail(f"[IMPORT] ❌ Import failed for {filename}... ({elapsed_time:.1f}s): {type(e).__name__}: {str(e)[:200]}")
+                            # Try to send error report to client if WebSocket is still open
+                            try:
+                                await logger.send_report(
+                                    file_id,
+                                    status=FileStatus.ERROR,
+                                    message=f"Import failed: {str(e)[:200]}",
+                                    took=elapsed_time,
+                                )
+                            except Exception:
+                                pass  # WebSocket may be closed, ignore
+                        finally:
+                            # Cancela keep-alive após import concluir
+                            keep_alive.cancel()
+                            try:
+                                await keep_alive
+                            except asyncio.CancelledError:
+                                pass
                 
                 # Start import in background - continue loop to receive more batches
                 asyncio.create_task(import_with_cleanup())

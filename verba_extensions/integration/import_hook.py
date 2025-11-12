@@ -20,6 +20,17 @@ _etl_executions_in_progress: Set[str] = set()
 # Store logger per doc_uuid for ETL completion notifications
 _logger_registry: Dict[str, any] = {}  # doc_uuid -> LoggerManager
 
+def cleanup_etl_state(doc_uuid: str):
+    """
+    Limpa estado global de ETL para garantir que próximos imports não sejam afetados.
+    Chamado no finally block para garantir execução mesmo com exceção.
+    """
+    try:
+        _etl_executions_in_progress.discard(doc_uuid)
+        _logger_registry.pop(doc_uuid, None)
+    except Exception:
+        pass  # Silently ignore cleanup errors
+
 def patch_weaviate_manager():
     """
     Aplica patch no WeaviateManager.import_document para capturar passage_uuids
@@ -38,6 +49,22 @@ def patch_weaviate_manager():
             embedder: str,
         ):
             """Importa documento e captura passage_uuids para ETL"""
+            # VERIFICAÇÃO DE SAÚDE: Garante que cliente está pronto
+            try:
+                if not await client.is_ready():
+                    msg.warn("[ETL-HEALTH] ⚠️ Cliente não está pronto para import - tentando reconectar")
+                    if hasattr(client, 'connect'):
+                        try:
+                            await client.connect()
+                            if await client.is_ready():
+                                msg.good("[ETL-HEALTH] ✅ Reconexão bem-sucedida")
+                            else:
+                                msg.warn("[ETL-HEALTH] ⚠️ Cliente reconectado mas ainda não ready")
+                        except Exception as e:
+                            msg.warn(f"[ETL-HEALTH] ⚠️ Erro ao reconectar: {str(e)[:100]}")
+            except Exception as e:
+                msg.warn(f"[ETL-HEALTH] ⚠️ Erro ao verificar saúde do cliente: {str(e)[:100]}")
+            
             # Verifica se ETL está habilitado ANTES de importar
             # Padrão: True (ETL sempre ativo por padrão, a menos que explicitamente desabilitado)
             enable_etl = document.meta.get("enable_etl", True) if hasattr(document, 'meta') and document.meta else True
@@ -282,9 +309,8 @@ def patch_weaviate_manager():
                                             if not hook_client:
                                                 msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
                                                 msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
-                                                # Limpa logger do registry
-                                                if doc_uuid in _logger_registry:
-                                                    del _logger_registry[doc_uuid]
+                                                # Limpa estado do ETL
+                                                cleanup_etl_state(doc_uuid)
                                                 return
                                             
                                             msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
@@ -323,10 +349,8 @@ def patch_weaviate_manager():
                                                         msg.warn(f"[ETL] Traceback: {traceback.format_exc()[:500]}")
                                             finally:
                                                 # Remove da lista de execuções em progresso
-                                                _etl_executions_in_progress.discard(doc_uuid)
-                                                # Limpa logger do registry após uso
-                                                if doc_uuid in _logger_registry:
-                                                    del _logger_registry[doc_uuid]
+                                                # Usa cleanup_etl_state para garantir limpeza completa
+                                                cleanup_etl_state(doc_uuid)
                                         
                                         asyncio.create_task(run_etl_hook())
                                     else:
