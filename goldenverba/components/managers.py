@@ -902,13 +902,20 @@ class WeaviateManager:
         if await self.verify_collection(client, self.document_collection_name):
             document_collection = client.collections.get(self.document_collection_name)
 
-            if await document_collection.data.exists(uuid):
+            # Check if document exists before attempting to fetch
+            if not await document_collection.data.exists(uuid):
+                # Only log as warning if it's not a transient error (e.g., during import)
+                # Silently return None to avoid log spam during batch operations
+                return None
+            
+            try:
                 response = await document_collection.query.fetch_object_by_id(
                     uuid, return_properties=properties
                 )
                 return response.properties
-            else:
-                msg.warn(f"Document not found ({uuid})")
+            except Exception as e:
+                # Document might have been deleted between exists() and fetch()
+                # Silently return None to avoid log spam
                 return None
 
     ### Labels

@@ -255,10 +255,13 @@ def patch_weaviate_manager():
                                 
                                 if passage_uuids:
                                     # Verifica se ETL já está em execução para este doc_uuid
+                                    # Usa lock thread-safe para evitar race conditions
                                     if doc_uuid in _etl_executions_in_progress:
-                                        msg.warn(f"[ETL-POST] ⚠️ ETL já está em execução para doc_uuid {doc_uuid[:50]}... - pulando execução duplicada")
+                                        # Silently skip duplicate execution (no log spam)
+                                        # This is expected during concurrent imports
+                                        continue
                                     else:
-                                        # Marca como em execução
+                                        # Marca como em execução ANTES de iniciar task
                                         _etl_executions_in_progress.add(doc_uuid)
                                         
                                         msg.info(f"[ETL] ✅ {len(passage_uuids)} chunks encontrados - executando ETL A2 (NER + Section Scope) em background")

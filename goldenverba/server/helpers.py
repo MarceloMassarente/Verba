@@ -134,10 +134,11 @@ class BatchManager:
 
     def add_batch(self, payload: DataBatchPayload) -> FileConfig:
         try:
-            # Log only first batch, every 100 batches, or last batch to reduce log spam
+            # Drastically reduce logging to avoid Railway rate limit (500 logs/sec)
+            # Only log first batch, every 500 batches, or last batch
             should_log = (
                 payload.order == 0 or 
-                payload.order % 100 == 0 or 
+                payload.order % 500 == 0 or 
                 payload.isLastChunk or 
                 payload.order == payload.total - 1
             )
@@ -213,8 +214,9 @@ class BatchManager:
                 msg.fail(f"[BATCH] Traceback: {traceback.format_exc()}")
                 raise
         else:
-            # Log periodicamente se ainda está esperando (reduzido para evitar spam)
-            if received % 200 == 0 or received == total - 1:
+            # Log periodicamente se ainda está esperando (reduzido drasticamente para evitar rate limit)
+            # Apenas a cada 1000 chunks ou no último chunk
+            if received % 1000 == 0 or received == total - 1:
                 missing = total - received
                 msg.info(f"[BATCH] Still waiting: {received}/{total} chunks received ({missing} missing)")
             return None

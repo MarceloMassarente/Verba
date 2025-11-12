@@ -371,11 +371,12 @@ async def websocket_import_files(websocket: WebSocket):
                 break
             
             data = await websocket.receive_text()
-            # Only log first chunk and every 100th chunk to reduce log spam
+            # Drastically reduce logging to avoid Railway rate limit (500 logs/sec)
+            # Only log first chunk, every 500th chunk, or last chunk
             try:
                 batch_data = DataBatchPayload.model_validate_json(data)
-                # Log only first chunk, every 100th chunk, or last chunk (reduced from 50 to 100)
-                if batch_data.order == 0 or batch_data.order % 100 == 0 or batch_data.isLastChunk:
+                # Log only first chunk, every 500th chunk, or last chunk (reduced from 100 to 500)
+                if batch_data.order == 0 or batch_data.order % 500 == 0 or batch_data.isLastChunk:
                     msg.info(f"[WEBSOCKET] Chunk {batch_data.order + 1}/{batch_data.total} for {batch_data.fileID[:50]}...")
             except Exception as e:
                 import traceback
