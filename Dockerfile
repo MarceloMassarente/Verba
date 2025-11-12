@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 # Instala pandas e openpyxl para suporte completo a arquivos Excel (.xlsx e .xls)
 RUN pip install --no-cache-dir pandas openpyxl xlrd || true
 
+# Instala dependências do Google Drive Reader (plugin patchable)
+RUN pip install --no-cache-dir google-api-python-client google-auth-httplib2 google-auth-oauthlib || true
+
 # Baixa modelos do spaCy (para ETL A2 e EntityAware Retriever)
 RUN python -m spacy download pt_core_news_sm || true
 RUN python -m spacy download en_core_web_sm || pip install --no-cache-dir https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0-py3-none-any.whl

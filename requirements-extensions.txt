@@ -18,6 +18,11 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 xlrd>=2.0.0
 
+# Para Google Drive Reader (plugin patchable)
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.1.1
+google-auth-oauthlib>=1.1.0
+
 # Já incluídas no Verba base:
 # - weaviate-client
 # - fastapi

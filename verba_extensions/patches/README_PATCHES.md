@@ -681,6 +681,12 @@ Se algum patch falhar, verifique:
 - [ ] Verificar se 6 campos têm `index_filterable=True`
 - [ ] Testar script: `python -m pytest scripts/test_phase1_phase2_optimizations.py -v`
 
+### ⭐ NOVO: Verificação de Plugins
+- [ ] Verificar se Google Drive Reader está carregado: `'google_drive_reader' in pm.plugins`
+- [ ] Verificar se Google Drive Reader aparece na lista de readers: `'Google Drive (ETL A2)' in readers`
+- [ ] Verificar se dependências Google Drive estão instaladas: `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
+- [ ] Verificar se variável `GOOGLE_DRIVE_CREDENTIALS` está configurada (se usar Google Drive)
+
 ### Testes Funcionais
 - [ ] Testar import de documento pequeno
 - [ ] Verificar logs: "[ETL-PRE] ✅ Entidades extraídas"
@@ -689,6 +695,7 @@ Se algum patch falhar, verifique:
 - [ ] Verificar se chunks têm propriedades ETL (se ETL ativado)
 - [ ] Testar busca com EntityAware Retriever
 - [ ] Verificar se queries por entity_id funcionam
+- [ ] Testar import do Google Drive (se configurado)
 
 ---
 
@@ -888,11 +895,15 @@ Se após upgrade os patches não funcionarem:
   - Evita re-chunking desnecessário (93 → 2379 chunks)
   - Chunking inicial já é bem feito, não precisa re-otimizar
 - ✅ **Componentes RAG2**: Integrados (TelemetryMiddleware, Embeddings Cache, etc.)
+- ✅ **Google Drive Reader**: ⭐ NOVO - Plugin patchable para importação do Google Drive com ETL A2
+  - Suporte a Service Account e OAuth 2.0
+  - Importação recursiva de pastas
+  - ETL A2 automático em todos os arquivos
 - ✅ **Documentação**: Este arquivo
 
 **Última atualização:** Novembro 2025  
 **Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)  
-**Mudanças recentes:** ETL inteligente multi-idioma, correção collection, suporte universal embeddings
+**Mudanças recentes:** Google Drive Reader, ETL inteligente multi-idioma, correção collection, suporte universal embeddings
 
 ---
 
@@ -1063,4 +1074,94 @@ export TIKA_SERVER_URL="http://192.168.1.197:9998"
 - Universal Reader: integração direta no código
 
 **Documentação completa:** `INTEGRACAO_TIKA.md`
+
+---
+
+### 9. **Google Drive Reader (ETL A2 Integrado)** ⭐ NOVO
+
+**Arquivo:** `verba_extensions/plugins/google_drive_reader.py`
+
+**Status:** ✅ Plugin patchable - carregado automaticamente
+
+**O que faz:**
+- Importa arquivos diretamente do Google Drive para o Verba
+- Suporta Service Account e OAuth 2.0 para autenticação
+- Lista arquivos de pastas/compartilhamentos do Google Drive
+- Baixa arquivos automaticamente e processa com BasicReader
+- **ETL A2 automático** - Aplica NER + Section Scope em todos os arquivos importados
+- Suporte recursivo a subpastas
+- Múltiplos formatos (PDF, DOCX, TXT, MD, XLSX, PPTX, etc.)
+
+**Funcionalidades:**
+1. **Autenticação Flexível:**
+   - Service Account (recomendado para servidores)
+   - OAuth 2.0 (para contas pessoais)
+   - Configuração via variável de ambiente `GOOGLE_DRIVE_CREDENTIALS`
+
+2. **Importação Inteligente:**
+   - Importa por Folder ID ou URL compartilhada
+   - Importa arquivos específicos por File ID
+   - Filtro por tipo de arquivo (PDF, DOCX, etc.)
+   - Suporte recursivo a subpastas
+
+3. **ETL A2 Integrado:**
+   - Habilita ETL automaticamente em todos os documentos (`enable_etl=True`)
+   - Extração de entidades (NER) e Section Scope
+   - Metadados do Google Drive preservados (file_id, source, etc.)
+
+**Dependências:**
+- `google-api-python-client>=2.100.0`
+- `google-auth-httplib2>=0.1.1`
+- `google-auth-oauthlib>=1.1.0`
+
+**Configuração:**
+```bash
+# Service Account (recomendado)
+export GOOGLE_DRIVE_CREDENTIALS="/caminho/para/service-account-key.json"
+
+# OAuth 2.0 (alternativa)
+export GOOGLE_DRIVE_CREDENTIALS="/caminho/para/token.json"
+```
+
+**Como é registrado:**
+- Plugin carregado automaticamente via `verba_extensions/startup.py`
+- Registrado via `register()` que retorna `{'readers': [GoogleDriveReader()]}`
+- Adicionado aos readers disponíveis via `PluginManager._hook_readers()`
+- Aparece na interface como tipo "URL"
+
+**Como verificar após upgrade:**
+```python
+# 1. Verificar se plugin está carregado:
+from verba_extensions.plugin_manager import get_plugin_manager
+pm = get_plugin_manager()
+if 'google_drive_reader' in pm.plugins:
+    print('✅ Google Drive Reader carregado')
+
+# 2. Verificar se está disponível no ReaderManager:
+from goldenverba.components import managers
+readers = [r.name for r in managers.readers]
+if 'Google Drive (ETL A2)' in readers:
+    print('✅ Google Drive Reader disponível')
+
+# 3. Verificar dependências:
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    print('✅ Dependências Google Drive instaladas')
+except ImportError:
+    print('❌ Dependências não instaladas')
+```
+
+**Se precisar reaplicar:**
+- Plugin é carregado automaticamente via `startup.py`
+- Se não aparecer, verificar se `verba_extensions/plugins/google_drive_reader.py` existe
+- Verificar se `register()` retorna estrutura correta
+- Verificar se `PluginManager._hook_readers()` está sendo chamado
+- Verificar se dependências estão instaladas no Dockerfile/requirements
+
+**Documentação completa:** `verba_extensions/plugins/GOOGLE_DRIVE_README.md`
+
+**Script de autenticação:** `verba_extensions/plugins/google_drive_auth.py`
+
+---
 

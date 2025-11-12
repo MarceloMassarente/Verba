@@ -134,6 +134,36 @@ POST /ingest/urls {"run_etl": true}
 POST /etl/patch {"tenant": "news_v1", "limit": 500}
 ```
 
+### 2.1. Google Drive Reader (ETL A2 Integrado) ⭐ NOVO
+
+**Localização:** `verba_extensions/plugins/google_drive_reader.py`
+
+**Funcionalidade:**
+- Importa arquivos diretamente do Google Drive
+- Suporta Service Account e OAuth 2.0
+- Lista arquivos de pastas/compartilhamentos
+- Baixa arquivos automaticamente
+- **ETL A2 automático** - NER + Section Scope em todos os arquivos
+- Suporte recursivo a subpastas
+- Múltiplos formatos (PDF, DOCX, TXT, MD, XLSX, PPTX, etc.)
+
+**Configuração:**
+```bash
+# Service Account (recomendado)
+export GOOGLE_DRIVE_CREDENTIALS="/caminho/para/service-account-key.json"
+
+# OAuth 2.0 (alternativa)
+export GOOGLE_DRIVE_CREDENTIALS="/caminho/para/token.json"
+```
+
+**Uso no Verba:**
+1. Plugin carregado automaticamente
+2. Aparece como "Google Drive (ETL A2)" no seletor de readers tipo "URL"
+3. Configure Folder ID ou File IDs na interface
+4. Arquivos são importados com ETL A2 habilitado automaticamente
+
+**Documentação completa:** `verba_extensions/plugins/GOOGLE_DRIVE_README.md`
+
 ### 3. Minisserviço de Ingestão
 
 **Endpoints:**
