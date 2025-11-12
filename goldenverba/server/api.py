@@ -360,15 +360,23 @@ async def websocket_import_files(websocket: WebSocket):
 
     while True:
         try:
-            data = await websocket.receive_text()
-            msg.info(f"[WEBSOCKET] Received message (length: {len(data)} chars)")
+            # Check WebSocket state before attempting to receive data
+            if websocket.application_state != WebSocketState.CONNECTED:
+                msg.info(f"[WEBSOCKET] WebSocket not connected (state: {websocket.application_state}), waiting for reconnection or closing...")
+                await asyncio.sleep(1)
+                # Check if there are incomplete batches that can still be processed
+                if batcher.batches:
+                    msg.warn(f"[WEBSOCKET] ⚠️ WebSocket disconnected but {len(batcher.batches)} batch(es) still incomplete - will wait briefly")
+                    await asyncio.sleep(2)
+                break
             
-            # Only log first chunk and errors to avoid log spam
+            data = await websocket.receive_text()
+            # Only log first chunk and every 100th chunk to reduce log spam
             try:
                 batch_data = DataBatchPayload.model_validate_json(data)
-                # Log only first chunk, every 50th chunk, or last chunk
-                if batch_data.order == 0 or batch_data.order % 50 == 0 or batch_data.isLastChunk:
-                    msg.info(f"[WEBSOCKET] Parsed chunk {batch_data.order + 1}/{batch_data.total} for {batch_data.fileID[:50]}...")
+                # Log only first chunk, every 100th chunk, or last chunk (reduced from 50 to 100)
+                if batch_data.order == 0 or batch_data.order % 100 == 0 or batch_data.isLastChunk:
+                    msg.info(f"[WEBSOCKET] Chunk {batch_data.order + 1}/{batch_data.total} for {batch_data.fileID[:50]}...")
             except Exception as e:
                 import traceback
                 msg.fail(f"[WEBSOCKET] Failed to parse batch data: {type(e).__name__}: {str(e)}")
@@ -386,7 +394,7 @@ async def websocket_import_files(websocket: WebSocket):
                     msg.warn(f"[WEBSOCKET] ⚠️ Last chunk order ({batch_data.order + 1}) doesn't match total ({batch_data.total})")
             
             if fileConfig is not None:
-                msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import process")
+                msg.info(f"[WEBSOCKET] ✅ FileConfig ready - starting import for: {fileConfig.filename[:50]}...")
                 # Send STARTING status immediately to update frontend
                 try:
                     await logger.send_report(
@@ -410,9 +418,6 @@ async def websocket_import_files(websocket: WebSocket):
                     if client is None or not await client.is_ready():
                         raise Exception("Failed to reconnect to Weaviate")
                 
-                # Log import start
-                msg.info(f"[IMPORT] Starting import for file: {fileConfig.filename} (ID: {fileConfig.fileID})")
-                
                 # Task de keep-alive para manter WebSocket vivo durante import longo
                 async def keep_alive_task():
                     """Envia pings periódicos para manter WebSocket conectado"""
@@ -435,73 +440,105 @@ async def websocket_import_files(websocket: WebSocket):
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
-                        msg.info(f"[WEBSOCKET] Keep-alive task ended: {str(e)}")
+                        pass  # Silently handle keep-alive errors
                 
                 # Cria task de keep-alive
                 keep_alive = asyncio.create_task(keep_alive_task())
                 
-                # Start import task in background - it will continue even if WebSocket closes
-                import_task = asyncio.create_task(
-                    manager.import_document(client, fileConfig, logger)
-                )
+                # Start import task in background - DON'T await it, let it run while we continue receiving batches
+                # This allows multiple files to be imported sequentially
+                async def import_with_cleanup():
+                    """Wrapper para import com cleanup do keep-alive"""
+                    try:
+                        await manager.import_document(client, fileConfig, logger)
+                        msg.info(f"[IMPORT] ✅ Import completed: {fileConfig.filename[:50]}...")
+                    except Exception as e:
+                        msg.fail(f"[IMPORT] ❌ Import failed for {fileConfig.filename[:50]}...: {type(e).__name__}: {str(e)}")
+                        # Try to send error report to client if WebSocket is still open
+                        try:
+                            await logger.send_report(
+                                fileConfig.fileID,
+                                status=FileStatus.ERROR,
+                                message=f"Import failed: {str(e)}",
+                                took=0,
+                            )
+                        except Exception:
+                            pass  # WebSocket may be closed, ignore
+                    finally:
+                        # Cancela keep-alive após import concluir
+                        keep_alive.cancel()
+                        try:
+                            await keep_alive
+                        except asyncio.CancelledError:
+                            pass
                 
-                # Wait for import with timeout handling
-                try:
-                    await import_task
-                    msg.info(f"[IMPORT] Import completed successfully for: {fileConfig.filename}")
-                except Exception as e:
-                    msg.fail(f"[IMPORT] Import failed for {fileConfig.filename}: {type(e).__name__}: {str(e)}")
-                    import traceback
-                    msg.fail(f"[IMPORT] Traceback: {traceback.format_exc()}")
-                    # Try to send error report to client if WebSocket is still open
-                    try:
-                        await logger.send_report(
-                            fileConfig.fileID,
-                            status=FileStatus.ERROR,
-                            message=f"Import failed: {str(e)}",
-                            took=0,
-                        )
-                    except Exception as report_error:
-                        msg.warn(f"[IMPORT] Failed to send error report (WebSocket may be closed): {str(report_error)}")
-                    # Don't re-raise - let the loop continue to handle next import
-                    # The error is already logged
-                finally:
-                    # Cancela keep-alive após import concluir (sucesso ou erro)
-                    keep_alive.cancel()
-                    try:
-                        await keep_alive
-                    except asyncio.CancelledError:
-                        pass
+                # Start import in background - continue loop to receive more batches
+                asyncio.create_task(import_with_cleanup())
 
         except WebSocketDisconnect:
-            msg.warn("[WEBSOCKET] Import WebSocket connection closed by client (normal during long imports)")
+            msg.info("[WEBSOCKET] Client disconnected (normal during long imports)")
             # Verifica se há batches incompletos antes de fechar
             if batcher.batches:
-                msg.warn(f"[WEBSOCKET] ⚠️ WebSocket closed but {len(batcher.batches)} batch(es) still incomplete:")
+                msg.warn(f"[WEBSOCKET] ⚠️ {len(batcher.batches)} batch(es) incomplete:")
                 for fileID, batch_info in batcher.batches.items():
                     received = len(batch_info["chunks"].keys())
                     total = batch_info["total"]
-                    msg.warn(f"[WEBSOCKET]   - {fileID[:50]}...: {received}/{total} chunks received")
+                    msg.warn(f"[WEBSOCKET]   - {fileID[:50]}...: {received}/{total} chunks")
             # Don't break immediately - the import might still be running in background
-            # Wait a bit to see if import completes
             await asyncio.sleep(1)
             break
+        except RuntimeError as e:
+            error_str = str(e).lower()
+            # Handle WebSocket state errors gracefully
+            if "not connected" in error_str or "need to call" in error_str or "cannot call" in error_str:
+                msg.info(f"[WEBSOCKET] WebSocket connection lost: {str(e)}")
+                # Check if there are incomplete batches
+                if batcher.batches:
+                    msg.warn(f"[WEBSOCKET] ⚠️ {len(batcher.batches)} batch(es) incomplete")
+                await asyncio.sleep(1)
+                break
+            else:
+                # Other RuntimeErrors - log and break
+                msg.fail(f"[WEBSOCKET] RuntimeError: {type(e).__name__}: {str(e)}")
+                await asyncio.sleep(1)
+                break
         except Exception as e:
-            msg.fail(f"[WEBSOCKET] Import WebSocket Error: {type(e).__name__}: {str(e)}")
-            import traceback
-            msg.fail(f"[WEBSOCKET] Traceback: {traceback.format_exc()}")
+            error_str = str(e).lower()
+            # Check if it's a WebSocket-related error (desconexão é normal em imports longos)
+            websocket_error_keywords = [
+                "websocket",
+                "not connected",
+                "need to call",
+                "cannot call",
+                "connection closed",
+                "connection lost",
+                "close message has been sent"
+            ]
+            is_websocket_error = any(keyword in error_str for keyword in websocket_error_keywords)
+            
+            if is_websocket_error:
+                # WebSocket desconectado - é comportamento esperado em imports longos
+                # Não logar como erro crítico, apenas como info
+                msg.info(f"[WEBSOCKET] Connection lost during import (normal for long imports): {type(e).__name__}: {str(e)}")
+            else:
+                # Outros erros - logar como erro
+                msg.fail(f"[WEBSOCKET] Error: {type(e).__name__}: {str(e)}")
+            
             # Try to notify client about the error if connection is still open
-            try:
-                await logger.send_report(
-                    "unknown",
-                    status=FileStatus.ERROR,
-                    message=f"WebSocket error: {str(e)}",
-                    took=0,
-                )
-            except Exception as report_error:
-                msg.warn(f"[WEBSOCKET] Could not send error report (connection may be closed): {str(report_error)}")
-            # Don't break immediately - let the import task finish if it's still running
-            await asyncio.sleep(2)
+            # Mas não tentar se já sabemos que é erro de WebSocket desconectado
+            if not is_websocket_error:
+                try:
+                    if websocket.application_state == WebSocketState.CONNECTED:
+                        await logger.send_report(
+                            "unknown",
+                            status=FileStatus.ERROR,
+                            message=f"WebSocket error: {str(e)}",
+                            took=0,
+                        )
+                except Exception:
+                    pass  # Connection already closed, ignore
+            
+            await asyncio.sleep(1)
             break
 
 

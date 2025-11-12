@@ -14,14 +14,42 @@ class LoggerManager:
     def __init__(self, socket: WebSocket = None):
         self.socket = socket
 
+    def _is_websocket_ready(self) -> bool:
+        """Verifica se WebSocket está pronto para enviar mensagens"""
+        if self.socket is None:
+            return False
+        try:
+            # Verifica estado da aplicação
+            if self.socket.application_state != WebSocketState.CONNECTED:
+                return False
+            # Verifica se o WebSocket foi aceito (client_state)
+            # Se client_state não for CONNECTED, o WebSocket não está pronto
+            if hasattr(self.socket, 'client_state'):
+                if self.socket.client_state != WebSocketState.CONNECTED:
+                    return False
+            return True
+        except Exception:
+            # Se houver qualquer erro ao verificar, assumir que não está pronto
+            return False
+
     async def send_report(
         self, file_Id: str, status: FileStatus, message: str, took: float
     ):
-        msg.info(f"{status} | {file_Id} | {message} | {took}")
+        # Reduce logging frequency - only log important status changes
+        if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+            msg.info(f"{status} | {file_Id} | {message} | {took}")
+        # Skip logging for intermediate statuses to reduce log spam
         if self.socket is not None:
-            # Verifica se WebSocket está conectado antes de tentar enviar
-            if self.socket.application_state != WebSocketState.CONNECTED:
-                msg.info(f"[WEBSOCKET] WebSocket not connected (state: {self.socket.application_state}) - skipping report: {message}")
+            # Verifica se WebSocket está pronto antes de tentar enviar
+            if not self._is_websocket_ready():
+                # Only log disconnection for important statuses to avoid spam
+                if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+                    state_info = "unknown"
+                    try:
+                        state_info = str(self.socket.application_state)
+                    except:
+                        pass
+                    msg.info(f"[WEBSOCKET] WebSocket not ready (state: {state_info}) - skipping report: {message}")
                 return
             
             try:
@@ -32,26 +60,45 @@ class LoggerManager:
                     "took": took,
                 }
                 await self.socket.send_json(payload)
-            except RuntimeError as e:
+            except (RuntimeError, ConnectionError, OSError) as e:
                 error_str = str(e).lower()
                 # WebSocket foi fechado pelo cliente - é normal em imports longos
                 # Client pode ter timeout (~30s) enquanto o servidor ainda está processando (pode ser >150s)
-                if "close message has been sent" in error_str or "cannot call" in error_str or "not connected" in error_str or "need to call" in error_str:
-                    msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
+                if any(keyword in error_str for keyword in [
+                    "close message has been sent", 
+                    "cannot call", 
+                    "not connected", 
+                    "need to call",
+                    "websocket is not connected",
+                    "connection closed",
+                    "connection lost"
+                ]):
+                    # Não logar como erro - é comportamento esperado em imports longos
+                    if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+                        msg.info(f"[WEBSOCKET] Client disconnected before receiving report: {message}")
                 else:
-                    msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")
+                    # Outros RuntimeErrors - logar como warning
+                    if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+                        msg.warn(f"[WEBSOCKET] RuntimeError sending report: {type(e).__name__}: {str(e)}")
             except Exception as e:
                 # Outros erros - log apenas para não quebrar o processamento
-                msg.warn(f"[WEBSOCKET] Failed to send report to client: {type(e).__name__}: {str(e)}")
+                # Não logar como erro crítico - apenas como info para imports intermediários
+                if status in (FileStatus.STARTING, FileStatus.DONE, FileStatus.ERROR):
+                    msg.warn(f"[WEBSOCKET] Failed to send report to client: {type(e).__name__}: {str(e)}")
 
     async def create_new_document(
         self, new_file_id: str, document_name: str, original_file_id: str
     ):
         msg.info(f"Creating new file {new_file_id} from {original_file_id}")
         if self.socket is not None:
-            # Verifica se WebSocket está conectado antes de tentar enviar
-            if self.socket.application_state != WebSocketState.CONNECTED:
-                msg.info(f"[WEBSOCKET] WebSocket not connected (state: {self.socket.application_state}) - skipping document creation: {new_file_id}")
+            # Verifica se WebSocket está pronto antes de tentar enviar
+            if not self._is_websocket_ready():
+                state_info = "unknown"
+                try:
+                    state_info = str(self.socket.application_state)
+                except:
+                    pass
+                msg.info(f"[WEBSOCKET] WebSocket not ready (state: {state_info}) - skipping document creation: {new_file_id}")
                 return
             
             try:
@@ -61,13 +108,21 @@ class LoggerManager:
                     "original_file_id": original_file_id,
                 }
                 await self.socket.send_json(payload)
-            except RuntimeError as e:
+            except (RuntimeError, ConnectionError, OSError) as e:
                 error_str = str(e).lower()
                 # WebSocket foi fechado - é normal
-                if "close message has been sent" in error_str or "cannot call" in error_str or "not connected" in error_str or "need to call" in error_str:
+                if any(keyword in error_str for keyword in [
+                    "close message has been sent", 
+                    "cannot call", 
+                    "not connected", 
+                    "need to call",
+                    "websocket is not connected",
+                    "connection closed",
+                    "connection lost"
+                ]):
                     msg.info(f"[WEBSOCKET] Client disconnected before receiving document creation: {new_file_id}")
                 else:
-                    msg.warn(f"[WEBSOCKET] RuntimeError: {str(e)}")
+                    msg.warn(f"[WEBSOCKET] RuntimeError sending document creation: {type(e).__name__}: {str(e)}")
             except Exception as e:
                 # Outros erros - log apenas
                 msg.warn(f"[WEBSOCKET] Failed to send document creation to client: {type(e).__name__}: {str(e)}")
@@ -79,10 +134,10 @@ class BatchManager:
 
     def add_batch(self, payload: DataBatchPayload) -> FileConfig:
         try:
-            # Log only first batch, every 50 batches, or last batch to reduce log spam
+            # Log only first batch, every 100 batches, or last batch to reduce log spam
             should_log = (
                 payload.order == 0 or 
-                payload.order % 50 == 0 or 
+                payload.order % 100 == 0 or 
                 payload.isLastChunk or 
                 payload.order == payload.total - 1
             )
@@ -158,8 +213,8 @@ class BatchManager:
                 msg.fail(f"[BATCH] Traceback: {traceback.format_exc()}")
                 raise
         else:
-            # Log periodicamente se ainda está esperando
-            if received % 50 == 0 or received == total - 1:
+            # Log periodicamente se ainda está esperando (reduzido para evitar spam)
+            if received % 200 == 0 or received == total - 1:
                 missing = total - received
                 msg.info(f"[BATCH] Still waiting: {received}/{total} chunks received ({missing} missing)")
             return None
