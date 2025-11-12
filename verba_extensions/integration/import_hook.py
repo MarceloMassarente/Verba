@@ -256,11 +256,7 @@ def patch_weaviate_manager():
                                 if passage_uuids:
                                     # Verifica se ETL já está em execução para este doc_uuid
                                     # Usa lock thread-safe para evitar race conditions
-                                    if doc_uuid in _etl_executions_in_progress:
-                                        # Silently skip duplicate execution (no log spam)
-                                        # This is expected during concurrent imports
-                                        continue
-                                    else:
+                                    if doc_uuid not in _etl_executions_in_progress:
                                         # Marca como em execução ANTES de iniciar task
                                         _etl_executions_in_progress.add(doc_uuid)
                                         
@@ -333,6 +329,9 @@ def patch_weaviate_manager():
                                                     del _logger_registry[doc_uuid]
                                         
                                         asyncio.create_task(run_etl_hook())
+                                    else:
+                                        # ETL já está em execução para este doc_uuid (evita execução duplicada)
+                                        msg.info(f"[ETL] ℹ️ ETL já está em execução para este doc_uuid")
                                 else:
                                     msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
                             except Exception as collection_error:
