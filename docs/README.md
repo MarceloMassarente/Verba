@@ -10,6 +10,7 @@ Guias práticos e tutoriais:
 - Guias de uso (Entity Aware Retriever, Labels, etc.)
 - Guias de teste e verificação
 - Explicações de funcionalidades
+- **ADVANCED_WEAVIATE_FEATURES.md** - Features avançadas Weaviate (Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation)
 
 ### 📁 `analyses/`
 Análises técnicas e arquiteturais:
@@ -79,5 +80,14 @@ Recursos estáticos:
 - **Entidades**: Apenas ORG + PERSON/PER (exclui LOC/GPE)
 - **Otimizações**: Binary search, deduplicação, normalização PT/EN
 - **Documentação**: `guides/CONFIGURACAO_ETL_FINAL.md`
+
+### Features Avançadas Weaviate ⭐ NOVO
+- **Status**: ✅ Implementado e disponível
+- **Named Vectors**: 3 vetores especializados (concept_vec, sector_vec, company_vec)
+- **Multi-Vector Search**: Busca paralela com RRF para melhor recall
+- **GraphQL Builder**: Queries dinâmicas com HTTP fallback
+- **Aggregation**: Analytics com HTTP fallback quando gRPC falha
+- **Framework Detection**: Detecção automática de frameworks/empresas/setores
+- **Documentação**: `guides/ADVANCED_WEAVIATE_FEATURES.md`
 
 

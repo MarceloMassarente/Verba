@@ -899,11 +899,17 @@ Se após upgrade os patches não funcionarem:
   - Suporte a Service Account e OAuth 2.0
   - Importação recursiva de pastas
   - ETL A2 automático em todos os arquivos
+- ✅ **Features Avançadas Weaviate**: ⭐ NOVO - Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation
+  - Named Vectors: 3 vetores especializados (concept_vec, sector_vec, company_vec)
+  - Multi-Vector Search: busca paralela com RRF
+  - GraphQL Builder: queries dinâmicas com HTTP fallback
+  - Aggregation: analytics com HTTP fallback
+  - Framework Detection: detecção automática de frameworks/empresas/setores
 - ✅ **Documentação**: Este arquivo
 
-**Última atualização:** Novembro 2025  
+**Última atualização:** Janeiro 2025  
 **Última verificação de compatibilidade:** Verba 2.1.x (novembro 2024)  
-**Mudanças recentes:** Google Drive Reader, ETL inteligente multi-idioma, correção collection, suporte universal embeddings
+**Mudanças recentes:** Features Avançadas Weaviate (Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation), Google Drive Reader, ETL inteligente multi-idioma, correção collection, suporte universal embeddings
 
 ---
 
@@ -1162,6 +1168,136 @@ except ImportError:
 **Documentação completa:** `verba_extensions/plugins/GOOGLE_DRIVE_README.md`
 
 **Script de autenticação:** `verba_extensions/plugins/google_drive_auth.py`
+
+---
+
+### 10. **Features Avançadas Weaviate** ⭐ NOVO - Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation
+
+**Arquivos:**
+- `verba_extensions/integration/vector_config_builder.py` - Configuração de named vectors
+- `verba_extensions/integration/schema_updater.py` - Suporte a named vectors no schema
+- `verba_extensions/utils/vector_extractor.py` - Extração de textos especializados
+- `verba_extensions/plugins/multi_vector_searcher.py` - Busca multi-vetor com RRF
+- `verba_extensions/utils/graphql_builder.py` - Builder de queries GraphQL
+- `verba_extensions/utils/graphql_client.py` - Cliente GraphQL com HTTP fallback
+- `verba_extensions/utils/aggregation_wrapper.py` - Wrapper de aggregation com HTTP fallback
+- `verba_extensions/integration/import_hook.py` - Preparação de textos para named vectors
+
+**O que faz:**
+
+**1. Named Vectors Especializados:**
+- Cria collections com 3 named vectors: `concept_vec`, `sector_vec`, `company_vec`
+- Modo BYOV (Bring Your Own Vector) - embeddings calculados manualmente
+- Quantização PQ automática para collections grandes (threshold: 50k)
+- Propriedades de texto especializadas: `concept_text`, `sector_text`, `company_text`
+
+**2. Multi-Vector Search:**
+- Busca paralela em múltiplos named vectors
+- Combinação inteligente com RRF (Reciprocal Rank Fusion)
+- Detecção automática de quando usar (query combina conceito + setor + empresa)
+- Integrado ao EntityAwareRetriever
+
+**3. GraphQL Builder:**
+- Constrói queries GraphQL dinâmicas
+- Suporte a named vectors (targetVector)
+- Filtros complexos (where clause)
+- Hybrid search via GraphQL
+
+**4. Aggregation & Analytics:**
+- Wrapper para aggregation com HTTP fallback quando gRPC falha
+- Detecção automática de queries de agregação
+- GroupBy, count, sum, etc.
+- Integrado ao EntityAwareRetriever
+
+**5. Framework Detection:**
+- Detecção de frameworks, empresas e setores durante chunking
+- Armazenamento em propriedades Weaviate: `frameworks`, `companies`, `sectors`
+- Filtros automáticos baseados em detecção
+
+**Configuração:**
+```bash
+# Habilitar named vectors (cria collections com vectorConfig)
+export ENABLE_NAMED_VECTORS="true"
+
+# No EntityAwareRetriever:
+# - "Enable Multi-Vector Search": true/false (default: false)
+# - "Enable Aggregation": true/false (default: false)
+```
+
+**Como funciona:**
+
+**Named Vectors:**
+1. Collection criada com `vectorConfig` contendo 3 named vectors
+2. Durante chunking: textos especializados extraídos (concept_text, sector_text, company_text)
+3. Durante import: embeddings gerados para cada named vector (estrutura preparada)
+4. Durante busca: multi-vector search quando query combina múltiplos aspectos
+
+**Multi-Vector Search:**
+1. Query analisada: detecta conceitos, setores, empresas
+2. Se 2+ aspectos detectados: usa multi-vector search
+3. Busca paralela em vetores relevantes
+4. Combinação RRF dos resultados
+5. Fallback para busca simples se named vectors não disponíveis
+
+**GraphQL Builder:**
+1. Constrói queries GraphQL dinâmicas
+2. Suporta targetVector para named vectors
+3. HTTP fallback quando SDK Python não suporta features
+
+**Aggregation:**
+1. Detecta queries de agregação ("quantos documentos", "count", etc.)
+2. Executa aggregation via SDK ou HTTP fallback
+3. Retorna resultados analíticos
+
+**Como verificar após upgrade:**
+```python
+# 1. Verificar se named vectors estão habilitados:
+from verba_extensions.integration.schema_updater import get_vector_config
+vector_config = get_vector_config(enable_named_vectors=True)
+if vector_config:
+    print('✅ Named vectors configurados')
+
+# 2. Verificar se collection tem named vectors:
+collection = client.collections.get("VERBA_Embedding_...")
+config = await collection.config.get()
+if hasattr(config, 'vector_config') and config.vector_config:
+    print('✅ Collection tem named vectors')
+
+# 3. Verificar se multi-vector searcher está disponível:
+from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
+searcher = MultiVectorSearcher()
+print('✅ Multi-vector searcher disponível')
+
+# 4. Verificar se aggregation wrapper está disponível:
+from verba_extensions.utils.aggregation_wrapper import get_aggregation_wrapper
+wrapper = get_aggregation_wrapper()
+print('✅ Aggregation wrapper disponível')
+```
+
+**Onde é aplicado:**
+- `verba_extensions/integration/schema_updater.py` linha ~398-447: Patch em `verify_collection()` para criar collections com named vectors
+- `verba_extensions/integration/import_hook.py` linha ~232-335: Preparação de textos especializados
+- `verba_extensions/plugins/entity_aware_retriever.py` linha ~920-1064: Integração de multi-vector search e aggregation
+
+**Se precisar reaplicar:**
+- Verificar se `WeaviateManager.verify_collection()` ainda existe
+- Verificar se `client.collections.create_from_dict()` ainda funciona
+- Verificar se `collection.config.get()` retorna `vector_config`
+- Verificar se `collection.query.near_vector()` aceita `target_vector`
+
+**Impacto:**
+- ✅ **Busca mais precisa** - named vectors especializados capturam diferentes aspectos
+- ✅ **Multi-vector search** - combina resultados de múltiplos vetores para melhor recall
+- ✅ **GraphQL queries** - suporte a features avançadas do Weaviate
+- ✅ **Aggregation** - queries analíticas funcionam mesmo quando gRPC falha
+- ✅ **Framework detection** - filtros automáticos baseados em frameworks/empresas/setores
+
+**Documentação completa:**
+- `docs/guides/MIGRATION_FRAMEWORK_PROPERTIES.md` - Migração de collections
+- `verba_extensions/integration/vector_config_builder.py` - Documentação inline
+- `verba_extensions/plugins/multi_vector_searcher.py` - Documentação inline
+
+**Última atualização:** Janeiro 2025
 
 ---
 

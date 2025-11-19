@@ -36,6 +36,32 @@
   - Text Preprocessing
   - Quality Scoring
 
+### Features Avançadas Weaviate ⭐ NOVO
+
+- **`docs/guides/ADVANCED_WEAVIATE_FEATURES.md`**
+  - Documentação completa das features avançadas
+  - Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation
+  - Guias de configuração e uso
+  - Troubleshooting
+
+- **`verba_extensions/integration/vector_config_builder.py`**
+  - Configuração de named vectors
+  - Quantização PQ automática
+
+- **`verba_extensions/plugins/multi_vector_searcher.py`**
+  - Busca multi-vetor com RRF
+  - Documentação inline completa
+
+- **`verba_extensions/utils/graphql_builder.py`**
+  - Builder de queries GraphQL
+  - Suporte a named vectors e filtros
+
+- **`verba_extensions/utils/graphql_client.py`**
+  - Cliente GraphQL com HTTP fallback
+
+- **`verba_extensions/utils/aggregation_wrapper.py`**
+  - Wrapper de aggregation com HTTP fallback
+
 ## 🔗 Documentação Geral
 
 - **`README_EXTENSOES.md`**
@@ -112,8 +138,12 @@ from verba_extensions.utils.embeddings_cache import get_cached_embedding
 |------------|--------|------------|--------------|
 | TelemetryMiddleware | ⭐⭐⭐⭐⭐ | CRÍTICA | `middleware/README.md` |
 | Embeddings Cache | ⭐⭐⭐⭐⭐ | CRÍTICA | `utils/README.md` |
+| **Named Vectors** | ⭐⭐⭐⭐⭐ | ALTA | `docs/guides/ADVANCED_WEAVIATE_FEATURES.md` |
+| **Multi-Vector Search** | ⭐⭐⭐⭐⭐ | ALTA | `docs/guides/ADVANCED_WEAVIATE_FEATURES.md` |
 | Telemetry Collector | ⭐⭐⭐⭐ | ALTA | `utils/README.md` |
 | UUID Determinístico | ⭐⭐⭐⭐ | ALTA | `utils/README.md` |
+| **GraphQL Builder** | ⭐⭐⭐⭐ | MÉDIA | `docs/guides/ADVANCED_WEAVIATE_FEATURES.md` |
+| **Aggregation** | ⭐⭐⭐⭐ | MÉDIA | `docs/guides/ADVANCED_WEAVIATE_FEATURES.md` |
 | Text Preprocessing | ⭐⭐⭐ | MÉDIA | `utils/README.md` |
 | Quality Scoring | ⭐⭐⭐ | MÉDIA | `utils/README.md` |
 
@@ -136,6 +166,7 @@ from verba_extensions.utils.embeddings_cache import get_cached_embedding
 
 ---
 
-**Última atualização:** 2025-01-XX  
-**Versão:** 1.0
+**Última atualização:** Janeiro 2025  
+**Versão:** 1.1  
+**Novidades:** Features Avançadas Weaviate (Named Vectors, Multi-Vector Search, GraphQL Builder, Aggregation)
 
