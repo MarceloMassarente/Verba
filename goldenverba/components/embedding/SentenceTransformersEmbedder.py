@@ -34,6 +34,13 @@ class SentenceTransformersEmbedder(Embedding):
         }
 
     async def vectorize(self, config: dict, content: list[str]) -> list[float]:
+        """Vectorize chunks using SentenceTransformer (runs in executor)."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._vectorize_sync, config, content)
+
+    def _vectorize_sync(self, config: dict, content: list[str]) -> list[float]:
+        """Synchronous implementation of vectorization."""
         try:
             # Embeddings Cache (RAG2) - integrado para queries únicas
             use_cache = False

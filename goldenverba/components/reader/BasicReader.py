@@ -160,9 +160,16 @@ class BasicReader(Reader):
             raise ValueError(f"Invalid JSON in {fileConfig.filename}: {str(e)}")
 
     async def load_pdf_file(self, decoded_bytes: bytes) -> str:
-        """Load and extract text from a PDF file."""
+        """Load and extract text from a PDF file (runs in executor to avoid blocking)."""
         if not PdfReader:
             raise ImportError("pypdf is not installed. Cannot process PDF files.")
+        
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._load_pdf_file_sync, decoded_bytes)
+
+    def _load_pdf_file_sync(self, decoded_bytes: bytes) -> str:
+        """Synchronous implementation of PDF loading."""
         pdf_bytes = io.BytesIO(decoded_bytes)
         reader = PdfReader(pdf_bytes)
         
@@ -211,17 +218,29 @@ class BasicReader(Reader):
         return "\n\n".join(text_parts)
 
     async def load_docx_file(self, decoded_bytes: bytes) -> str:
-        """Load and extract text from a DOCX file."""
+        """Load and extract text from a DOCX file (runs in executor)."""
         if not docx:
             raise ImportError(
                 "python-docx is not installed. Cannot process DOCX files."
             )
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._load_docx_file_sync, decoded_bytes)
+
+    def _load_docx_file_sync(self, decoded_bytes: bytes) -> str:
+        """Synchronous implementation of DOCX loading."""
         docx_bytes = io.BytesIO(decoded_bytes)
         reader = docx.Document(docx_bytes)
         return "\n".join(paragraph.text for paragraph in reader.paragraphs)
 
     async def load_csv_file(self, decoded_bytes: bytes) -> str:
-        """Load and convert CSV file to readable text format."""
+        """Load and convert CSV file to readable text format (runs in executor)."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._load_csv_file_sync, decoded_bytes)
+
+    def _load_csv_file_sync(self, decoded_bytes: bytes) -> str:
+        """Synchronous implementation of CSV loading."""
         try:
             # Try UTF-8 first, fallback to latin-1
             try:
@@ -261,108 +280,13 @@ class BasicReader(Reader):
             raise ValueError(f"Error reading CSV file: {str(e)}")
 
     async def load_excel_file(self, decoded_bytes: bytes, extension: str) -> str:
-        """Load and convert Excel file to readable text format."""
+        """Load and convert Excel file to readable text format (runs in executor)."""
         if not pd and not openpyxl:
             raise ImportError("pandas or openpyxl is required to process Excel files.")
+        
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._load_excel_file_sync, decoded_bytes, extension)
 
-        try:
-            excel_bytes = io.BytesIO(decoded_bytes)
-
-            # Use pandas if available for better support
-            if pd:
-                # Read all sheets
-                if extension == "xlsx":
-                    sheets_dict = pd.read_excel(
-                        excel_bytes, sheet_name=None, engine="openpyxl"
-                    )
-                else:  # xls
-                    try:
-                        sheets_dict = pd.read_excel(
-                            excel_bytes, sheet_name=None, engine="xlrd"
-                        )
-                    except Exception as e:
-                        # Try auto engine detection as fallback
-                        try:
-                            sheets_dict = pd.read_excel(
-                                excel_bytes, sheet_name=None, engine=None
-                            )
-                        except Exception:
-                            raise ImportError(
-                                f"Cannot read .xls file. Please install 'xlrd' for .xls support: pip install xlrd. "
-                                f"Original error: {str(e)}"
-                            )
-
-                result = []
-
-                for sheet_name, df in sheets_dict.items():
-                    result.append(f"\nSheet: {sheet_name}")
-
-                    if df.empty:
-                        result.append("(Empty sheet)")
-                        continue
-
-                    result.append(" \n\n")
-
-                    # Add column headers
-                    headers = df.columns.tolist()
-                    result.append("Headers: " + " | ".join(str(h) for h in headers))
-                    result.append(" \n\n")
-
-                    for idx, (_, row) in enumerate(df.iterrows()):
-                        row_data = []
-                        for header, value in zip(headers, row):
-                            # Handle NaN values
-                            display_value = str(value) if pd.notna(value) else ""
-                            row_data.append(f"{header}: {display_value}")
-                        result.append(f"Row {idx + 1}: {' | '.join(row_data)}")
-                        result.append(" \n\n")
-
-                return "\n".join(result)
-
-            else:
-                # Fallback to openpyxl for basic reading
-                if extension != "xlsx":
-                    raise ImportError(
-                        "openpyxl only supports .xlsx files. Please install pandas for .xls support."
-                    )
-
-                from openpyxl import load_workbook
-
-                workbook = load_workbook(excel_bytes, data_only=True)
-
-                result = []
-
-                for sheet_name in workbook.sheetnames:
-                    sheet = workbook[sheet_name]
-                    result.append(f"\nSheet: {sheet_name}")
-                    result.append(" \n\n")
-
-                    rows_data = []
-                    for row in sheet.iter_rows(values_only=True):
-                        if any(cell is not None for cell in row):  # Skip empty rows
-                            rows_data.append(
-                                [str(cell) if cell is not None else "" for cell in row]
-                            )
-
-                    if not rows_data:
-                        result.append("(Empty sheet)")
-                        continue
-
-                    # Add headers and data
-                    headers = rows_data[0] if rows_data else []
-                    result.append("Headers: " + " | ".join(headers))
-                    result.append(" \n\n")
-
-                    for i, row in enumerate(rows_data[1:], 1):
-                        if len(row) == len(headers):
-                            row_data = [f"{h}: {v}" for h, v in zip(headers, row)]
-                            result.append(f"Row {i}: {' | '.join(row_data)}")
-                            result.append(" \n\n")
-                        else:
-                            result.append(f"Row {i}: {' | '.join(row)}")
-                            result.append(" \n\n")
-
-                return "\n".join(result)
-
-        except Exception as e:
-            raise ValueError(f"Error reading Excel file: {str(e)}")
+    def _load_excel_file_sync(self, decoded_bytes: bytes, extension: str) -> str:
+        """Synchronous implementation of Excel loading."""

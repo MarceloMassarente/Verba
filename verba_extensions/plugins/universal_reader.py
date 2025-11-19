@@ -90,8 +90,14 @@ class UniversalA2Reader(Reader):
         # O fallback automático do BasicReader já cuida disso
         return False
     
-    def _extract_with_tika(self, content: bytes, extract_metadata: bool = True):
-        """Extrai texto e metadados usando Tika"""
+    async def _extract_with_tika(self, content: bytes, extract_metadata: bool = True):
+        """Extrai texto e metadados usando Tika (runs in executor to avoid blocking)"""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._extract_with_tika_sync, content, extract_metadata)
+
+    def _extract_with_tika_sync(self, content: bytes, extract_metadata: bool = True):
+        """Implementação síncrona da extração com Tika"""
         try:
             tika_server = self._tika_server or os.getenv("TIKA_SERVER_URL", "http://localhost:9998")
             
@@ -191,8 +197,8 @@ class UniversalA2Reader(Reader):
                 if not decoded_bytes:
                     decoded_bytes = fileConfig.content.encode('utf-8') if hasattr(fileConfig, 'content') else b''
                 
-                # Extrai com Tika
-                text, metadata = self._extract_with_tika(decoded_bytes, extract_metadata=True)
+                # Extrai com Tika (agora async/thread-safe)
+                text, metadata = await self._extract_with_tika(decoded_bytes, extract_metadata=True)
                 
                 if text:
                     # Cria documento
