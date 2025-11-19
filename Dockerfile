@@ -25,9 +25,7 @@ COPY . /Verba
 WORKDIR /Verba/frontend
 RUN npm install
 RUN npm run build
-# Move o build para onde o servidor Python espera encontrar
-RUN rm -rf /Verba/goldenverba/server/frontend/out
-RUN cp -r out /Verba/goldenverba/server/frontend/out
+
 # Volta para a raiz para instalar o Python
 WORKDIR /Verba
 
