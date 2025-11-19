@@ -3,7 +3,8 @@ Atualiza schema do Verba para adicionar campos de ETL
 Adiciona propriedades necessárias para ETL funcionar completamente
 """
 
-from typing import Optional
+import os
+from typing import Optional, Dict, Any
 from wasabi import msg
 
 def get_verba_standard_properties():
@@ -133,18 +134,140 @@ def get_etl_properties():
     ]
 
 
-def get_all_embedding_properties():
+def get_framework_properties():
     """
-    Retorna TODAS as propriedades para collections de embedding (padrão + ETL)
+    Retorna lista de propriedades de framework para adicionar a collections
     
-    Schema ETL-aware serve para AMBOS:
-    - Chunks normais: deixam propriedades ETL vazias
+    NOTA: Essas propriedades são OPCIONAIS - chunks normais podem deixá-las vazias.
+    Schema framework-aware serve para AMBOS os casos (chunks normais e framework-aware).
+    
+    Returns:
+        Lista de Property objects do Weaviate
+    """
+    from weaviate.classes.config import Property, DataType
+    
+    return [
+        Property(
+            name="frameworks",
+            data_type=DataType.TEXT_ARRAY,
+            description="Frameworks detectados (SWOT, Porter, BCG, etc.)",
+            index_filterable=True
+        ),
+        Property(
+            name="companies",
+            data_type=DataType.TEXT_ARRAY,
+            description="Empresas mencionadas no chunk",
+            index_filterable=True
+        ),
+        Property(
+            name="sectors",
+            data_type=DataType.TEXT_ARRAY,
+            description="Setores/indústrias mencionados",
+            index_filterable=True
+        ),
+        Property(
+            name="framework_confidence",
+            data_type=DataType.NUMBER,
+            description="Confiança na detecção de frameworks (0.0-1.0)"
+        ),
+    ]
+
+
+def get_named_vector_text_properties():
+    """
+    Retorna propriedades de texto que alimentam named vectors.
+    
+    Essas propriedades contêm texto especializado extraído do chunk:
+    - concept_text: Conceitos abstratos (frameworks, estratégias, metodologias)
+    - sector_text: Setores/indústrias (varejo, bancos, tecnologia)
+    - company_text: Empresas específicas (Apple, Microsoft, etc.)
+    
+    NOTA: Essas propriedades são OPCIONAIS - apenas necessárias se named vectors estiverem habilitados.
+    
+    Returns:
+        Lista de Property objects do Weaviate
+    """
+    from weaviate.classes.config import Property, DataType
+    
+    return [
+        Property(
+            name="concept_text",
+            data_type=DataType.TEXT,
+            description="Texto focado em conceitos abstratos (frameworks, estratégias, metodologias) - usado para concept_vec",
+            tokenization="word"  # Word tokenization para busca textual
+        ),
+        Property(
+            name="sector_text",
+            data_type=DataType.TEXT,
+            description="Texto focado em setores/indústrias - usado para sector_vec",
+            tokenization="word"  # Word tokenization para busca textual
+        ),
+        Property(
+            name="company_text",
+            data_type=DataType.TEXT,
+            description="Texto focado em empresas específicas - usado para company_vec",
+            tokenization="word"  # Word tokenization para busca textual
+        ),
+    ]
+
+
+def get_all_embedding_properties(include_named_vectors: bool = False):
+    """
+    Retorna TODAS as propriedades para collections de embedding.
+    
+    Schema completo serve para AMBOS:
+    - Chunks normais: deixam propriedades ETL/framework vazias
     - Chunks ETL-aware: preenchem propriedades ETL
+    - Chunks framework-aware: preenchem propriedades de framework
+    - Chunks com named vectors: preenchem concept_text, sector_text, company_text
+    
+    Args:
+        include_named_vectors: Se True, inclui propriedades de texto para named vectors
     
     Returns:
         Lista completa de Property objects
     """
-    return get_verba_standard_properties() + get_etl_properties()
+    properties = (
+        get_verba_standard_properties() + 
+        get_etl_properties() + 
+        get_framework_properties()
+    )
+    
+    if include_named_vectors:
+        properties = properties + get_named_vector_text_properties()
+    
+    return properties
+
+
+def get_vector_config(
+    enable_named_vectors: bool = False,
+    estimated_count: int = 0,
+    use_pq: bool = True
+) -> Optional[Dict[str, Any]]:
+    """
+    Retorna vectorConfig para collections com named vectors.
+    
+    Args:
+        enable_named_vectors: Se True, retorna vectorConfig com named vectors
+        estimated_count: Número estimado de objetos (para PQ)
+        use_pq: Se True, ativa PQ automaticamente se count >= threshold
+    
+    Returns:
+        Dict com vectorConfig ou None se desabilitado
+    """
+    if not enable_named_vectors:
+        return None
+    
+    try:
+        from verba_extensions.integration.vector_config_builder import build_named_vectors_config
+        return build_named_vectors_config(
+            enable_named_vectors=True,
+            estimated_count=estimated_count,
+            use_pq=use_pq
+        )
+    except ImportError:
+        # Se vector_config_builder não estiver disponível, retorna None
+        return None
 
 
 async def check_collection_has_etl_properties(client, collection_name: str) -> bool:
@@ -275,23 +398,97 @@ def patch_weaviate_manager_verify_collection():
             
             if should_create_with_etl:
                 try:
-                    # Obtém todas as propriedades (padrão Verba + ETL)
-                    all_properties = get_all_embedding_properties()
+                    # Verifica se named vectors estão habilitados (via env var ou padrão False)
+                    enable_named_vectors = os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true"
+                    
+                    # Obtém todas as propriedades (padrão Verba + ETL + opcionalmente named vectors)
+                    all_properties = get_all_embedding_properties(include_named_vectors=enable_named_vectors)
+                    
+                    # Obtém vectorConfig se named vectors estiverem habilitados
+                    vector_config = None
+                    if enable_named_vectors:
+                        # Estima count baseado em collection existente ou usa 0
+                        estimated_count = 0
+                        try:
+                            # Tenta obter count de collection similar se existir
+                            all_collections = await client.collections.list_all()
+                            for coll_name in all_collections:
+                                if "VERBA_Embedding" in coll_name:
+                                    coll = client.collections.get(coll_name)
+                                    count = await coll.length()
+                                    estimated_count = max(estimated_count, count)
+                                    break
+                        except:
+                            pass  # Se falhar, usa 0
+                        
+                        vector_config = get_vector_config(
+                            enable_named_vectors=True,
+                            estimated_count=estimated_count,
+                            use_pq=True
+                        )
                     
                     msg.info(f"🔧 Criando collection {collection_name} com schema ETL-aware...")
                     msg.info(f"   📋 Total de propriedades: {len(all_properties)}")
+                    if enable_named_vectors:
+                        msg.info(f"   🎯 Named vectors habilitados: concept_vec, sector_vec, company_vec")
                     msg.info(f"   📝 Schema serve para chunks normais E ETL-aware (propriedades ETL são opcionais)")
                     
-                    # Cria collection com todas as propriedades
+                    # Cria collection com todas as propriedades e opcionalmente vectorConfig
                     # NOTA: Não especificamos vectorizer - Verba não usa vectorizer do Weaviate
-                    # (gera embeddings localmente e insere os vetores)
-                    collection = await client.collections.create(
-                        name=collection_name,
-                        properties=all_properties,
-                    )
+                    # (gera embeddings localmente e insere os vetores - modo BYOV)
+                    
+                    if vector_config:
+                        # Para named vectors, precisamos usar create_from_dict (API mais flexível)
+                        # Constrói schema completo como dict
+                        from weaviate.classes.config import Configure
+                        
+                        schema_dict = {
+                            "class": collection_name,
+                            "description": f"Collection com named vectors: concept_vec, sector_vec, company_vec",
+                            "vectorConfig": vector_config,
+                            "properties": [
+                                {
+                                    "name": prop.name,
+                                    "dataType": [prop.data_type.value] if hasattr(prop.data_type, 'value') else [str(prop.data_type)],
+                                    "description": prop.description or "",
+                                    "tokenization": prop.tokenization.value if hasattr(prop.tokenization, 'value') else str(prop.tokenization) if hasattr(prop, 'tokenization') and prop.tokenization else None,
+                                    "indexFilterable": prop.index_filterable if hasattr(prop, 'index_filterable') else False,
+                                    "indexSearchable": prop.index_searchable if hasattr(prop, 'index_searchable') else False,
+                                }
+                                for prop in all_properties
+                                if prop.tokenization is not None  # Remove None tokenization
+                            ]
+                        }
+                        
+                        # Remove None values do schema
+                        schema_dict["properties"] = [
+                            {k: v for k, v in prop.items() if v is not None}
+                            for prop in schema_dict["properties"]
+                        ]
+                        
+                        try:
+                            # Usa create_from_dict para named vectors
+                            collection = await client.collections.create_from_dict(schema_dict)
+                            msg.info(f"   ✅ Collection criada usando create_from_dict (named vectors)")
+                        except Exception as dict_error:
+                            msg.warn(f"   ⚠️  Erro ao criar com create_from_dict: {str(dict_error)}")
+                            msg.warn(f"   💡 Tentando criar sem named vectors como fallback...")
+                            # Fallback: cria sem named vectors
+                            collection = await client.collections.create(
+                                name=collection_name,
+                                properties=all_properties,
+                            )
+                    else:
+                        # Sem named vectors - usa API normal
+                        collection = await client.collections.create(
+                            name=collection_name,
+                            properties=all_properties,
+                        )
                     
                     if collection:
                         msg.good(f"✅ Collection {collection_name} criada com schema ETL-aware!")
+                        if enable_named_vectors:
+                            msg.good(f"   🎯 Named vectors habilitados!")
                         msg.info(f"   ✅ Chunks normais podem usar (propriedades ETL opcionais)")
                         msg.info(f"   ✅ Chunks ETL-aware podem usar (propriedades ETL preenchidas)")
                         return True

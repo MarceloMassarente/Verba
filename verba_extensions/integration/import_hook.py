@@ -11,7 +11,8 @@ Aplicado via: verba_extensions/startup.py (durante inicialização)
 """
 
 import os
-from typing import List, Dict, Set, Optional
+import json
+from typing import List, Dict, Set, Optional, Any
 from wasabi import msg
 
 # Track ETL executions to prevent duplicates
@@ -19,6 +20,67 @@ _etl_executions_in_progress: Set[str] = set()
 
 # Store logger per doc_uuid for ETL completion notifications
 _logger_registry: Dict[str, any] = {}  # doc_uuid -> LoggerManager
+
+
+async def _map_framework_properties_to_weaviate(
+    client,
+    collection_name: str,
+    chunk_properties: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Mapeia propriedades de framework do chunk.meta para propriedades do Weaviate.
+    
+    Se collection tem propriedades de framework, adiciona diretamente.
+    Caso contrário, salva em meta JSON como fallback.
+    
+    Args:
+        client: Cliente Weaviate
+        collection_name: Nome da collection
+        chunk_properties: Propriedades do chunk (de chunk.to_json())
+    
+    Returns:
+        Propriedades atualizadas com frameworks
+    """
+    try:
+        from verba_extensions.integration.schema_validator import collection_has_framework_properties
+        
+        # Verifica se collection tem propriedades de framework
+        has_framework_props = await collection_has_framework_properties(client, collection_name)
+        
+        # Extrai meta do chunk
+        meta_str = chunk_properties.get("meta", "{}")
+        try:
+            meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+        except:
+            meta = {}
+        
+        # Extrai frameworks do meta
+        frameworks = meta.get("frameworks", [])
+        companies = meta.get("companies", [])
+        sectors = meta.get("sectors", [])
+        framework_confidence = meta.get("framework_confidence", 0.0)
+        
+        if has_framework_props:
+            # Collection tem propriedades de framework - adiciona diretamente
+            chunk_properties["frameworks"] = frameworks
+            chunk_properties["companies"] = companies
+            chunk_properties["sectors"] = sectors
+            chunk_properties["framework_confidence"] = framework_confidence
+        else:
+            # Fallback: salva em meta JSON (já está lá, mas garante que está)
+            if frameworks or companies or sectors:
+                meta["frameworks"] = frameworks
+                meta["companies"] = companies
+                meta["sectors"] = sectors
+                meta["framework_confidence"] = framework_confidence
+                chunk_properties["meta"] = json.dumps(meta)
+        
+        return chunk_properties
+        
+    except Exception as e:
+        # Erro não crítico - retorna propriedades originais
+        msg.debug(f"[Framework-Mapping] Erro ao mapear frameworks (não crítico): {str(e)}")
+        return chunk_properties
 
 def cleanup_etl_state(doc_uuid: str):
     """
@@ -167,11 +229,116 @@ def patch_weaviate_manager():
                     msg.warn(f"[ETL-POST] Erro ao tentar reconectar: {str(e)}")
                     return None
             
+            # Mapeia frameworks para propriedades do Weaviate ANTES de importar
+            # Verifica se collection tem propriedades de framework
+            embedder_collection_name = self.embedding_table.get(embedder)
+            has_framework_props = False
+            has_named_vectors = False
+            if embedder_collection_name:
+                try:
+                    from verba_extensions.integration.schema_validator import collection_has_framework_properties
+                    has_framework_props = await collection_has_framework_properties(client, embedder_collection_name)
+                    
+                    # Verifica se collection tem named vectors
+                    try:
+                        collection = client.collections.get(embedder_collection_name)
+                        config = await collection.config.get()
+                        has_named_vectors = hasattr(config, 'vector_config') and config.vector_config is not None
+                    except:
+                        pass
+                except Exception as e:
+                    msg.debug(f"[Framework-Mapping] Erro ao verificar propriedades (não crítico): {str(e)}")
+            
             # Chama método original (NÃO retorna doc_uuid - método original não retorna)
             # Precisamos buscar doc_uuid após o import
             doc_uuid = None
             try:
-                await original_import(self, client, document, embedder)
+                # Patch temporário: intercepta criação de DataObjects para mapear frameworks e named vectors
+                from weaviate.collections.classes.data import DataObject
+                original_data_object_init = DataObject.__init__
+                
+                # Armazena resultado da verificação para usar no patch
+                _has_framework_props = has_framework_props
+                _has_named_vectors = has_named_vectors
+                _embedder_collection_name = embedder_collection_name
+                
+                def patched_data_object_init(self, *args, **kwargs):
+                    """Patch DataObject para mapear frameworks e named vectors antes de inserir"""
+                    # Chama init original
+                    original_data_object_init(self, *args, **kwargs)
+                    
+                    # Se collection tem propriedades de framework, mapeia de meta para properties
+                    if _has_framework_props and hasattr(self, 'properties') and self.properties:
+                        try:
+                            # Mapeia frameworks de meta para propriedades diretas
+                            meta_str = self.properties.get("meta", "{}")
+                            try:
+                                meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+                            except:
+                                meta = {}
+                            
+                            frameworks = meta.get("frameworks", [])
+                            companies = meta.get("companies", [])
+                            sectors = meta.get("sectors", [])
+                            framework_confidence = meta.get("framework_confidence", 0.0)
+                            
+                            # Adiciona diretamente às properties (collection já foi verificada)
+                            if frameworks or companies or sectors or framework_confidence > 0:
+                                self.properties["frameworks"] = frameworks
+                                self.properties["companies"] = companies
+                                self.properties["sectors"] = sectors
+                                self.properties["framework_confidence"] = framework_confidence
+                        except Exception as e:
+                            msg.debug(f"[Framework-Mapping] Erro ao mapear em DataObject (não crítico): {str(e)}")
+                    
+                    # Named vectors: adiciona textos especializados às properties
+                    # (os vetores serão adicionados antes de criar o DataObject)
+                    if _has_named_vectors and hasattr(self, 'properties') and self.properties:
+                        try:
+                            # Extrai textos especializados do meta
+                            meta_str = self.properties.get("meta", "{}")
+                            try:
+                                meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+                            except:
+                                meta = {}
+                            
+                            # Se já tem concept_text, sector_text, company_text no meta, usa eles
+                            # Caso contrário, extrai do conteúdo
+                            if "concept_text" in meta:
+                                self.properties["concept_text"] = meta["concept_text"]
+                            if "sector_text" in meta:
+                                self.properties["sector_text"] = meta["sector_text"]
+                            if "company_text" in meta:
+                                self.properties["company_text"] = meta["company_text"]
+                        except Exception as e:
+                            msg.debug(f"[Named-Vectors] Erro ao mapear textos especializados (não crítico): {str(e)}")
+                
+                # Aplica patch temporário
+                DataObject.__init__ = patched_data_object_init
+                
+                # Se tem named vectors, precisa gerar embeddings adicionais ANTES de criar DataObjects
+                # Isso requer modificar o método import_document para gerar embeddings extras
+                # Por enquanto, vamos apenas preparar os textos especializados nos chunks
+                if has_named_vectors and hasattr(document, 'chunks'):
+                    try:
+                        from verba_extensions.utils.vector_extractor import get_vector_extractor
+                        vector_extractor = get_vector_extractor()
+                        
+                        # Extrai textos especializados e adiciona ao meta de cada chunk
+                        for chunk in document.chunks:
+                            if hasattr(chunk, 'meta') and chunk.meta:
+                                texts = vector_extractor.extract_all_texts(chunk)
+                                chunk.meta["concept_text"] = texts["concept_text"]
+                                chunk.meta["sector_text"] = texts["sector_text"]
+                                chunk.meta["company_text"] = texts["company_text"]
+                    except Exception as e:
+                        msg.debug(f"[Named-Vectors] Erro ao extrair textos especializados (não crítico): {str(e)}")
+                
+                try:
+                    await original_import(self, client, document, embedder)
+                finally:
+                    # Restaura método original
+                    DataObject.__init__ = original_data_object_init
                 # Método original não retorna doc_uuid, então buscamos pelo título
                 if Filter is not None:
                     try:

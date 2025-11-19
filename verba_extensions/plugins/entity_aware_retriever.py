@@ -147,6 +147,24 @@ class EntityAwareRetriever(Retriever):
             description="Name of the date field in Weaviate (default: chunk_date)",
             values=[],
         )
+        self.config["Enable Framework Filter"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable framework/company/sector filtering in search",
+            values=[],
+        )
+        self.config["Enable Multi-Vector Search"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable multi-vector search using named vectors (concept_vec, sector_vec, company_vec)",
+            values=[],
+        )
+        self.config["Enable Aggregation"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable aggregation queries for analytics (count, group by, etc.)",
+            values=[],
+        )
     
     def _detect_entity_focus_in_query(self, query: str, entities: List[str]) -> bool:
         """
@@ -194,6 +212,73 @@ class EntityAwareRetriever(Retriever):
                     return True
         
         return False
+    
+    def _detect_aggregation_query(self, query: str) -> bool:
+        """
+        Detecta se a query é uma query de agregação/analytics.
+        
+        Padrões que indicam agregação:
+        - "quantos documentos"
+        - "count"
+        - "agrupar por"
+        - "group by"
+        - "quantidade de"
+        
+        Args:
+            query: Query do usuário
+        
+        Returns:
+            True se é query de agregação
+        """
+        query_lower = query.lower()
+        
+        aggregation_keywords = [
+            "quantos",
+            "quantas",
+            "count",
+            "agrupar",
+            "group by",
+            "quantidade",
+            "total de",
+            "número de",
+            "estatísticas",
+            "analytics",
+            "agregação"
+        ]
+        
+        return any(keyword in query_lower for keyword in aggregation_keywords)
+    
+    def _extract_group_by_from_query(self, query: str) -> Optional[List[str]]:
+        """
+        Extrai propriedades para group_by da query.
+        
+        Args:
+            query: Query do usuário
+        
+        Returns:
+            Lista de propriedades para agrupar ou None
+        """
+        query_lower = query.lower()
+        
+        # Mapear termos da query para propriedades Weaviate
+        property_mapping = {
+            "framework": "frameworks",
+            "empresa": "companies",
+            "setor": "sectors",
+            "company": "companies",
+            "sector": "sectors",
+            "data": "chunk_date",
+            "date": "chunk_date",
+            "idioma": "chunk_lang",
+            "language": "chunk_lang"
+        }
+        
+        group_by = []
+        for term, property_name in property_mapping.items():
+            if term in query_lower:
+                group_by.append(property_name)
+        
+        return group_by if group_by else None
     
     async def retrieve(
         self,
@@ -268,8 +353,47 @@ class EntityAwareRetriever(Retriever):
         cache_ttl = int(config.get("Query Rewriter Cache TTL", {}).value) if isinstance(config.get("Query Rewriter Cache TTL"), InputConfig) else 3600
         enable_temporal_filter = config.get("Enable Temporal Filter", {}).value if isinstance(config.get("Enable Temporal Filter"), InputConfig) else True
         date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
+        enable_aggregation = config.get("Enable Aggregation", {}).value if isinstance(config.get("Enable Aggregation"), InputConfig) else False
         
         msg.info(f"🎯 Entity Filter Mode: {entity_filter_mode}")
+        
+        # 0.5. VERIFICAR SE É QUERY DE AGREGAÇÃO
+        is_aggregation_query = False
+        if enable_aggregation:
+            is_aggregation_query = self._detect_aggregation_query(query)
+            if is_aggregation_query:
+                try:
+                    # Normalizar nome da collection
+                    normalized = weaviate_manager._normalize_embedder_name(embedder)
+                    collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                    
+                    # Executar aggregation
+                    from verba_extensions.utils.aggregation_wrapper import get_aggregation_wrapper
+                    aggregation_wrapper = get_aggregation_wrapper()
+                    
+                    # Detectar propriedades para group_by
+                    group_by = self._extract_group_by_from_query(query)
+                    
+                    # Executar aggregation
+                    result = await aggregation_wrapper.aggregate_over_all(
+                        client=client,
+                        collection_name=collection_name,
+                        group_by=group_by,
+                        total_count=True,
+                        use_http_fallback=True
+                    )
+                    
+                    # Converter resultado para formato de chunks (para compatibilidade)
+                    # Retornar resultado formatado
+                    msg.good(f"  ✅ Aggregation executada: {result}")
+                    
+                    # Por enquanto, retornar lista vazia (aggregation retorna dados analíticos, não chunks)
+                    # Em uma implementação futura, poderia retornar um formato especial
+                    return []
+                    
+                except Exception as e:
+                    msg.warn(f"  ⚠️ Erro ao executar aggregation: {str(e)}, usando busca normal")
+                    is_aggregation_query = False
         
         # 0. QUERY BUILDING (antes de parsing) - QueryBuilder inteligente com schema
         rewritten_query = query
@@ -569,6 +693,28 @@ class EntityAwareRetriever(Retriever):
         
         msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
         
+        # Detectar frameworks mencionados na query
+        detected_frameworks = []
+        detected_companies = []
+        detected_sectors = []
+        
+        try:
+            from verba_extensions.utils.framework_detector import get_framework_detector
+            framework_detector = get_framework_detector()
+            framework_data = await framework_detector.detect_frameworks(query)
+            detected_frameworks = framework_data.get("frameworks", [])
+            detected_companies = framework_data.get("companies", [])
+            detected_sectors = framework_data.get("sectors", [])
+            
+            if detected_frameworks:
+                msg.info(f"  🔍 Frameworks detectados na query: {detected_frameworks}")
+            if detected_companies:
+                msg.info(f"  🔍 Empresas detectadas na query: {detected_companies}")
+            if detected_sectors:
+                msg.info(f"  🔍 Setores detectados na query: {detected_sectors}")
+        except Exception as e:
+            msg.debug(f"  Erro ao detectar frameworks na query (não crítico): {str(e)}")
+        
         # Para compatibilidade: entity_ids usado para filtro
         entity_ids = final_entity_ids
         
@@ -733,7 +879,56 @@ class EntityAwareRetriever(Retriever):
             except ImportError:
                 msg.warn("  entity_frequency não disponível, ignorando filtro de frequência")
         
-        # Combinar filtros (entity + language + temporal)
+        # 2.4. FILTRO DE FRAMEWORK (se habilitado e collection suporta)
+        framework_filter = None
+        enable_framework_filter = config.get("Enable Framework Filter", {}).value if isinstance(config.get("Enable Framework Filter"), InputConfig) else True
+        
+        if enable_framework_filter and (detected_frameworks or detected_companies or detected_sectors):
+            try:
+                from verba_extensions.integration.schema_validator import collection_has_framework_properties
+                
+                # Normalizar nome da collection
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                # Verifica se collection tem propriedades de framework
+                has_framework_props = await collection_has_framework_properties(client, collection_name)
+                
+                if has_framework_props:
+                    framework_filters = []
+                    
+                    # Filtro por frameworks
+                    if detected_frameworks:
+                        framework_filters.append(
+                            Filter.by_property("frameworks").contains_any(detected_frameworks)
+                        )
+                    
+                    # Filtro por empresas
+                    if detected_companies:
+                        framework_filters.append(
+                            Filter.by_property("companies").contains_any(detected_companies)
+                        )
+                    
+                    # Filtro por setores
+                    if detected_sectors:
+                        framework_filters.append(
+                            Filter.by_property("sectors").contains_any(detected_sectors)
+                        )
+                    
+                    # Combina filtros de framework (AND - todos devem estar presentes)
+                    if len(framework_filters) == 1:
+                        framework_filter = framework_filters[0]
+                    elif len(framework_filters) > 1:
+                        framework_filter = Filter.all_of(framework_filters)
+                    
+                    if framework_filter:
+                        msg.good(f"  ✅ Filtro de framework aplicado: frameworks={detected_frameworks}, companies={detected_companies}, sectors={detected_sectors}")
+                else:
+                    msg.info(f"  ℹ️ Collection não tem propriedades de framework - filtro não será aplicado")
+            except Exception as e:
+                msg.debug(f"  Erro ao aplicar filtro de framework (não crítico): {str(e)}")
+        
+        # Combinar filtros (entity + language + temporal + framework)
         # IMPORTANTE: Quando não há entidades, filtros podem estar restringindo demais os resultados
         # Estratégia: aplicar filtros apenas quando há entidades OU quando são realmente necessários
         combined_filter = None
@@ -766,6 +961,11 @@ class EntityAwareRetriever(Retriever):
         if temporal_filter:
             filters_list.append(temporal_filter)
             msg.info(f"  ✅ Filtro temporal aplicado")
+        
+        # Filtro de framework: aplicar se disponível e collection suporta
+        if framework_filter:
+            filters_list.append(framework_filter)
+            # Log já foi feito acima
         
         if len(filters_list) == 1:
             combined_filter = filters_list[0]
@@ -829,6 +1029,45 @@ class EntityAwareRetriever(Retriever):
             debug_info["rewritten_query"] = search_query
         debug_info["search_mode"] = search_mode
         
+        # 3.5. VERIFICAR SE DEVE USAR MULTI-VECTOR SEARCH
+        enable_multi_vector = config.get("Enable Multi-Vector Search", {}).value if isinstance(config.get("Enable Multi-Vector Search"), InputConfig) else False
+        use_multi_vector = False
+        vectors_to_search = []
+        
+        if enable_multi_vector:
+            try:
+                # Normalizar nome da collection
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                # Verificar se collection tem named vectors
+                collection = client.collections.get(collection_name)
+                config_obj = await collection.config.get()
+                has_named_vectors = hasattr(config_obj, 'vector_config') and config_obj.vector_config is not None
+                
+                if has_named_vectors:
+                    # Decidir quais vetores usar baseado na query
+                    has_concept = bool(semantic_terms) or bool(detected_frameworks)
+                    has_sector = bool(detected_sectors)
+                    has_company = bool(detected_companies)
+                    
+                    # Se tem 2+ aspectos, usar multi-vector
+                    if has_concept:
+                        vectors_to_search.append("concept_vec")
+                    if has_sector:
+                        vectors_to_search.append("sector_vec")
+                    if has_company:
+                        vectors_to_search.append("company_vec")
+                    
+                    if len(vectors_to_search) >= 2:
+                        use_multi_vector = True
+                        msg.good(f"  🎯 Multi-vector search habilitado: {vectors_to_search}")
+                    else:
+                        msg.info(f"  ℹ️ Multi-vector não aplicável (apenas {len(vectors_to_search)} vetor(es) relevante(s))")
+            except Exception as e:
+                msg.debug(f"  Erro ao verificar named vectors (não crítico): {str(e)}")
+                use_multi_vector = False
+        
         # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!) - SUPORTE MULTI-MODO
         if search_mode == "Hybrid Search":
             try:
@@ -875,10 +1114,73 @@ class EntityAwareRetriever(Retriever):
                 # Executar busca baseado na estratégia escolhida
                 chunks = []
                 
-                if use_boost_only:
-                    # MODO BOOST: Busca SEM filtro + boost na query
-                    # Entidades já foram adicionadas à search_query (linha 758)
-                    msg.info(f"  Executando: Hybrid search com BOOST (sem filtro)")
+                # Se multi-vector está habilitado e aplicável, usar ele
+                if use_multi_vector and vectors_to_search:
+                    try:
+                        from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
+                        from goldenverba.components.managers import EmbeddingManager
+                        
+                        # Obter embedder para gerar query_vector
+                        embedding_manager = EmbeddingManager()
+                        embedder_obj = embedding_manager.get_embedder(embedder)
+                        embedder_config = embedding_manager.get_embedder_config(embedder)
+                        
+                        # Gerar embedding da query
+                        query_embeddings = await embedder_obj.vectorize(embedder_config, [search_query])
+                        if query_embeddings and len(query_embeddings) > 0:
+                            query_vector = query_embeddings[0]
+                            
+                            # Criar searcher e executar busca multi-vector
+                            searcher = MultiVectorSearcher()
+                            multi_vector_result = await searcher.search_multi_vector(
+                                client=client,
+                                collection_name=collection_name,
+                                query=search_query,
+                                query_vector=query_vector,
+                                vectors=vectors_to_search,
+                                filters=combined_filter if combined_filter else None,
+                                limit=limit * 2,  # Buscar mais para ter opções
+                                alpha=rewritten_alpha
+                            )
+                            
+                            # Converter resultados para formato de chunks
+                            from goldenverba.components.chunk import Chunk
+                            chunks = []
+                            for result in multi_vector_result.get("results", [])[:limit]:
+                                try:
+                                    chunk = Chunk(
+                                        text=result.get("text", ""),
+                                        doc_uuid=result.get("doc_uuid", ""),
+                                        chunk_id=result.get("chunk_id", 0)
+                                    )
+                                    # Adicionar metadados se disponíveis
+                                    if "frameworks" in result:
+                                        chunk.meta = chunk.meta or {}
+                                        chunk.meta["frameworks"] = result["frameworks"]
+                                    if "companies" in result:
+                                        chunk.meta = chunk.meta or {}
+                                        chunk.meta["companies"] = result["companies"]
+                                    if "sectors" in result:
+                                        chunk.meta = chunk.meta or {}
+                                        chunk.meta["sectors"] = result["sectors"]
+                                    chunks.append(chunk)
+                                except Exception as e:
+                                    msg.debug(f"  Erro ao converter resultado multi-vector: {str(e)}")
+                            
+                            msg.good(f"  ✅ Multi-vector search: {len(chunks)} chunks encontrados")
+                        else:
+                            msg.warn(f"  ⚠️ Não foi possível gerar embedding para multi-vector, usando busca normal")
+                            use_multi_vector = False
+                    except Exception as e:
+                        msg.warn(f"  ⚠️ Erro ao executar multi-vector search: {str(e)}, usando busca normal")
+                        use_multi_vector = False
+                
+                # Se multi-vector não foi usado, usar busca normal
+                if not use_multi_vector:
+                    if use_boost_only:
+                        # MODO BOOST: Busca SEM filtro + boost na query
+                        # Entidades já foram adicionadas à search_query (linha 758)
+                        msg.info(f"  Executando: Hybrid search com BOOST (sem filtro)")
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
                         embedder=embedder,
