@@ -1,18 +1,37 @@
 FROM python:3.11-slim
 
-# Instala dependências do sistema
+# 1. Instala Node.js e dependências de sistema para build
 RUN apt-get update && apt-get install -y \
     build-essential \
     wget \
     curl \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /Verba
 
-# Copia arquivos necessários
+# 2. Copia arquivos do projeto
 COPY . /Verba
 
-# Instala dependências do Verba base
+# 3. Build do Frontend
+# Instala dependências e compila o frontend React
+# O resultado será movido para o diretório correto que o Python serve
+WORKDIR /Verba/frontend
+RUN npm install
+RUN npm run build
+# Move o build para onde o servidor Python espera encontrar
+RUN rm -rf /Verba/goldenverba/server/frontend/out
+RUN cp -r out /Verba/goldenverba/server/frontend/out
+# Volta para a raiz para instalar o Python
+WORKDIR /Verba
+
+# 4. Instala dependências do Backend (Python)
 RUN pip install --no-cache-dir '.'
 
 # Instala sentence-transformers (para embedder local)
