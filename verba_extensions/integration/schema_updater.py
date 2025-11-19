@@ -398,8 +398,34 @@ def patch_weaviate_manager_verify_collection():
             
             if should_create_with_etl:
                 try:
-                    # Verifica se named vectors estão habilitados (via env var ou padrão False)
-                    enable_named_vectors = os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true"
+                    # Verifica se named vectors estão habilitados
+                    # 1. Tenta pegar da configuração do Verba salva no Weaviate
+                    enable_named_vectors = False
+                    try:
+                        from goldenverba.verba_manager import VerbaManager
+                        vm = VerbaManager()
+                        # Tenta obter configuração salva
+                        try:
+                            config = await vm.weaviate_manager.get_config(
+                                client, vm.rag_config_uuid
+                            )
+                            if config and "Advanced" in config and "Enable Named Vectors" in config["Advanced"]:
+                                enable_named_vectors = config["Advanced"]["Enable Named Vectors"].get("value", False)
+                                msg.info(f"📋 Named vectors lido da configuração: {enable_named_vectors}")
+                        except:
+                            # Se não conseguir ler, usa padrão do create_config
+                            default_config = vm.create_config()
+                            if "Advanced" in default_config and "Enable Named Vectors" in default_config["Advanced"]:
+                                enable_named_vectors = default_config["Advanced"]["Enable Named Vectors"]["value"]
+                                msg.info(f"📋 Named vectors lido do padrão: {enable_named_vectors}")
+                    except Exception as e:
+                        msg.debug(f"[Schema-Updater] Erro ao ler config do VerbaManager: {str(e)}")
+                    
+                    # 2. Fallback para variável de ambiente (compatibilidade)
+                    if not enable_named_vectors:
+                        enable_named_vectors = os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true"
+                        if enable_named_vectors:
+                            msg.info(f"📋 Named vectors lido de variável de ambiente: ENABLE_NAMED_VECTORS=true")
                     
                     # Obtém todas as propriedades (padrão Verba + ETL + opcionalmente named vectors)
                     all_properties = get_all_embedding_properties(include_named_vectors=enable_named_vectors)

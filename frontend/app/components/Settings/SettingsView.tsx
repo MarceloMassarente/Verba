@@ -10,13 +10,15 @@ import { IoChatboxEllipsesSharp } from "react-icons/io5";
 
 import VerbaButton from "../Navigation/VerbaButton";
 
-import { Theme, Themes, Credentials } from "@/app/types";
+import { Theme, Themes, Credentials, RAGConfig } from "@/app/types";
 
 import SettingsComponent from "./SettingsComponent";
 
 import InfoComponent from "../Navigation/InfoComponent";
 import SuggestionView from "./SuggestionView";
 import InfoView from "./InfoView";
+import AdvancedSettingsView from "./AdvancedSettingsView";
+import { FaCog } from "react-icons/fa";
 
 interface SettingsViewProps {
   selectedTheme: Theme;
@@ -24,6 +26,8 @@ interface SettingsViewProps {
   themes: Themes;
   setThemes: React.Dispatch<React.SetStateAction<Themes>>;
   credentials: Credentials;
+  RAGConfig: RAGConfig | null;
+  setRAGConfig: React.Dispatch<React.SetStateAction<RAGConfig | null>>;
   addStatusMessage: (
     message: string,
     type: "INFO" | "WARNING" | "SUCCESS" | "ERROR"
@@ -37,9 +41,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   addStatusMessage,
   setSelectedTheme,
   credentials,
+  RAGConfig,
+  setRAGConfig,
 }) => {
   const [settingMode, setSettingMode] = useState<
-    "INFO" | "ADMIN" | "THEME" | "SUGGESTIONS" | "CACHE"
+    "INFO" | "ADMIN" | "THEME" | "SUGGESTIONS" | "CACHE" | "ADVANCED"
   >("INFO");
 
   return (
@@ -75,6 +81,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               selected={settingMode === "SUGGESTIONS"}
               selected_color="bg-secondary-verba"
               Icon={IoChatboxEllipsesSharp}
+            />
+            <VerbaButton
+              title="Advanced"
+              onClick={() => setSettingMode("ADVANCED")}
+              selected={settingMode === "ADVANCED"}
+              selected_color="bg-secondary-verba"
+              Icon={FaCog}
             />
           </div>
           <div className="bg-bg-alt-verba gap-2 rounded-2xl flex flex-col p-6 w-full overflow-y-auto overflow-x-hidden">
@@ -119,6 +132,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             {settingMode === "SUGGESTIONS" && (
               <SuggestionView
                 credentials={credentials}
+                addStatusMessage={addStatusMessage}
+              />
+            )}
+            {settingMode === "ADVANCED" && (
+              <AdvancedSettingsView
+                credentials={credentials}
+                RAGConfig={RAGConfig}
+                setRAGConfig={setRAGConfig}
                 addStatusMessage={addStatusMessage}
               />
             )}

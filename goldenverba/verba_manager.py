@@ -656,12 +656,23 @@ class VerbaManager:
             "selected": list(generators.values())[0].name,
         }
 
+        # Advanced settings (Weaviate features)
+        advanced_config = {
+            "Enable Named Vectors": {
+                "type": "bool",
+                "value": os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true",
+                "description": "Enable named vectors (concept_vec, sector_vec, company_vec). Requires collection recreation. Increases memory usage (~3x).",
+                "values": []
+            }
+        }
+
         return {
             "Reader": reader_config,
             "Chunker": chunkers_config,
             "Embedder": embedder_config,
             "Retriever": retrievers_config,
             "Generator": generator_config,
+            "Advanced": advanced_config,
         }
 
     def create_user_config(self) -> dict:
@@ -688,6 +699,21 @@ class VerbaManager:
                 merged_config[component_key] = new_config[component_key]
                 continue
             
+            # Special handling for "Advanced" settings (not a RAGComponentClass)
+            if component_key == "Advanced":
+                # Merge Advanced settings directly
+                new_advanced = new_config[component_key]
+                if component_key not in merged_config:
+                    merged_config[component_key] = new_advanced
+                else:
+                    # Merge individual advanced settings
+                    for setting_key, new_setting in new_advanced.items():
+                        if setting_key not in merged_config[component_key]:
+                            merged_config[component_key][setting_key] = new_setting
+                            msg.info(f"Adding missing advanced setting '{setting_key}' with default value: {new_setting.get('value', 'N/A')}")
+                continue
+            
+            # Standard RAG component merging
             new_components = new_config[component_key]["components"]
             merged_components = merged_config[component_key]["components"]
             

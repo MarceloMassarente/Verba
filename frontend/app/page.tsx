@@ -272,6 +272,8 @@ export default function Home() {
                 setSelectedTheme={setSelectedTheme}
                 themes={themes}
                 setThemes={setThemes}
+                RAGConfig={RAGConfig}
+                setRAGConfig={setRAGConfig}
               />
             </div>
           </div>
