@@ -48,6 +48,85 @@
    - Não aparece: `✅ Aggregation executada`
    - **Causa provável**: Feature não foi usada (não há query de agregação nos logs)
 
+### 🚨 Erro Crítico Encontrado nos Logs:
+
+**Erro de Validação: `Advanced` Section**
+
+```
+✘ [BATCH] Failed to parse FileConfig JSON: ValidationError: 2
+validation errors for FileConfig
+rag_config.Advanced.selected   Field required
+rag_config.Advanced.components Field required
+```
+
+**Problema:**
+- O campo `rag_config.Advanced` está sendo enviado com estrutura incorreta
+- O backend espera que `Advanced` siga a estrutura `RAGComponentClass` com:
+  - `selected: str` (obrigatório)
+  - `components: dict[str, RAGComponentConfig]` (obrigatório)
+- Mas o frontend está enviando uma estrutura plana:
+  ```json
+  "Advanced": {
+    "Enable Named Vectors": {
+      "type": "bool",
+      "value": true,
+      "description": "...",
+      "values": []
+    }
+  }
+  ```
+
+**Solução:**
+
+**Opção 1: Remover `Advanced` do `rag_config` antes de validar** (Recomendado)
+- Modificar `goldenverba/server/helpers.py` na função `check_batch()` para filtrar `Advanced` antes da validação:
+
+```python
+# Em goldenverba/server/helpers.py, linha ~197-214
+try:
+    import json
+    # Parse JSON first to filter out Advanced section
+    data_dict = json.loads(data)
+    
+    # Advanced section is not a proper RAGComponentClass structure
+    # Note: Advanced settings are read from the global RAG config (stored in Weaviate),
+    # not from the file-specific FileConfig, so we can safely remove it here
+    advanced_config = None
+    if "rag_config" in data_dict and "Advanced" in data_dict["rag_config"]:
+        advanced_config = data_dict["rag_config"].pop("Advanced")
+        msg.info(f"[BATCH] Advanced section found and removed from validation")
+    
+    # Now validate the cleaned data
+    fileConfig = FileConfig.model_validate(data_dict)
+    ...
+```
+
+**Por que funciona:**
+- A configuração `Advanced` (como "Enable Named Vectors") é lida do **RAG config global** armazenado no Weaviate (via `vm.get_rag_config()`), não do `FileConfig` específico do arquivo
+- O `schema_updater.py` já lê `Advanced` do RAG config global quando necessário
+- Remover `Advanced` do `FileConfig` não afeta a funcionalidade, pois ele não é usado durante a importação
+
+**Impacto (Antes da correção):**
+- ❌ **Importação de arquivos falha** quando `Advanced` está presente no `rag_config`
+- ❌ **Batch uploads são rejeitados** pela validação Pydantic
+- ⚠️ Configurações avançadas (como "Enable Named Vectors") não são aplicadas durante a importação
+
+**Status Atual nos Logs (Antes da correção):**
+```
+✘ [BATCH] Failed to add batch: ValidationError: 2 validation errors for FileConfig
+rag_config.Advanced.selected   Field required
+rag_config.Advanced.components Field required
+```
+
+**Status Após Correção:**
+```
+✅ [BATCH] Advanced section found and removed from validation
+✅ [BATCH] Advanced config detected (will use global RAG config instead): ['Enable Named Vectors']
+✅ [BATCH] ✅ Parsed FileConfig: ... (Reader: ...)
+```
+
+**Nota:** A configuração "Enable Named Vectors" continua funcionando corretamente porque é lida do RAG config global armazenado no Weaviate, não do `FileConfig` do arquivo.
+
 ---
 
 ## 🔍 Por que os logs não aparecem?

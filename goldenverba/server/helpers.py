@@ -194,7 +194,26 @@ class BatchManager:
             msg.info(f"[BATCH] Assembled JSON data: {len(data)} chars")
             
             try:
-                fileConfig = FileConfig.model_validate_json(data)
+                import json
+                # Parse JSON first to filter out Advanced section
+                data_dict = json.loads(data)
+                
+                # Advanced section is not a proper RAGComponentClass structure
+                # It's a flat dict of settings, so we need to remove it before validation
+                # Note: Advanced settings are read from the global RAG config (stored in Weaviate),
+                # not from the file-specific FileConfig, so we can safely remove it here
+                advanced_config = None
+                if "rag_config" in data_dict and "Advanced" in data_dict["rag_config"]:
+                    advanced_config = data_dict["rag_config"].pop("Advanced")
+                    msg.info(f"[BATCH] Advanced section found and removed from validation (Advanced settings are read from global RAG config, not FileConfig)")
+                
+                # Now validate the cleaned data
+                fileConfig = FileConfig.model_validate(data_dict)
+                
+                # Log advanced config for debugging (not used for import, but helpful to know)
+                if advanced_config:
+                    msg.info(f"[BATCH] Advanced config detected (will use global RAG config instead): {list(advanced_config.keys())}")
+                
                 # rag_config is dict[str, RAGComponentClass], so access selected attribute directly
                 reader_name = "unknown"
                 if "Reader" in fileConfig.rag_config and fileConfig.rag_config["Reader"]:
