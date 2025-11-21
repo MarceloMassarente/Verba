@@ -138,14 +138,14 @@ O sistema de tracking de tempo está funcionando corretamente, com valores `took
   - Pode ser um schema legado ou específico para este embedder
 
 **Análise Técnica:**
-- O aviso vem de `ingestor/etl_a2_intelligent.py` linha 334
+- O aviso vem de `verba_extensions/etl/etl_a2_intelligent.py` linha 334
 - O código tenta buscar propriedades `text` e `chunk_text` da collection de embedding
 - Collections de embedding (`VERBA_Embedding_*`) normalmente não têm essas propriedades
 - O código lida com isso graciosamente, apenas não buscando essas propriedades
 - **Não é crítico** - imports completaram com sucesso
 
 **Recomendação:**
-- Opcional: Ajustar `ingestor/etl_a2_intelligent.py` para não solicitar `text` e `chunk_text` de collections de embedding
+- Opcional: Ajustar `verba_extensions/etl/etl_a2_intelligent.py` para não solicitar `text` e `chunk_text` de collections de embedding
 - Ou: Adicionar lógica para detectar tipo de collection e ajustar propriedades solicitadas
 - **Prioridade:** Baixa (não afeta funcionalidade, apenas reduz ruído nos logs)
 

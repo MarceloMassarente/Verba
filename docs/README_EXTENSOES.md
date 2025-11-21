@@ -117,7 +117,7 @@ verba start
 
 ### 2. ETL A2
 
-**Localização:** `ingestor/etl_a2.py`
+**Localização:** `verba_extensions/etl/etl_a2.py`
 
 **Funcionalidade:**
 - NER com spaCy

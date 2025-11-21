@@ -55,7 +55,7 @@ Verba/
 │       └── components/managers.py       (modificado)
 │
 └── 📦 Outros
-    ├── ingestor/                        (minisserviço separado)
+    ├── verba_extensions/etl/            (ETL integrado)
     ├── frontend/                        (sem modificações)
     └── requirements-extensions.txt
 ```
