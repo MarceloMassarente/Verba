@@ -88,11 +88,11 @@ plugin_manager, version_checker = initialize_extensions()
 python scripts/create_schema.py
 ```
 
-### 5. Rodar Ingestor
+### 5. Rodar Ingestor (Opcional - ETL está integrado)
 
 ```bash
-# Terminal 1: Ingestor
-cd ingestor
+# Terminal 1: Ingestor (apenas se quiser rodar standalone)
+cd verba_extensions/etl
 uvicorn app:app --host 0.0.0.0 --port 8001
 
 # Terminal 2: Verba (com extensões)

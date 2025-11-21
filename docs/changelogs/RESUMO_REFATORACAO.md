@@ -151,7 +151,7 @@ verba_extensions/
 1. **Remova:**
    ```bash
    # Não precisa mais rodar:
-   cd ingestor && uvicorn app:app --port 8001
+   cd verba_extensions/etl && uvicorn app:app --port 8001
    ```
 
 2. **Use:**

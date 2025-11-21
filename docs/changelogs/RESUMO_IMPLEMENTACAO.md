@@ -152,8 +152,8 @@ from goldenverba.server.api import app
 ### 4. Uso
 
 ```bash
-# Ingestor
-cd ingestor && uvicorn app:app --port 8001
+# Ingestor (opcional - ETL está integrado nos plugins)
+cd verba_extensions/etl && uvicorn app:app --port 8001
 
 # Verba (outro terminal)
 verba start
