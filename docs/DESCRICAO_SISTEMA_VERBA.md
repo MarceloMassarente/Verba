@@ -41,7 +41,7 @@ Verba/
 ├── frontend/                 # Frontend Next.js/React
 │   └── app/                  # Componentes React
 │
-├── ingestor/                 # Minisserviço de Ingestão (Opcional)
+├── verba_extensions/etl/     # Sistema ETL Integrado (Core para customizações)
 │   ├── app.py               # API FastAPI para ingestão
 │   ├── etl_a2.py            # ETL com NER + Section Scope
 │   └── chunker.py           # Divisão de documentos

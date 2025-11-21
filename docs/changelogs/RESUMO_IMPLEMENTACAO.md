@@ -31,12 +31,12 @@
 ### 3. Minisserviço de Ingestão
 
 **Arquivos:**
-- `ingestor/app.py` - FastAPI com endpoints REST
-- `ingestor/deps.py` - Conexão Weaviate
-- `ingestor/fetcher.py` - Extração de URLs
-- `ingestor/chunker.py` - Divisão em passages
-- `ingestor/etl_a2.py` - ETL com NER + Section Scope
-- `ingestor/utils.py` - Utilidades
+- `verba_extensions/etl/app.py` - FastAPI com endpoints REST
+- `verba_extensions/etl/deps.py` - Conexão Weaviate
+- `verba_extensions/etl/fetcher.py` - Extração de URLs
+- `verba_extensions/etl/chunker.py` - Divisão em passages
+- `verba_extensions/etl/etl_a2.py` - ETL com NER + Section Scope
+- `verba_extensions/etl/utils.py` - Utilidades
 
 **Endpoints:**
 - `POST /ingest/urls` - Ingesta URLs diretamente

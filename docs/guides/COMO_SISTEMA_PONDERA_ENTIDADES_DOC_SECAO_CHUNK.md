@@ -99,7 +99,7 @@ Total no documento:
 
 ### 1. SectionScope (Ordem de Prioridade)
 
-**Arquivo**: `ingestor/etl_a2.py` (linhas 112-124)
+**Arquivo**: `verba_extensions/etl/etl_a2.py` (linhas 112-124)
 
 ```python
 # Ordem de verificação:
@@ -129,7 +129,7 @@ Ambos vazios, mas parent_entities: ["Q312"]
 
 ### 2. Entity Focus Score
 
-**Arquivo**: `ingestor/etl_a2.py` (linha 128)
+**Arquivo**: `verba_extensions/etl/etl_a2.py` (linha 128)
 
 ```python
 # Primary entity escolhida

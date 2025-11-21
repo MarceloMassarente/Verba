@@ -20,7 +20,7 @@ projeto/
 │   └── plugins/
 │       ├── entity_aware_retriever.py
 │       └── (seus plugins aqui)
-├── ingestor/                 # Minisserviço de ingestão
+├── verba_extensions/etl/     # Sistema ETL integrado
 │   ├── app.py
 │   ├── etl_a2.py
 │   └── ...

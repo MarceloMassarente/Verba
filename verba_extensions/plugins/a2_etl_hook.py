@@ -159,7 +159,7 @@ async def run_etl_on_passages(
         try:
             msg.info(f"📊 Executando ETL inteligente (multi-idioma) em {len(passage_uuids)} chunks...")
             # ETL inteligente do ingestor
-            from ingestor.etl_a2_intelligent import run_etl_patch_for_passage_uuids as run_etl_intelligent
+            from etl_a2_intelligent import run_etl_patch_for_passage_uuids as run_etl_intelligent
             result = await run_etl_intelligent(
                 lambda: client,
                 passage_uuids,

@@ -74,7 +74,7 @@
 
 ### ⭐ NOVO: ETL Inteligente Multi-idioma
 
-**Módulo:** `ingestor/etl_a2_intelligent.py`
+**Módulo:** `verba_extensions/etl/etl_a2_intelligent.py`
 
 **Funcionalidades:**
 1. **Detecção automática de idioma:**

@@ -52,7 +52,7 @@ primary = sect_ids[0]  # "ent:loc:cupertino" ❌ ERRADO!
 ### 3. Código Atual
 
 ```python
-# ingestor/etl_a2.py linha 116-120
+# verba_extensions/etl/etl_a2.py linha 116-120
 h_hits = match_aliases(sect_title, gaz)  # ["ent:loc:cupertino", "ent:org:apple"]
 
 if h_hits:

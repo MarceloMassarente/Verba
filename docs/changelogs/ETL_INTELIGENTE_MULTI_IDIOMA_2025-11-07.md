@@ -10,7 +10,7 @@ Implementação completa do **ETL Inteligente Multi-idioma** que detecta entidad
 
 ### 1. **ETL Inteligente Multi-idioma** ⭐
 
-**Módulo:** `ingestor/etl_a2_intelligent.py`
+**Módulo:** `verba_extensions/etl/etl_a2_intelligent.py`
 
 **Funcionalidades:**
 - ✅ **Detecção automática de idioma** (PT/EN) usando `langdetect`
@@ -45,7 +45,7 @@ Implementação completa do **ETL Inteligente Multi-idioma** que detecta entidad
   - Qualquer outro modelo
 
 **Arquivos modificados:**
-- `ingestor/etl_a2_intelligent.py` - Detecção automática de collection
+- `verba_extensions/etl/etl_a2_intelligent.py` - Detecção automática de collection
 - `verba_extensions/plugins/a2_etl_hook.py` - Passa `collection_name` explicitamente
 
 ---
@@ -144,7 +144,7 @@ Implementados **4 modos de filtro** configuráveis no Entity-Aware Retriever:
 
 **Arquivos modificados:**
 - `verba_extensions/utils/code_switching_detector.py`
-- `ingestor/etl_a2_intelligent.py`
+- `verba_extensions/etl/etl_a2_intelligent.py`
 - `verba_extensions/plugins/bilingual_filter.py`
 - `scripts/test_code_switching.py`
 
@@ -181,7 +181,7 @@ Implementados **4 modos de filtro** configuráveis no Entity-Aware Retriever:
 - ✅ Fallback para `"Passage"` se nada encontrado
 
 **Arquivos:**
-- `ingestor/etl_a2_intelligent.py` (linha 199-213)
+- `verba_extensions/etl/etl_a2_intelligent.py` (linha 199-213)
 - `verba_extensions/plugins/a2_etl_hook.py` (linha 162)
 
 ---
@@ -228,7 +228,7 @@ Implementados **4 modos de filtro** configuráveis no Entity-Aware Retriever:
 ## 📝 Arquivos Modificados
 
 ### **Novos:**
-- `ingestor/etl_a2_intelligent.py` - ETL inteligente multi-idioma
+- `verba_extensions/etl/etl_a2_intelligent.py` - ETL inteligente multi-idioma
 - `scripts/check_entities_in_chunks.py` - Script de validação
 
 ### **Modificados:**

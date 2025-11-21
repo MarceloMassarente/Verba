@@ -363,7 +363,7 @@ print(f"Default embedder: {config['Embedder']['selected']}")  # Deve ser Sentenc
 ### 5. **ETL A2 Hook (NER + Section Scope)** ✅ ⭐ ATUALIZADO
 
 **Arquivo:** `verba_extensions/plugins/a2_etl_hook.py`  
-**Módulo ETL:** `ingestor/etl_a2_intelligent.py` ⭐ NOVO
+**Módulo ETL:** `verba_extensions/etl/etl_a2_intelligent.py` ⭐ NOVO
 
 **O que faz:**
 - Executa ETL pós-chunking: extrai entidades (NER) e determina section scope para cada chunk
@@ -405,7 +405,7 @@ print(f"Default embedder: {config['Embedder']['selected']}")  # Deve ser Sentenc
 ```python
 # Verificar se função ainda existe:
 from verba_extensions.plugins.a2_etl_hook import run_etl_on_passages
-from ingestor.etl_a2_intelligent import run_etl_patch_for_passage_uuids
+from verba_extensions.etl.etl_a2_intelligent import run_etl_patch_for_passage_uuids
 # Se importar sem erro, está OK
 
 # Verificar se collection_name é passado:
@@ -541,7 +541,7 @@ Na interface do Verba, nova opção `Entity Filter Mode` com valores: `strict`, 
 **Arquivos:**
 - `verba_extensions/utils/code_switching_detector.py`
 - `verba_extensions/plugins/bilingual_filter.py`
-- `ingestor/etl_a2_intelligent.py`
+- `verba_extensions/etl/etl_a2_intelligent.py`
 - `scripts/test_code_switching.py`
 
 **Problema:**
