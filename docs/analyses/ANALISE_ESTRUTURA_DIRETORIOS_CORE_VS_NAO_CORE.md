@@ -86,17 +86,17 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 
 ---
 
-### 🟢 6. `ingestor/` - **LEGADO/DESENVOLVIMENTO**
-**Importância:** Baixa - Sistema ETL legado
+### 🟡 6. `ingestor/` - **ETL STANDALONE**
+**Importância:** Média - Sistema ETL independente
 
 **Conteúdo:**
-- `app.py` - API ETL
-- `etl_a2.py`, `etl_a2_intelligent.py` - Processamento ETL
+- `app.py` - **API FastAPI independente** (porta própria)
+- `etl_a2.py`, `etl_a2_intelligent.py` - Processamento ETL inteligente
 - `chunker.py`, `fetcher.py` - Componentes ETL
 - `resources/gazetteer.json` - Dados entidades
 
-**Função:** Sistema ETL separado (aparentemente não integrado ao core).
-**Status:** 📦 Parece ser código legado ou experimental, não usado pelo sistema principal
+**Função:** Sistema ETL standalone usado pelos plugins via import.
+**Status:** 🔗 **NÃO é plugin**, mas é **usado pelos plugins** (`a2_etl_hook.py` importa funções dele)
 
 ---
 
@@ -162,7 +162,7 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 | `verba_extensions/` | 🟡 AVANÇADO | ✅ RECOMENDADO | ✅ ESSENCIAL | ✅ IMPORTANTE |
 | `docs/` | 🟢 SUPORTE | ❌ OPCIONAL | ✅ ESSENCIAL | ✅ IMPORTANTE |
 | `scripts/` | 🟡 FERRAMENTAS | ❌ OPCIONAL | ✅ IMPORTANTE | ✅ ESSENCIAL |
-| `ingestor/` | 🟢 LEGADO | ❌ NÃO USADO | 🟡 EXPERIMENTAL | ❌ BAIXA |
+| `ingestor/` | 🟡 STANDALONE | ❌ NÃO CORE | 🟡 USADO POR PLUGINS | 🟡 MANUTENÇÃO |
 | `patches/` | 🟢 CORREÇÕES | ❌ OPCIONAL | 🟡 VERSIONADO | 🟡 SITUACIONAL |
 | `img/` | 🟢 ASSETS | ❌ OPCIONAL | 🟡 DOCUMENTAÇÃO | ❌ BAIXA |
 | `tests/` | 🟢 TESTES | ❌ OPCIONAL | ✅ IMPORTANTE | ✅ IMPORTANTE |
