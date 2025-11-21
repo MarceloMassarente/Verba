@@ -360,6 +360,9 @@ class VerbaManager:
             # Add chunk_lang to chunks (language detection) + Quality Scoring (RAG2)
             from goldenverba.components.document import detect_language
             for doc in chunked_documents:
+                initial_chunk_count = len(doc.chunks)
+                msg.info(f"[QUALITY] Processando {initial_chunk_count} chunks para documento '{doc.title}'")
+                
                 # Quality Scoring (RAG2) - filtrar chunks de baixa qualidade
                 try:
                     from verba_extensions.utils.quality import compute_quality_score
@@ -371,6 +374,7 @@ class VerbaManager:
                 
                 filtered_chunks = []
                 quality_filtered_count = 0
+                chunk_scores = []  # Para diagnóstico
                 
                 for chunk in doc.chunks:
                     # Language detection
@@ -397,6 +401,13 @@ class VerbaManager:
                             is_summary=is_summary
                         )
                         
+                        chunk_scores.append({
+                            "score": score,
+                            "reason": reason,
+                            "length": len(chunk.content),
+                            "chunk_id": chunk.chunk_id
+                        })
+                        
                         # Filtrar chunks de baixa qualidade
                         if score < quality_threshold:
                             quality_filtered_count += 1
@@ -413,10 +424,35 @@ class VerbaManager:
                     
                     filtered_chunks.append(chunk)
                 
+                # PROTEÇÃO: Se TODOS os chunks foram filtrados, manter pelo menos o melhor
+                if use_quality_filter and len(filtered_chunks) == 0 and initial_chunk_count > 0:
+                    msg.warn(f"[QUALITY] ⚠️ TODOS os {initial_chunk_count} chunks foram filtrados pelo quality filter!")
+                    msg.warn(f"[QUALITY] Mantendo o chunk com maior score para evitar documento sem chunks")
+                    
+                    # Encontra o chunk com maior score
+                    if chunk_scores:
+                        best_chunk_idx = max(range(len(chunk_scores)), key=lambda i: chunk_scores[i]["score"])
+                        best_chunk = doc.chunks[best_chunk_idx]
+                        best_score = chunk_scores[best_chunk_idx]["score"]
+                        
+                        msg.warn(f"[QUALITY] Mantendo chunk {best_chunk.chunk_id} (score: {best_score:.3f}, reason: {chunk_scores[best_chunk_idx]['reason']})")
+                        filtered_chunks = [best_chunk]
+                
                 # Atualizar chunks do documento (remover os filtrados)
                 if use_quality_filter and quality_filtered_count > 0:
                     doc.chunks = filtered_chunks
-                    msg.info(f"[QUALITY] Filtrados {quality_filtered_count} chunks de baixa qualidade (threshold: {quality_threshold})")
+                    final_count = len(doc.chunks)
+                    msg.info(f"[QUALITY] Filtrados {quality_filtered_count}/{initial_chunk_count} chunks de baixa qualidade (threshold: {quality_threshold})")
+                    msg.info(f"[QUALITY] Chunks restantes: {final_count}")
+                    
+                    # Log detalhado se muitos foram filtrados
+                    if quality_filtered_count > initial_chunk_count * 0.5:
+                        msg.warn(f"[QUALITY] ⚠️ Mais de 50% dos chunks foram filtrados! ({quality_filtered_count}/{initial_chunk_count})")
+                        if chunk_scores:
+                            avg_score = sum(s["score"] for s in chunk_scores) / len(chunk_scores)
+                            min_score = min(s["score"] for s in chunk_scores)
+                            max_score = max(s["score"] for s in chunk_scores)
+                            msg.warn(f"[QUALITY] Scores: min={min_score:.3f}, avg={avg_score:.3f}, max={max_score:.3f}")
             
             # Apply plugin enrichment (e.g., LLMMetadataExtractor)
             if PLUGINS_AVAILABLE:
@@ -437,6 +473,22 @@ class VerbaManager:
             # Log embedding start
             embedder_name = currentFileConfig.rag_config["Embedder"].selected
             total_chunks = sum(len(doc.chunks) for doc in chunked_documents)
+            
+            # Validate that we have chunks before proceeding
+            if total_chunks == 0:
+                error_msg = f"No chunks created for document '{document.title}'. This may be due to: (1) empty or very short document content, (2) all chunks filtered out by quality threshold, or (3) chunking configuration issue."
+                msg.fail(f"[CHUNKING] ❌ {error_msg}")
+                try:
+                    await logger.send_report(
+                        currentFileConfig.fileID,
+                        status=FileStatus.ERROR,
+                        message=error_msg,
+                        took=0,
+                    )
+                except Exception:
+                    pass
+                raise Exception(error_msg)
+            
             msg.info(f"[EMBEDDING] Starting vectorization: embedder={embedder_name}, chunks={total_chunks}, docs={len(chunked_documents)}")
             
             # Envia status de início do embedding

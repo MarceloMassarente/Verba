@@ -796,6 +796,16 @@ class WeaviateManager:
 
             chunk_ids = []
 
+            # Validate that document has chunks before attempting import
+            if not document.chunks or len(document.chunks) == 0:
+                # Clean up the document we just created
+                await document_collection.data.delete_by_id(doc_uuid)
+                raise Exception(
+                    f"Cannot import document '{document.title}': no chunks available. "
+                    f"This may occur if: (1) document content is empty, (2) all chunks were filtered out, "
+                    f"or (3) chunking failed to create any chunks."
+                )
+
             try:
                 for chunk in document.chunks:
                     chunk.doc_uuid = doc_uuid

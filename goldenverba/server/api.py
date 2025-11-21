@@ -852,8 +852,56 @@ async def update_theme_config(payload: SetThemeConfigPayload):
 async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
     try:
+        # Validação básica do payload
+        if not payload.query or not payload.query.strip():
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "Query cannot be empty",
+                    "documents": [],
+                    "context": ""
+                }
+            )
+        
+        if not payload.RAG:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "RAG configuration is required",
+                    "documents": [],
+                    "context": ""
+                }
+            )
+        
         client = await client_manager.connect(payload.credentials)
-        documents_uuid = [document.uuid for document in payload.documentFilter]
+        documents_uuid = [document.uuid for document in payload.documentFilter] if payload.documentFilter else []
+        
+        # Verificar se há chunks disponíveis antes de processar query
+        try:
+            embedder = payload.RAG.get("Embedder", {}).get("selected", "")
+            if embedder:
+                from goldenverba.components.managers import WeaviateManager
+                weaviate_manager = WeaviateManager()
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                if await weaviate_manager.verify_embedding_collection(client, embedder):
+                    embedder_collection = client.collections.get(collection_name)
+                    # Verifica se há chunks na collection
+                    total_count = await embedder_collection.aggregate.over_all(total_count=True)
+                    if total_count.total_count == 0:
+                        msg.warn("No chunks available in database - cannot process query")
+                        return JSONResponse(
+                            content={
+                                "error": "No documents or chunks available in the database. Please import documents first.",
+                                "documents": [],
+                                "context": ""
+                            }
+                        )
+        except Exception as check_error:
+            # Não falha a query se a verificação der erro, apenas loga
+            msg.warn(f"Could not verify chunks availability: {str(check_error)}")
+        
         result = await manager.retrieve_chunks(
             client, payload.query, payload.RAG, payload.labels, documents_uuid
         )
@@ -861,21 +909,29 @@ async def query(payload: QueryPayload):
         # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
         if len(result) == 3:
             documents, context, debug_info = result
+            # Garantir que documents é uma lista
+            if documents is None:
+                documents = []
             return JSONResponse(
                 content={
                     "error": "", 
                     "documents": documents, 
-                    "context": context,
+                    "context": context or "",
                     "debug_info": debug_info  # Informações de debug para exibir no frontend
                 }
             )
         else:
             documents, context = result
+            # Garantir que documents é uma lista
+            if documents is None:
+                documents = []
             return JSONResponse(
-                content={"error": "", "documents": documents, "context": context}
+                content={"error": "", "documents": documents, "context": context or ""}
             )
     except Exception as e:
         msg.fail(f"Query failed: {str(e)}")
+        import traceback
+        msg.fail(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             content={"error": str(e), "documents": [], "context": ""}
         )
