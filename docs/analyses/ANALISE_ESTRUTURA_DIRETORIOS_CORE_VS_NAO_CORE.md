@@ -86,8 +86,8 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 
 ---
 
-### 🟡 6. `ingestor/` - **ETL STANDALONE**
-**Importância:** Média - Sistema ETL independente
+### 🟢 6. `ingestor/` - **ETL OPCIONAL**
+**Importância:** Baixa - Sistema ETL para funcionalidades avançadas
 
 **Conteúdo:**
 - `app.py` - **API FastAPI independente** (porta própria)
@@ -95,8 +95,8 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 - `chunker.py`, `fetcher.py` - Componentes ETL
 - `resources/gazetteer.json` - Dados entidades
 
-**Função:** Sistema ETL standalone usado pelos plugins via import.
-**Status:** 🔗 **NÃO é plugin**, mas é **usado pelos plugins** (`a2_etl_hook.py` importa funções dele)
+**Função:** Sistema ETL standalone usado por plugins específicos (a2_etl_hook).
+**Status:** 🔗 **NÃO CORE** - Sistema funciona perfeitamente sem ele. Apenas usado para ETL A2 (feature avançada opcional)
 
 ---
 
@@ -162,7 +162,7 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 | `verba_extensions/` | 🟡 AVANÇADO | ✅ RECOMENDADO | ✅ ESSENCIAL | ✅ IMPORTANTE |
 | `docs/` | 🟢 SUPORTE | ❌ OPCIONAL | ✅ ESSENCIAL | ✅ IMPORTANTE |
 | `scripts/` | 🟡 FERRAMENTAS | ❌ OPCIONAL | ✅ IMPORTANTE | ✅ ESSENCIAL |
-| `ingestor/` | 🟡 STANDALONE | ❌ NÃO CORE | 🟡 USADO POR PLUGINS | 🟡 MANUTENÇÃO |
+| `ingestor/` | 🟢 OPCIONAL | ❌ NÃO CORE | 🟢 FEATURE AVANÇADA | ❌ BAIXA |
 | `patches/` | 🟢 CORREÇÕES | ❌ OPCIONAL | 🟡 VERSIONADO | 🟡 SITUACIONAL |
 | `img/` | 🟢 ASSETS | ❌ OPCIONAL | 🟡 DOCUMENTAÇÃO | ❌ BAIXA |
 | `tests/` | 🟢 TESTES | ❌ OPCIONAL | ✅ IMPORTANTE | ✅ IMPORTANTE |
@@ -205,17 +205,24 @@ Esta análise classifica todos os diretórios do projeto Verba em **Core** (esse
 - `verba_extensions/tests/` - Testes extensões
 - `tests/` - Diretório separado (aparentemente vazio)
 
-### 2. Sistema ETL Separado
-- `ingestor/` parece ser um sistema ETL independente
-- Não integrado ao pipeline principal do Verba
-- Pode ser código legado ou experimental
+### 2. Sistema ETL Opcional
+- `ingestor/` é **ETL opcional** usado apenas por alguns plugins específicos
+- Sistema básico funciona perfeitamente sem ETL (BasicReader, FirecrawlReader, etc.)
+- Apenas `universal_reader`, `a2_reader`, `google_drive_reader` usam ETL
+- `a2_etl_hook` tem múltiplas camadas de fallback quando `ingestor/` não está disponível
 
 ### 3. Arquitetura Modular
 - Core (`goldenverba/`) é autocontido
 - Features avançadas (`verba_extensions/`) são plugináveis
 - Sistema funciona sem extensões (modo básico)
 
-### 4. Suporte Multi-Version
+### 4. ETL é Feature Opcional
+- Sistema funciona perfeitamente sem ETL
+- Readers básicos (`BasicReader`, `FirecrawlReader`, etc.) não dependem de ETL
+- ETL é usado apenas por readers específicos (`universal_reader`, `a2_reader`)
+- `a2_etl_hook` tem fallbacks próprios quando `ingestor/` não está disponível
+
+### 5. Suporte Multi-Version
 - `patches/` para correções versionadas
 - `compatibility/` para Weaviate v3/v4
 - Sistema preparado para evolução
