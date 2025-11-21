@@ -21,7 +21,7 @@ def load_gazetteer(path: str = None) -> Dict:
     import json
     if path is None:
         possible_paths = [
-            "ingestor/resources/gazetteer.json",
+            "verba_extensions/etl/resources/gazetteer.json",
             "verba_extensions/resources/gazetteer.json",
             "resources/gazetteer.json",
         ]

@@ -1,0 +1,31 @@
+[
+  {
+    "entity_id": "ent:org:google",
+    "aliases": ["Google", "Alphabet", "Google Cloud", "GCP", "Google Inc", "Alphabet Inc"]
+  },
+  {
+    "entity_id": "ent:org:microsoft",
+    "aliases": ["Microsoft", "MSFT", "Azure", "Microsoft Corporation"]
+  },
+  {
+    "entity_id": "ent:org:openai",
+    "aliases": ["OpenAI", "GPT", "ChatGPT"]
+  },
+  {
+    "entity_id": "ent:org:anthropic",
+    "aliases": ["Anthropic", "Claude", "Claude AI"]
+  },
+  {
+    "entity_id": "ent:org:weaviate",
+    "aliases": ["Weaviate", "Weaviate.io"]
+  },
+  {
+    "entity_id": "ent:loc:brasil",
+    "aliases": ["Brasil", "Brazil", "Brasileiro", "Brasileira"]
+  },
+  {
+    "entity_id": "ent:loc:usa",
+    "aliases": ["Estados Unidos", "USA", "US", "United States", "America"]
+  }
+]
+

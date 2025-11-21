@@ -22,7 +22,7 @@ def get_etl_module():
         import sys
         # Adicionar ingestor ao path
         if "ingestor" not in sys.modules:
-            ingestor_path = os.path.join(os.path.dirname(__file__), "..", "..", "ingestor")
+            ingestor_path = os.path.join(os.path.dirname(__file__), "..", "etl")
             if os.path.exists(ingestor_path):
                 sys.path.insert(0, ingestor_path)
         
@@ -62,7 +62,7 @@ def load_gazetteer(path: str = None) -> Dict:
     """Carrega gazetteer (opcional, para modo legado)"""
     etl = get_etl_module()
     if etl and "load_gazetteer" in etl:
-        return etl["load_gazetteer"](path if path else "ingestor/resources/gazetteer.json")
+        return etl["load_gazetteer"](path if path else "verba_extensions/etl/resources/gazetteer.json")
     return {}
 
 def get_nlp():
