@@ -204,7 +204,13 @@ class EntitySemanticChunker(Chunker):
             sections: List[Dict[str, Any]] = []
             try:
                 sections = detect_sections(text)  # type: ignore[name-defined]
-            except Exception:
+                msg.info(f"[Entity-Semantic] Detectadas {len(sections)} seções no documento")
+                for i, sec in enumerate(sections):
+                    sec_title = sec.get("title", "(sem título)")[:50]
+                    sec_size = sec.get("end", 0) - sec.get("start", 0)
+                    msg.info(f"[Entity-Semantic]   Seção {i+1}: '{sec_title}' ({sec_size} chars)")
+            except Exception as e:
+                msg.warn(f"[Entity-Semantic] Erro ao detectar seções: {str(e)}, usando documento inteiro")
                 sections = [{"title": "", "content": text, "start": 0, "end": len(text)}]
 
             chunk_id_counter = 0
@@ -275,6 +281,10 @@ class EntitySemanticChunker(Chunker):
 
                 # Ordena e remove duplicados
                 breakpoints = sorted(set(breakpoints))
+                
+                # Log para debug
+                section_title = section.get("title", "(sem título)")[:50]
+                msg.info(f"[Entity-Semantic] Seção '{section_title}': {len(sentences)} sentenças, {len(breakpoints)} breakpoints semânticos, max_sentences={max_sentences_per_chunk}")
 
                 # Constrói chunks respeitando guard-rails de entidades e overlap (em sentenças)
                 start_idx = 0
@@ -329,6 +339,7 @@ class EntitySemanticChunker(Chunker):
                     
                     document.chunks.append(chunk)
                     chunk_id_counter += 1
+                    msg.debug(f"[Entity-Semantic] Chunk {chunk_id_counter} criado: {len(chunk_text)} chars, {end_idx_exclusive - chunk_start_idx} sentenças")
 
                     start_idx = end_idx_exclusive
 

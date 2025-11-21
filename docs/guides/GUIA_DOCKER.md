@@ -92,7 +92,7 @@ services:
     #     condition: service_healthy
 
   # weaviate:  # COMENTE todo este serviço
-  #   image: semitechnologies/weaviate:1.25.10
+  #   image: semitechnologies/weaviate:1.34.0
   #   # ...
 ```
 

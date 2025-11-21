@@ -28,7 +28,7 @@ services:
 
   # COMENTE todo o serviço weaviate:
   # weaviate:
-  #   image: semitechnologies/weaviate:1.25.10
+  #   image: semitechnologies/weaviate:1.34.0
   #   # ... resto ...
 ```
 

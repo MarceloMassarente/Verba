@@ -14,7 +14,7 @@ services:
       weaviate:  # Weaviate roda junto
   
   weaviate:  # ← Serviço Weaviate incluído
-    image: semitechnologies/weaviate:1.25.10
+    image: semitechnologies/weaviate:1.34.0
     # ...
 ```
 
@@ -41,7 +41,7 @@ services:
 
   # Comente todo o serviço weaviate:
   # weaviate:
-  #   image: semitechnologies/weaviate:1.25.10
+  #   image: semitechnologies/weaviate:1.34.0
   #   # ... resto da config ...
 ```
 
@@ -186,7 +186,7 @@ services:
 
   # Serviço Weaviate COMENTADO - usando externo
   # weaviate:
-  #   image: semitechnologies/weaviate:1.25.10
+  #   image: semitechnologies/weaviate:1.34.0
   #   # ...
 
 networks:

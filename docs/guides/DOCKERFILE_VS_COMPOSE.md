@@ -117,7 +117,7 @@ Resultado:
    
 2. **OU criar serviço Weaviate no Railway**:
    - Novo serviço no Railway
-   - Use imagem: `semitechnologies/weaviate:1.25.10`
+   - Use imagem: `semitechnologies/weaviate:1.34.0`
    - Conecte via variáveis
 
 **Recomendação**: Opção 1 (já está quase pronto!)
