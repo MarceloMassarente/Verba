@@ -59,7 +59,7 @@ const BLOCKS: ConfigBlock[] = [
   {
     name: "search_mode",
     title: "Modo de Busca",
-    description: "Escolha o modo de busca (mutuamente exclusivos)",
+    description: "Escolha o modo de busca (mutuamente exclusivos): Modo Padrão, Two-Phase Search ou Aggregation",
     mode: "radio",
     configs: ["Two-Phase Search Mode", "Enable Multi-Vector Search", "Enable Aggregation"],
   },
@@ -322,6 +322,19 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
 
     if (blockConfigs.length === 0) return null;
 
+    // Determinar modo ativo para bloco "search_mode"
+    const getActiveMode = () => {
+      if (block.name !== "search_mode") return null;
+      const twoPhase = component.config["Two-Phase Search Mode"];
+      const aggregation = component.config["Enable Aggregation"];
+      
+      if (aggregation?.value) return "Aggregation";
+      if (twoPhase?.value && twoPhase.value !== "disabled") return "Two-Phase";
+      return "Padrão";
+    };
+    
+    const activeMode = getActiveMode();
+
     return (
       <div key={block.name} className="mb-6 p-4 bg-bg-alt-verba rounded-lg">
         <div className="mb-4">
@@ -329,6 +342,14 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
             {block.title}
           </h3>
           <p className="text-sm text-text-alt-verba">{block.description}</p>
+          {activeMode && (
+            <div className="mt-2 p-2 bg-button-verba/20 rounded text-xs text-text-verba">
+              <strong>Modo Ativo:</strong> {activeMode}
+              {activeMode === "Padrão" && " (Entity Filter + Semantic Search)"}
+              {activeMode === "Two-Phase" && " (Two-Phase Search)"}
+              {activeMode === "Aggregation" && " (Análise Estatística)"}
+            </div>
+          )}
         </div>
 
         {blockConfigs.map(({ name, config }) => renderConfigField(name, config))}
