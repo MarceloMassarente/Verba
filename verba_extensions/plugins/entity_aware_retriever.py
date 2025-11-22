@@ -35,7 +35,7 @@ from goldenverba.components.interfaces import Retriever
 from goldenverba.components.types import InputConfig
 from goldenverba.components.chunk import Chunk
 from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from wasabi import msg
 
 
@@ -63,59 +63,72 @@ class EntityAwareRetriever(Retriever):
         self.description = "Entity-Aware Retriever com busca semântica"
         self.name = "EntityAware"
         
+        # BLOCO 1: Busca Fundamental
         self.config["Search Mode"] = InputConfig(
             type="dropdown",
             value="Hybrid Search",
             description="Search mode to use.",
             values=["Hybrid Search"],
+            block="fundamental",
         )
         self.config["Limit Mode"] = InputConfig(
             type="dropdown",
             value="Autocut",
             description="Method for limiting results",
             values=["Autocut", "Fixed"],
+            block="fundamental",
         )
         self.config["Limit/Sensitivity"] = InputConfig(
             type="number",
             value=1,
             description="Limit value or sensitivity (for initial search)",
             values=[],
-        )
-        self.config["Chunk Window"] = InputConfig(
-            type="number",
-            value=1,
-            description="Number of surrounding chunks",
-            values=[],
+            block="fundamental",
         )
         self.config["Alpha"] = InputConfig(
             type="text",
             value="0.6",
             description="Hybrid search alpha (0.0=keyword, 1.0=vector). Use decimal format (e.g., 0.6)",
             values=[],
+            block="fundamental",
         )
+        self.config["Reranker Top K"] = InputConfig(
+            type="number",
+            value=5,
+            description="Number of top chunks to return after reranking (default: 5, use 0 to return all)",
+            values=[],
+            block="fundamental",
+        )
+        # BLOCO 2: Filtros
         self.config["Enable Entity Filter"] = InputConfig(
             type="bool",
             value=True,
             description="Enable entity-aware pre-filtering",
             values=[],
+            block="filters",
+            disabled_by=["Two-Phase Search Mode"],
         )
         self.config["Entity Filter Mode"] = InputConfig(
             type="dropdown",
             value="adaptive",
             description="Entity filter strategy: strict (hard filter), boost (soft boost), adaptive (fallback), hybrid (syntax-based)",
             values=["strict", "boost", "adaptive", "hybrid"],
+            block="filters",
+            disabled_by=["Two-Phase Search Mode"],
         )
         self.config["Enable Semantic Search"] = InputConfig(
             type="bool",
             value=True,
             description="Enable semantic search within filtered results",
             values=[],
+            block="filters",
         )
         self.config["Enable Language Filter"] = InputConfig(
             type="bool",
             value=True,
             description="Enable automatic language filtering based on query language",
             values=[],
+            block="filters",
         )
         self.config["Enable Query Rewriting"] = InputConfig(
             type="bool",
@@ -140,54 +153,93 @@ class EntityAwareRetriever(Retriever):
             value=True,
             description="Enable automatic temporal filtering based on dates in query",
             values=[],
+            block="filters",
         )
         self.config["Date Field Name"] = InputConfig(
             type="text",
             value="chunk_date",
             description="Name of the date field in Weaviate (default: chunk_date)",
             values=[],
+            block="filters",
         )
         self.config["Enable Framework Filter"] = InputConfig(
             type="bool",
             value=True,
             description="Enable framework/company/sector filtering in search",
             values=[],
+            block="filters",
+        )
+        # BLOCO 3: Modo de Busca (hierárquico)
+        self.config["Two-Phase Search Mode"] = InputConfig(
+            type="dropdown",
+            value="auto",
+            description="Two-phase search: first filter by entities, then multi-vector search within subspace",
+            values=["auto", "enabled", "disabled"],
+            block="search_mode",
+            disables=["Enable Entity Filter"],
+            warning="Entity Filter será desabilitado automaticamente (redundante com Two-Phase Search)",
         )
         self.config["Enable Multi-Vector Search"] = InputConfig(
             type="bool",
             value=False,
             description="Enable multi-vector search using named vectors (concept_vec, sector_vec, company_vec)",
             values=[],
+            block="search_mode",
+            requires={"global": "Enable Named Vectors"},
+            warning="Requer Enable Named Vectors habilitado globalmente (Settings → Advanced)",
         )
         self.config["Enable Aggregation"] = InputConfig(
             type="bool",
             value=False,
             description="Enable aggregation queries for analytics (count, group by, etc.)",
             values=[],
+            block="search_mode",
+            disables=["Enable Entity Filter", "Two-Phase Search Mode", "Enable Multi-Vector Search"],
+            warning="Modo Agregação: filtros e outros modos serão desabilitados automaticamente",
         )
-        self.config["Two-Phase Search Mode"] = InputConfig(
-            type="dropdown",
-            value="auto",
-            description="Two-phase search: first filter by entities, then multi-vector search within subspace",
-            values=["auto", "enabled", "disabled"],
-        )
+        # BLOCO 4: Otimizações
         self.config["Enable Query Expansion"] = InputConfig(
             type="bool",
             value=True,
             description="Enable query expansion (generates 3-5 variations to improve Recall)",
             values=[],
+            block="optimizations",
         )
         self.config["Enable Relative Score Fusion"] = InputConfig(
             type="bool",
             value=True,
             description="Enable Relative Score Fusion (preserves magnitude, better than RRF)",
             values=[],
+            block="optimizations",
         )
         self.config["Enable Dynamic Alpha"] = InputConfig(
             type="bool",
             value=True,
             description="Enable dynamic alpha optimization based on query type",
             values=[],
+            block="optimizations",
+            warning="Se ativado, Alpha acima é apenas base (será ajustado automaticamente)",
+        )
+        self.config["Enable Query Rewriting"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable LLM-based query rewriting for better search results (fallback only)",
+            values=[],
+            block="optimizations",
+        )
+        self.config["Query Rewriter Cache TTL"] = InputConfig(
+            type="number",
+            value=3600,
+            description="Cache TTL in seconds for query rewriting (default: 3600)",
+            values=[],
+            block="optimizations",
+        )
+        self.config["Chunk Window"] = InputConfig(
+            type="number",
+            value=1,
+            description="Number of surrounding chunks",
+            values=[],
+            block="optimizations",
         )
     
     async def _execute_two_phase_search(
@@ -431,6 +483,100 @@ class EntityAwareRetriever(Retriever):
             traceback.print_exc()
             return []
     
+    def _check_named_vectors_enabled(self) -> bool:
+        """
+        Verifica se Named Vectors estão habilitados globalmente.
+        
+        Returns:
+            True se Enable Named Vectors está habilitado (via env var ou config)
+        """
+        import os
+        # Verificar variável de ambiente
+        if os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true":
+            return True
+        
+        # Tentar verificar via VerbaManager (se disponível)
+        try:
+            from goldenverba.verba_manager import VerbaManager
+            vm = VerbaManager()
+            default_config = vm.create_config()
+            if "Advanced" in default_config and "Enable Named Vectors" in default_config["Advanced"]:
+                return default_config["Advanced"]["Enable Named Vectors"].get("value", False)
+        except Exception:
+            pass
+        
+        return False
+    
+    def _validate_config_hierarchy(self, config: Dict) -> Tuple[Dict, List[str]]:
+        """
+        Valida e auto-ajusta flags baseado em hierarquia.
+        
+        Args:
+            config: Dicionário de configurações (InputConfig objects)
+        
+        Returns:
+            Tuple (config_ajustado, lista_de_avisos)
+        """
+        warnings = []
+        adjusted_config = config.copy()  # Shallow copy para não modificar original
+        
+        # REGRA 1: Two-Phase Search desabilita Entity Filter
+        two_phase_config = adjusted_config.get("Two-Phase Search Mode")
+        if two_phase_config and isinstance(two_phase_config, InputConfig):
+            two_phase_value = two_phase_config.value
+            if two_phase_value != "disabled":
+                entity_filter_config = adjusted_config.get("Enable Entity Filter")
+                if entity_filter_config and isinstance(entity_filter_config, InputConfig):
+                    if entity_filter_config.value:
+                        entity_filter_config.value = False
+                        warnings.append("Entity Filter desabilitado automaticamente (redundante com Two-Phase Search)")
+        
+        # REGRA 2: Aggregation desabilita filtros e outros modos
+        aggregation_config = adjusted_config.get("Enable Aggregation")
+        if aggregation_config and isinstance(aggregation_config, InputConfig):
+            if aggregation_config.value:
+                # Desabilitar Entity Filter
+                entity_filter_config = adjusted_config.get("Enable Entity Filter")
+                if entity_filter_config and isinstance(entity_filter_config, InputConfig):
+                    if entity_filter_config.value:
+                        entity_filter_config.value = False
+                
+                # Desabilitar Two-Phase Search
+                two_phase_config = adjusted_config.get("Two-Phase Search Mode")
+                if two_phase_config and isinstance(two_phase_config, InputConfig):
+                    if two_phase_config.value != "disabled":
+                        two_phase_config.value = "disabled"
+                
+                # Desabilitar Multi-Vector Search
+                multi_vector_config = adjusted_config.get("Enable Multi-Vector Search")
+                if multi_vector_config and isinstance(multi_vector_config, InputConfig):
+                    if multi_vector_config.value:
+                        multi_vector_config.value = False
+                
+                warnings.append("Modo Agregação: filtros e outros modos desabilitados automaticamente")
+        
+        # REGRA 3: Multi-Vector Search requer Named Vectors global
+        multi_vector_config = adjusted_config.get("Enable Multi-Vector Search")
+        if multi_vector_config and isinstance(multi_vector_config, InputConfig):
+            if multi_vector_config.value:
+                if not self._check_named_vectors_enabled():
+                    multi_vector_config.value = False
+                    warnings.append("Multi-Vector Search requer Enable Named Vectors (global) - desabilitado automaticamente")
+        
+        return adjusted_config, warnings
+    
+    def _apply_config_validation(self, config: Dict) -> Tuple[Dict, List[str]]:
+        """
+        Aplica validação de hierarquia e retorna config ajustado com avisos.
+        
+        Args:
+            config: Dicionário de configurações
+        
+        Returns:
+            Tuple (config_validado, lista_de_avisos)
+        """
+        return self._validate_config_hierarchy(config)
+    
     def _detect_entity_focus_in_query(self, query: str, entities: List[str]) -> bool:
         """
         Detecta se a query tem foco explícito em entidades (para modo hybrid)
@@ -570,6 +716,16 @@ class EntityAwareRetriever(Retriever):
         from verba_extensions.plugins.query_parser import parse_query
         
         msg.info(f"EntityAwareRetriever processando: '{query}'")
+        
+        # VALIDAR E AUTO-AJUSTAR CONFIG (Fase 2: Sistema de Validação)
+        validated_config, validation_warnings = self._apply_config_validation(config)
+        
+        # Logar avisos de validação
+        for warning in validation_warnings:
+            msg.warn(f"  ⚠️ {warning}")
+        
+        # Usar validated_config no resto do método
+        config = validated_config
         
         # CONFIG
         search_mode = config["Search Mode"].value

@@ -9,6 +9,7 @@ import { RAGConfig, RAGComponentConfig } from "@/app/types";
 import { closeOnClick } from "@/app/util";
 
 import VerbaButton from "../Navigation/VerbaButton";
+import RetrieverConfigBlocks from "../Chat/RetrieverConfigBlocks";
 
 export const MultiInput: React.FC<{
   component_name: string;
@@ -171,6 +172,19 @@ const ComponentView: React.FC<ComponentViewProps> = ({
     skip_component
   ) {
     return <></>;
+  }
+
+  // Use RetrieverConfigBlocks for Retriever component
+  if (component_name === "Retriever") {
+    return (
+      <RetrieverConfigBlocks
+        RAGConfig={RAGConfig}
+        blocked={blocked}
+        selectComponent={selectComponent}
+        updateConfig={updateConfig}
+        saveComponentConfig={saveComponentConfig}
+      />
+    );
   }
 
   return (
