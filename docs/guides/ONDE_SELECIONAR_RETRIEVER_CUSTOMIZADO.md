@@ -58,13 +58,23 @@ Procure por:
 
 1. **Na seção Retriever**, clique no dropdown
 2. **Selecione "EntityAware"**
-3. **Configure:**
-   - ✅ **Enable Entity Filter**: Ative (checkbox)
-   - **Limit/Sensitivity**: 32 (ajuste se necessário)
-   - **Chunk Window**: 1
-   - **Alpha**: 0.6
-4. **Clique em "Save"** (botão ao lado de "Retriever Settings")
-5. **Clique em "Save Config"** (botão no topo)
+3. **Nova Interface em Blocos**: As configurações aparecem organizadas em 4 blocos:
+   - **Busca Fundamental**: Search Mode, Limit, Alpha, Reranker Top K
+   - **Filtros**: Entity Filter, Language, Temporal, Framework
+   - **Modo de Busca**: Two-Phase, Multi-Vector, Aggregation (escolha um)
+   - **Otimizações**: Query Expansion, Dynamic Alpha, etc.
+4. **Configure:**
+   - ✅ **Enable Entity Filter**: Ative (checkbox) - Bloco 2: Filtros
+   - **Limit/Sensitivity**: 32 (ajuste se necessário) - Bloco 1: Busca Fundamental
+   - **Chunk Window**: 1 - Bloco 4: Otimizações
+   - **Alpha**: 0.6 - Bloco 1: Busca Fundamental
+5. **Validação Automática**: O sistema valida e ajusta flags conflitantes automaticamente
+   - Se ativar "Two-Phase Search", "Entity Filter" será desabilitado automaticamente
+   - Avisos aparecem na interface quando isso acontece
+6. **Clique em "Save"** (botão ao lado de "Retriever Settings")
+7. **Clique em "Save Config"** (botão no topo)
+
+> **📖 Para entender a estrutura de blocos e regras de validação, veja:** [Configuração Hierárquica](./CONFIGURACAO_HIERARQUICA.md)
 
 ---
 

@@ -13,32 +13,43 @@ As novas features são configuráveis na interface do Verba, na seção de confi
 4. Escolha **EntityAware** como retriever
 5. Role até as opções de configuração
 
-### 2. Configurações Disponíveis
+### 2. Configurações Disponíveis (Organizadas em Blocos)
 
-#### ✅ **Enable Multi-Vector Search** (NOVO)
-- **Tipo**: Boolean (checkbox)
-- **Padrão**: `false` (desabilitado)
-- **Descrição**: "Enable multi-vector search when query combines multiple aspects (concept, sector, company)"
-- **Onde aparece**: Na lista de configurações do EntityAware Retriever
-- **Quando usar**: 
-  - Quando você tem named vectors habilitados (`ENABLE_NAMED_VECTORS=true`)
-  - Quando suas queries combinam múltiplos aspectos (ex: "estratégia digital para bancos")
+As configurações agora estão organizadas em **4 blocos hierárquicos** com validação automática:
 
-#### ✅ **Enable Aggregation** (NOVO)
-- **Tipo**: Boolean (checkbox)
-- **Padrão**: `false` (desabilitado)
-- **Descrição**: "Enable aggregation queries (count, group by, etc.)"
-- **Onde aparece**: Na lista de configurações do EntityAware Retriever
-- **Quando usar**:
-  - Quando você quer fazer queries analíticas ("quantos documentos sobre SWOT?")
-  - Quando precisa de estatísticas agregadas
+#### **Bloco 1: Busca Fundamental**
+- **Search Mode**: Modo de busca (Hybrid Search)
+- **Limit Mode**: Método de limitação (Autocut/Fixed)
+- **Limit/Sensitivity**: Valor de limite ou sensibilidade
+- **Alpha**: Balance entre BM25 (0.0) e Vector (1.0)
+- **Reranker Top K**: Número de chunks após reranking
 
-#### ✅ **Enable Framework Filter** (JÁ EXISTIA, AGORA MELHORADO)
-- **Tipo**: Boolean (checkbox)
-- **Padrão**: `true` (habilitado)
-- **Descrição**: "Enable automatic framework/company/sector filtering"
-- **Onde aparece**: Na lista de configurações do EntityAware Retriever
-- **O que mudou**: Agora funciona com as novas propriedades `frameworks`, `companies`, `sectors` do Weaviate
+#### **Bloco 2: Filtros**
+- **Enable Entity Filter**: Filtro por entidades
+- **Entity Filter Mode**: Estratégia (strict/boost/adaptive/hybrid)
+- **Enable Semantic Search**: Busca semântica
+- **Enable Language Filter**: Filtro por idioma
+- **Enable Temporal Filter**: Filtro por data
+- **Date Field Name**: Nome do campo de data
+- **Enable Framework Filter**: Filtro por frameworks/setores/empresas
+
+#### **Bloco 3: Modo de Busca (Hierárquico - Escolha UM)**
+- **Two-Phase Search Mode**: auto/enabled/disabled
+  - ⚠️ **Auto-desabilita**: Entity Filter (redundante)
+- **Enable Multi-Vector Search**: Busca em named vectors
+  - ⚠️ **Requer**: Enable Named Vectors (global)
+- **Enable Aggregation**: Queries de agregação/analytics
+  - ⚠️ **Auto-desabilita**: Entity Filter, Two-Phase, Multi-Vector
+
+#### **Bloco 4: Otimizações**
+- **Enable Query Expansion**: Expansão de queries (3-5 variações)
+- **Enable Dynamic Alpha**: Alpha dinâmico baseado em tipo de query
+- **Enable Relative Score Fusion**: Fusão de scores melhorada
+- **Enable Query Rewriting**: Query Rewriter (fallback)
+- **Query Rewriter Cache TTL**: Cache TTL em segundos
+- **Chunk Window**: Chunks vizinhos a retornar
+
+> **📖 Para detalhes completos sobre blocos e validação, veja:** [Configuração Hierárquica](./CONFIGURACAO_HIERARQUICA.md)
 
 ---
 

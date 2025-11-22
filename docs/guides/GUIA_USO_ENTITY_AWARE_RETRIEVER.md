@@ -34,13 +34,26 @@ Quando você faz uma query no chat, o retriever:
 Na UI do Verba → **Settings** → Seção **Retriever**:
 
 1. No dropdown, escolha: **"EntityAware"** (ao invés de "Window")
-2. Configure:
+2. **Nova Interface em Blocos**: As configurações agora estão organizadas em 4 blocos hierárquicos:
+   - **Bloco 1: Busca Fundamental** - Configurações básicas (Search Mode, Limit, Alpha, etc.)
+   - **Bloco 2: Filtros** - Filtros independentes (Entity Filter, Language, Temporal, etc.)
+   - **Bloco 3: Modo de Busca** - Escolha um modo (Two-Phase, Multi-Vector, Aggregation)
+   - **Bloco 4: Otimizações** - Melhorias opcionais (Query Expansion, Dynamic Alpha, etc.)
+
+3. Configure:
    - **Enable Entity Filter**: ✅ Ativado (recomendado)
    - **Limit/Sensitivity**: 32 (ajuste conforme necessário)
    - **Chunk Window**: 1 (chunks adjacentes)
    - **Alpha**: 0.6 (balance entre keyword/vector search)
 
-3. Clique em **"Save Config"**
+4. **Validação Automática**: O sistema agora valida e auto-ajusta flags conflitantes automaticamente
+   - Se ativar "Two-Phase Search", "Entity Filter" será desabilitado automaticamente
+   - Se ativar "Aggregation", outros modos serão desabilitados automaticamente
+   - Avisos aparecem na interface quando isso acontece
+
+5. Clique em **"Save Config"**
+
+> **📖 Para mais detalhes sobre a estrutura de blocos, veja:** [Configuração Hierárquica](./CONFIGURACAO_HIERARQUICA.md)
 
 ### **Passo 2: Usar no Chat**
 
