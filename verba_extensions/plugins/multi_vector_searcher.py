@@ -52,7 +52,9 @@ class MultiVectorSearcher:
         filters: Optional[Any] = None,  # Weaviate Filter
         limit: int = 50,
         vector_weights: Optional[Dict[str, float]] = None,
-        alpha: float = 0.5
+        alpha: float = 0.5,
+        fusion_type: str = "RRF",  # "RRF" (manual) ou "RELATIVE_SCORE" (nativo Weaviate)
+        query_properties: Optional[List[str]] = None  # Propriedades para BM25 (ex: ["content", "title^2"])
     ) -> Dict[str, Any]:
         """
         Executa busca em múltiplos named vectors em paralelo e combina resultados.
@@ -69,12 +71,14 @@ class MultiVectorSearcher:
             limit: Limite de resultados finais
             vector_weights: Pesos para cada vetor (ex: {"concept_vec": 0.6, "sector_vec": 0.4})
             alpha: Alpha para busca híbrida (0.0 = só BM25, 1.0 = só vector)
+            fusion_type: Tipo de fusão ("RRF" para manual, "RELATIVE_SCORE" para nativo Weaviate)
+            query_properties: Propriedades para BM25 (ex: ["content", "title^2"] para boost de título)
         
         Returns:
             Dict com:
             - results: Resultados combinados e deduplicados
             - vector_results: Resultados por vetor
-            - combined_scores: Scores combinados (RRF)
+            - combined_scores: Scores combinados (RRF ou Relative Score)
             - metadata: Metadados da busca
         """
         # Validar entrada
@@ -97,7 +101,7 @@ class MultiVectorSearcher:
             search_tasks = [
                 self._search_single_vector(
                     client, collection_name, query, query_vector, vector_name,
-                    filters, limit, alpha
+                    filters, limit, alpha, query_properties
                 )
                 for vector_name in vectors
             ]
@@ -113,12 +117,36 @@ class MultiVectorSearcher:
                 else:
                     results_by_vector[vector_name] = vector_results[i]
             
-            # Combinar com RRF
-            combined = self._combine_with_rrf(
-                results_by_vector,
-                vector_weights,
-                limit
-            )
+            # Combinar resultados
+            if fusion_type == "RELATIVE_SCORE":
+                # Tentar usar Relative Score Fusion nativo do Weaviate
+                combined = await self._combine_with_relative_score_fusion(
+                    client,
+                    collection_name,
+                    query,
+                    query_vector,
+                    vectors,
+                    vector_weights,
+                    filters,
+                    limit,
+                    alpha,
+                    query_properties
+                )
+                if combined is None:
+                    # Fallback para RRF se Relative Score não disponível
+                    msg.warn("Relative Score Fusion não disponível, usando RRF como fallback")
+                    combined = self._combine_with_rrf(
+                        results_by_vector,
+                        vector_weights,
+                        limit
+                    )
+            else:
+                # Usar RRF manual (comportamento padrão)
+                combined = self._combine_with_rrf(
+                    results_by_vector,
+                    vector_weights,
+                    limit
+                )
             
             return {
                 "results": combined["results"],
@@ -145,7 +173,8 @@ class MultiVectorSearcher:
         vector_name: str,
         filters: Optional[Any],
         limit: int,
-        alpha: float
+        alpha: float,
+        query_properties: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
         Executa busca em um vetor específico usando nearVector + BM25.
@@ -199,13 +228,24 @@ class MultiVectorSearcher:
             if alpha < 1.0 and query:
                 try:
                     # BM25 busca no texto geral (não usa target_vector)
-                    response = await collection.query.bm25(
-                        query=query,  # Query como string
-                        limit=int(limit * (1 - alpha) * 1.5),
-                        filters=filters,
-                        return_metadata=MetadataQuery(score=True),
-                        return_properties=["text", "doc_uuid", "chunk_id", "frameworks", "companies", "sectors"]
-                    )
+                    # Usa query_properties se especificado (permite boost, ex: ["content", "title^2"])
+                    bm25_kwargs = {
+                        "query": query,
+                        "limit": int(limit * (1 - alpha) * 1.5),
+                        "filters": filters,
+                        "return_metadata": MetadataQuery(score=True),
+                        "return_properties": ["text", "doc_uuid", "chunk_id", "frameworks", "companies", "sectors"]
+                    }
+                    
+                    # Adiciona query_properties se disponível (Weaviate v4+)
+                    if query_properties:
+                        try:
+                            bm25_kwargs["query_properties"] = query_properties
+                        except TypeError:
+                            # Se query_properties não suportado, ignora
+                            pass
+                    
+                    response = await collection.query.bm25(**bm25_kwargs)
                     
                     if response and hasattr(response, 'objects'):
                         for obj in response.objects:
@@ -373,4 +413,126 @@ class MultiVectorSearcher:
                 deduplicated.append(result)
         
         return deduplicated
+    
+    async def _combine_with_relative_score_fusion(
+        self,
+        client,
+        collection_name: str,
+        query: str,
+        query_vector: List[float],
+        vectors: List[str],
+        vector_weights: Dict[str, float],
+        filters: Optional[Any],
+        limit: int,
+        alpha: float,
+        query_properties: Optional[List[str]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Combina resultados usando Relative Score Fusion nativo do Weaviate.
+        
+        Usa collection.query.hybrid() com fusion_type=RELATIVE_SCORE e target_vector.
+        Preserva magnitude da similaridade (não apenas rank).
+        
+        Args:
+            client: Cliente Weaviate
+            collection_name: Nome da collection
+            query: Query do usuário
+            query_vector: Embedding da query
+            vectors: Lista de vetores
+            vector_weights: Pesos para cada vetor
+            filters: Filtros Weaviate
+            limit: Limite de resultados
+            alpha: Alpha para busca híbrida
+            query_properties: Propriedades para BM25
+        
+        Returns:
+            Dict com results e scores, ou None se não disponível
+        """
+        try:
+            from weaviate.classes.query import MetadataQuery, HybridVector, TargetVectors
+            import weaviate.classes.query as wvc_query
+            
+            collection = client.collections.get(collection_name)
+            
+            # Construir target_vector com pesos manuais
+            # Se temos 2+ vetores, usar TargetVectors.manual_weights
+            if len(vectors) >= 2:
+                weights_dict = {v: vector_weights.get(v, 1.0 / len(vectors)) for v in vectors}
+                target_vector = TargetVectors.manual_weights(weights=weights_dict)
+            else:
+                # Apenas um vetor
+                target_vector = vectors[0] if vectors else None
+            
+            # Preparar kwargs para hybrid query
+            hybrid_kwargs = {
+                "query": query,
+                "vector": HybridVector.near_vector(
+                    vector={vectors[0]: query_vector} if vectors else query_vector
+                ) if vectors else query_vector,
+                "target_vector": target_vector,
+                "alpha": alpha,
+                "limit": limit,
+                "return_metadata": MetadataQuery(score=True, distance=True, explain_score=True),
+                "filters": filters
+            }
+            
+            # Adicionar fusion_type se disponível
+            try:
+                hybrid_kwargs["fusion_type"] = wvc_query.HybridFusion.RELATIVE_SCORE
+            except (AttributeError, TypeError):
+                # Se fusion_type não disponível, retorna None para usar RRF
+                return None
+            
+            # Adicionar query_properties se disponível
+            if query_properties:
+                try:
+                    hybrid_kwargs["query_properties"] = query_properties
+                except TypeError:
+                    pass  # Ignora se não suportado
+            
+            # Executar busca híbrida com Relative Score Fusion
+            response = await collection.query.hybrid(**hybrid_kwargs)
+            
+            if not response or not hasattr(response, 'objects'):
+                return None
+            
+            # Converter resultados para formato esperado
+            results = []
+            scores = {}
+            
+            for obj in response.objects:
+                obj_dict = dict(obj.properties)
+                obj_dict["_uuid"] = str(obj.uuid)
+                
+                # Extrair score do metadata
+                if obj.metadata:
+                    if hasattr(obj.metadata, 'score'):
+                        score = obj.metadata.score
+                    elif hasattr(obj.metadata, 'distance'):
+                        # Converter distance para score (1 - distance para cosine)
+                        score = 1.0 - obj.metadata.distance
+                    else:
+                        score = 0.0
+                else:
+                    score = 0.0
+                
+                obj_dict["_score"] = score
+                obj_dict["_source_vector"] = ",".join(vectors)  # Múltiplos vetores
+                results.append(obj_dict)
+                scores[str(obj.uuid)] = score
+            
+            # Ordenar por score
+            results.sort(key=lambda x: x.get("_score", 0), reverse=True)
+            results = results[:limit]
+            
+            msg.info(f"Relative Score Fusion: {len(results)} resultados combinados")
+            
+            return {
+                "results": results,
+                "scores": scores
+            }
+            
+        except Exception as e:
+            msg.debug(f"Relative Score Fusion não disponível: {str(e)}")
+            return None
 

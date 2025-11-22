@@ -165,6 +165,271 @@ class EntityAwareRetriever(Retriever):
             description="Enable aggregation queries for analytics (count, group by, etc.)",
             values=[],
         )
+        self.config["Two-Phase Search Mode"] = InputConfig(
+            type="dropdown",
+            value="auto",
+            description="Two-phase search: first filter by entities, then multi-vector search within subspace",
+            values=["auto", "enabled", "disabled"],
+        )
+        self.config["Enable Query Expansion"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable query expansion (generates 3-5 variations to improve Recall)",
+            values=[],
+        )
+        self.config["Enable Relative Score Fusion"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable Relative Score Fusion (preserves magnitude, better than RRF)",
+            values=[],
+        )
+        self.config["Enable Dynamic Alpha"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Enable dynamic alpha optimization based on query type",
+            values=[],
+        )
+    
+    async def _execute_two_phase_search(
+        self,
+        client,
+        weaviate_manager,
+        embedder: str,
+        query: str,
+        search_query: str,
+        vector: List[float],
+        entity_ids: List[str],
+        entity_texts: List[str],
+        semantic_terms: List[str],
+        detected_frameworks: List[str],
+        detected_companies: List[str],
+        detected_sectors: List[str],
+        combined_filter,
+        lang_filter,
+        temporal_filter,
+        framework_filter,
+        limit_mode: str,
+        limit: int,
+        labels: List[str],
+        document_uuids: List[str],
+        rewritten_alpha: float,
+        enable_query_expansion: bool,
+        enable_multi_vector: bool,
+        vectors_to_search: List[str],
+        cache_ttl: int,
+        debug_info: Dict[str, Any],
+        rag_config: Optional[Dict[str, Any]] = None
+    ) -> List[Any]:
+        """
+        Executa Two-Phase Search:
+        Fase 1: Filtro por entidades (subespaço)
+        Fase 2: Multi-vector search dentro do subespaço filtrado
+        """
+        
+        try:
+            # FASE 1: Filtro por Entidades (Subespaço)
+            msg.info(f"  🔍 Fase 1: Filtrando por entidades...")
+            
+            # Construir filtro de entidades para Fase 1
+            phase1_filter = None
+            filters_list = []
+            
+            if entity_ids:
+                # Usar entity_ids (formato ent:*)
+                phase1_entity_filter = Filter.by_property("section_entity_ids").contains_any(entity_ids)
+                filters_list.append(phase1_entity_filter)
+                msg.info(f"    Filtro por entity_ids: {entity_ids}")
+            elif entity_texts:
+                # Usar entity_texts (modo inteligente)
+                # Buscar em entities_local_ids ou entity_mentions
+                phase1_entity_filter = Filter.by_property("entities_local_ids").contains_any(entity_texts)
+                filters_list.append(phase1_entity_filter)
+                msg.info(f"    Filtro por entity_texts: {entity_texts}")
+            
+            # Adicionar outros filtros (temporal, framework)
+            if temporal_filter:
+                filters_list.append(temporal_filter)
+            if framework_filter:
+                filters_list.append(framework_filter)
+            
+            if filters_list:
+                if len(filters_list) == 1:
+                    phase1_filter = filters_list[0]
+                else:
+                    phase1_filter = Filter.all_of(filters_list)
+            
+            # Busca ampla na Fase 1 (apenas para obter subespaço)
+            # Não precisa ser muito restritiva, apenas identificar chunks com entidades
+            phase1_limit = min(limit * 3, 100)  # Buscar mais chunks para ter subespaço maior
+            
+            normalized = weaviate_manager._normalize_embedder_name(embedder)
+            collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+            
+            # Busca simples na Fase 1 (apenas para obter subespaço)
+            # Usar busca híbrida básica com filtro de entidades
+            phase1_chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                client=client,
+                embedder=embedder,
+                query=search_query,
+                vector=vector,
+                limit_mode=limit_mode,
+                limit=phase1_limit,
+                labels=labels,
+                document_uuids=document_uuids,
+                filters=phase1_filter,
+                alpha=0.4,  # Mais BM25 na Fase 1 (foco em entidades)
+            )
+            
+            if not phase1_chunks:
+                msg.warn(f"    Fase 1: Nenhum chunk encontrado com entidades")
+                return []
+            
+            msg.good(f"    Fase 1: {len(phase1_chunks)} chunks no subespaço")
+            debug_info["two_phase_search"]["phase1_results"] = len(phase1_chunks)
+            
+            # Extrair UUIDs dos chunks da Fase 1 para filtrar na Fase 2
+            phase1_uuids = [str(chunk.uuid) for chunk in phase1_chunks if hasattr(chunk, 'uuid')]
+            
+            if not phase1_uuids:
+                msg.warn(f"    Fase 1: Nenhum UUID extraído")
+                return []
+            
+            # FASE 2: Multi-Vector Search dentro do Subespaço
+            msg.info(f"  🎯 Fase 2: Multi-vector search dentro do subespaço ({len(phase1_uuids)} chunks)...")
+            
+            # Query Expansion (Fase 2: Temas)
+            expanded_queries_phase2 = [search_query]  # Fallback
+            
+            if enable_query_expansion:
+                try:
+                    from verba_extensions.plugins.query_expander import QueryExpanderPlugin
+                    query_expander = QueryExpanderPlugin(cache_ttl_seconds=cache_ttl)
+                    expanded_queries_phase2 = await query_expander.expand_query_for_themes(search_query, use_cache=True)
+                    msg.info(f"    Query Expansion (Fase 2): {len(expanded_queries_phase2)} variações")
+                    debug_info["query_expansion_phase2"] = expanded_queries_phase2
+                except Exception as e:
+                    msg.debug(f"    Query Expansion não disponível: {str(e)}")
+            
+            # Usar primeira variação expandida (ou query original)
+            phase2_query = expanded_queries_phase2[0] if expanded_queries_phase2 else search_query
+            
+            # Construir filtro para Fase 2: subespaço (UUIDs da Fase 1) + outros filtros
+            phase2_filter_list = [
+                Filter.by_property("uuid").contains_any(phase1_uuids)
+            ]
+            
+            if temporal_filter:
+                phase2_filter_list.append(temporal_filter)
+            if framework_filter:
+                phase2_filter_list.append(framework_filter)
+            
+            phase2_filter = Filter.all_of(phase2_filter_list) if len(phase2_filter_list) > 1 else phase2_filter_list[0]
+            
+            # Multi-Vector Search na Fase 2
+            if enable_multi_vector and len(vectors_to_search) >= 2:
+                try:
+                    from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
+                    from goldenverba.components.managers import EmbeddingManager
+                    
+                    # Gerar embedding da query
+                    embedding_manager = EmbeddingManager()
+                    
+                    if rag_config:
+                        # Usar vectorize_query que já lida com config corretamente
+                        query_vector_phase2 = await embedding_manager.vectorize_query(
+                            embedder=embedder,
+                            content=phase2_query,
+                            rag_config=rag_config
+                        )
+                    else:
+                        # Fallback: usar método direto (pode não ter config correto)
+                        if embedder not in embedding_manager.embedders:
+                            raise Exception(f"Embedder {embedder} não encontrado")
+                        
+                        embedder_obj = embedding_manager.embedders[embedder]
+                        embedder_config = {}
+                        query_embeddings = await embedder_obj.vectorize(embedder_config, [phase2_query])
+                        if not query_embeddings or len(query_embeddings) == 0:
+                            raise Exception("Falha ao gerar embedding da query")
+                        query_vector_phase2 = query_embeddings[0]
+                    
+                    # Configurar fusion type
+                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
+                    
+                    # Configurar query_properties para BM25 boosting
+                    query_properties = ["content", "title^2"]  # Boost de título
+                    
+                    # Executar multi-vector search
+                    multi_vector_searcher = MultiVectorSearcher()
+                    result = await multi_vector_searcher.search_multi_vector(
+                        client=client,
+                        collection_name=collection_name,
+                        query=phase2_query,
+                        query_vector=query_vector_phase2,
+                        vectors=vectors_to_search,
+                        filters=phase2_filter,
+                        limit=limit,
+                        alpha=rewritten_alpha,
+                        fusion_type=fusion_type,
+                        query_properties=query_properties
+                    )
+                    
+                    if result and result.get("results"):
+                        # Converter resultados dict para objetos Weaviate
+                        # Buscar chunks completos pelos UUIDs retornados
+                        phase2_uuids = [r.get("_uuid") for r in result["results"] if r.get("_uuid")]
+                        
+                        if phase2_uuids:
+                            # Buscar objetos completos do Weaviate
+                            collection = client.collections.get(collection_name)
+                            phase2_objects = await collection.query.fetch_objects(
+                                filters=Filter.by_property("uuid").contains_any(phase2_uuids)
+                            )
+                            
+                            if phase2_objects and hasattr(phase2_objects, 'objects'):
+                                phase2_chunks = phase2_objects.objects
+                                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados")
+                                debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+                                debug_info["two_phase_search"]["fusion_type"] = fusion_type
+                                
+                                return phase2_chunks
+                            else:
+                                msg.warn(f"    Fase 2: Não foi possível buscar objetos completos")
+                        else:
+                            msg.warn(f"    Fase 2: Nenhum UUID extraído dos resultados")
+                    else:
+                        msg.warn(f"    Fase 2: Multi-vector não retornou resultados")
+                except Exception as e:
+                    msg.warn(f"    Fase 2: Erro em multi-vector search: {str(e)}")
+            
+            # Fallback: busca híbrida simples na Fase 2
+            phase2_chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                client=client,
+                embedder=embedder,
+                query=phase2_query,
+                vector=vector,
+                limit_mode=limit_mode,
+                limit=limit,
+                labels=labels,
+                document_uuids=document_uuids,
+                filters=phase2_filter,
+                alpha=rewritten_alpha,
+            )
+            
+            if phase2_chunks:
+                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados (fallback)")
+                debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+                return phase2_chunks
+            else:
+                msg.warn(f"    Fase 2: Nenhum chunk retornado")
+                return []
+                
+        except Exception as e:
+            msg.warn(f"  Erro em Two-Phase Search: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     def _detect_entity_focus_in_query(self, query: str, entities: List[str]) -> bool:
         """
@@ -472,6 +737,30 @@ class EntityAwareRetriever(Retriever):
                 debug_info["alpha_used"] = rewritten_alpha
                 msg.info(f"  Query builder: alpha ajustado para {rewritten_alpha}")
             
+            # Alpha Dinâmico (sobrescreve se habilitado)
+            enable_dynamic_alpha = self.config.get("Enable Dynamic Alpha", {}).get("value", True)
+            if enable_dynamic_alpha:
+                try:
+                    from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
+                    alpha_optimizer = AlphaOptimizerPlugin()
+                    
+                    # Detectar entidades para cálculo de alpha
+                    detected_entities = builder_entities if builder_entities else []
+                    intent = strategy.get("intent", "search")
+                    
+                    optimal_alpha = await alpha_optimizer.calculate_optimal_alpha(
+                        query=query,
+                        entities=detected_entities,
+                        intent=intent
+                    )
+                    
+                    rewritten_alpha = optimal_alpha
+                    debug_info["alpha_optimized"] = optimal_alpha
+                    debug_info["alpha_optimizer_used"] = True
+                    msg.info(f"  Alpha Dinâmico: ajustado para {optimal_alpha}")
+                except Exception as e:
+                    msg.debug(f"  Alpha Dinâmico não disponível: {str(e)}")
+            
             # Extrair filtros do builder (se houver)
             query_filters_from_builder = strategy.get("filters", {})
             builder_entities = query_filters_from_builder.get("entities", [])
@@ -509,6 +798,27 @@ class EntityAwareRetriever(Retriever):
                     intent = strategy.get("intent", "search")
                     debug_info["intent"] = intent
                     msg.info(f"  Query rewriting: intent={intent}")
+                    
+                    # Alpha Dinâmico (sobrescreve se habilitado)
+                    enable_dynamic_alpha = self.config.get("Enable Dynamic Alpha", {}).get("value", True)
+                    if enable_dynamic_alpha:
+                        try:
+                            from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
+                            alpha_optimizer = AlphaOptimizerPlugin()
+                            
+                            # Detectar entidades para cálculo de alpha (vazio por enquanto, será preenchido depois)
+                            optimal_alpha = await alpha_optimizer.calculate_optimal_alpha(
+                                query=query,
+                                entities=[],
+                                intent=intent
+                            )
+                            
+                            rewritten_alpha = optimal_alpha
+                            debug_info["alpha_optimized"] = optimal_alpha
+                            debug_info["alpha_optimizer_used"] = True
+                            msg.info(f"  Alpha Dinâmico: ajustado para {optimal_alpha}")
+                        except Exception as e:
+                            msg.debug(f"  Alpha Dinâmico não disponível: {str(e)}")
                     
                 except Exception as e:
                     msg.warn(f"  Erro no query rewriting (não crítico): {str(e)}")
@@ -686,8 +996,25 @@ class EntityAwareRetriever(Retriever):
             # Usar apenas para boost semântico, NÃO para filtro
             msg.info(f"  ℹ️ Entidades detectadas mas sem sintaxe explícita, usando apenas para boost: {entity_texts}")
         
+        # Query Expansion (Fase 1: Entidades) - antes de detectar entidades
+        enable_query_expansion = self.config.get("Enable Query Expansion", {}).get("value", True)
+        expanded_queries_phase1 = [query]  # Fallback: usar query original
+        
+        if enable_query_expansion:
+            try:
+                from verba_extensions.plugins.query_expander import QueryExpanderPlugin
+                query_expander = QueryExpanderPlugin(cache_ttl_seconds=cache_ttl)
+                expanded_queries_phase1 = await query_expander.expand_query_for_entities(query, use_cache=True)
+                msg.info(f"  Query Expansion (Fase 1): {len(expanded_queries_phase1)} variações geradas")
+                debug_info["query_expansion_phase1"] = expanded_queries_phase1
+            except Exception as e:
+                msg.debug(f"  Query Expansion não disponível: {str(e)}")
+        
+        # Detectar entidades de TODAS as variações expandidas
+        # Usar a primeira variação expandida para parsing (ou query original se não expandiu)
+        parse_query_text = expanded_queries_phase1[0] if expanded_queries_phase1 else query
+        
         # Obter termos semânticos
-        parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
         parsed = parse_query(parse_query_text)
         semantic_terms = parsed["semantic_concepts"]
         
@@ -1029,6 +1356,10 @@ class EntityAwareRetriever(Retriever):
             debug_info["rewritten_query"] = search_query
         debug_info["search_mode"] = search_mode
         
+        # 3.4. QUERY EXPANSION PARA BUSCA NORMAL (será aplicada depois se Two-Phase Search não estiver ativo)
+        # Preparar variável para armazenar query expandida (será usada nas buscas normais)
+        expanded_query_normal = search_query
+        
         # 3.5. VERIFICAR SE DEVE USAR MULTI-VECTOR SEARCH
         enable_multi_vector = config.get("Enable Multi-Vector Search", {}).value if isinstance(config.get("Enable Multi-Vector Search"), InputConfig) else False
         use_multi_vector = False
@@ -1068,12 +1399,94 @@ class EntityAwareRetriever(Retriever):
                 msg.debug(f"  Erro ao verificar named vectors (não crítico): {str(e)}")
                 use_multi_vector = False
         
-        # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!) - SUPORTE MULTI-MODO
+        # 3.6. VERIFICAR TWO-PHASE SEARCH MODE
+        two_phase_mode = self.config.get("Two-Phase Search Mode", {}).get("value", "auto")
+        should_use_two_phase = False
+        
+        if two_phase_mode == "enabled":
+            should_use_two_phase = True
+            msg.info(f"  Two-Phase Search: ENABLED (sempre ativo)")
+        elif two_phase_mode == "auto":
+            # Auto: ativa se detectar entidades na query
+            should_use_two_phase = bool(entity_ids or entity_texts)
+            if should_use_two_phase:
+                msg.info(f"  Two-Phase Search: AUTO → ENABLED (entidades detectadas)")
+            else:
+                msg.info(f"  Two-Phase Search: AUTO → DISABLED (sem entidades)")
+        else:  # disabled
+            should_use_two_phase = False
+            msg.info(f"  Two-Phase Search: DISABLED")
+        
+        debug_info["two_phase_search"] = {
+            "mode": two_phase_mode,
+            "enabled": should_use_two_phase
+        }
+        
+        # 4. BUSCA HÍBRIDA COM FILTRO (O MAGIC AQUI!) - SUPORTE MULTI-MODO E TWO-PHASE
         if search_mode == "Hybrid Search":
             try:
-                # Decidir estratégia baseado no modo
-                use_strict_filter = False
-                use_boost_only = False
+                # Se Two-Phase Search está ativo, executar Fase 1 primeiro
+                if should_use_two_phase:
+                    chunks = await self._execute_two_phase_search(
+                        client=client,
+                        weaviate_manager=weaviate_manager,
+                        embedder=embedder,
+                        query=query,
+                        search_query=search_query,
+                        vector=vector,
+                        entity_ids=entity_ids,
+                        entity_texts=entity_texts,
+                        semantic_terms=semantic_terms,
+                        detected_frameworks=detected_frameworks,
+                        detected_companies=detected_companies,
+                        detected_sectors=detected_sectors,
+                        combined_filter=combined_filter,
+                        lang_filter=lang_filter,
+                        temporal_filter=temporal_filter,
+                        framework_filter=framework_filter,
+                        limit_mode=limit_mode,
+                        limit=limit,
+                        labels=labels,
+                        document_uuids=document_uuids,
+                        rewritten_alpha=rewritten_alpha,
+                        enable_query_expansion=enable_query_expansion,
+                        enable_multi_vector=enable_multi_vector,
+                        vectors_to_search=vectors_to_search,
+                        cache_ttl=cache_ttl,
+                        debug_info=debug_info,
+                        rag_config=rag_config
+                    )
+                    
+                    if chunks:
+                        msg.good(f"  ✅ Two-Phase Search retornou {len(chunks)} chunks")
+                        # Pular busca híbrida normal, já temos resultados
+                        # Continuar para reranking e retorno
+                    else:
+                        msg.warn(f"  ⚠️ Two-Phase Search não retornou resultados, usando busca normal")
+                        # Continuar com busca híbrida normal como fallback
+                        should_use_two_phase = False
+                
+                if not should_use_two_phase:
+                    # Busca híbrida normal (comportamento atual)
+                    # Aplicar Query Expansion para busca normal (se habilitado)
+                    if enable_query_expansion:
+                        try:
+                            from verba_extensions.plugins.query_expander import QueryExpanderPlugin
+                            query_expander = QueryExpanderPlugin(cache_ttl_seconds=cache_ttl)
+                            expanded_queries_normal = await query_expander.expand_query_for_themes(search_query, use_cache=True)
+                            if expanded_queries_normal and len(expanded_queries_normal) > 0:
+                                # Usar primeira variação expandida
+                                expanded_query_normal = expanded_queries_normal[0]
+                                msg.info(f"  Query Expansion (normal): usando variação expandida")
+                                debug_info["query_expansion_normal"] = expanded_queries_normal
+                                # Atualizar search_query para usar variação expandida
+                                search_query = expanded_query_normal
+                        except Exception as e:
+                            msg.debug(f"  Query Expansion não disponível: {str(e)}")
+                    
+                    # Decidir estratégia baseado no modo
+                    use_strict_filter = False
+                    use_boost_only = False
                 
                 if not enable_entity_filter or not entity_filter:
                     # Filtro desabilitado ou sem entidades - busca normal
@@ -1120,27 +1533,65 @@ class EntityAwareRetriever(Retriever):
                         from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
                         from goldenverba.components.managers import EmbeddingManager
                         
+                        # Query Expansion para multi-vector search (se habilitado)
+                        search_query_mv = search_query
+                        if enable_query_expansion:
+                            try:
+                                from verba_extensions.plugins.query_expander import QueryExpanderPlugin
+                                query_expander = QueryExpanderPlugin(cache_ttl_seconds=cache_ttl)
+                                expanded_queries_mv = await query_expander.expand_query_for_themes(search_query, use_cache=True)
+                                if expanded_queries_mv:
+                                    search_query_mv = expanded_queries_mv[0]  # Usar primeira variação
+                                    msg.info(f"  Query Expansion (multi-vector): usando variação expandida")
+                            except Exception as e:
+                                msg.debug(f"  Query Expansion não disponível: {str(e)}")
+                        
                         # Obter embedder para gerar query_vector
                         embedding_manager = EmbeddingManager()
-                        embedder_obj = embedding_manager.get_embedder(embedder)
-                        embedder_config = embedding_manager.get_embedder_config(embedder)
+                        query_vector = None
                         
-                        # Gerar embedding da query
-                        query_embeddings = await embedder_obj.vectorize(embedder_config, [search_query])
-                        if query_embeddings and len(query_embeddings) > 0:
-                            query_vector = query_embeddings[0]
+                        if rag_config:
+                            # Usar vectorize_query que já lida com config corretamente
+                            query_vector = await embedding_manager.vectorize_query(
+                                embedder=embedder,
+                                content=search_query_mv,
+                                rag_config=rag_config
+                            )
+                        else:
+                            # Fallback: usar método direto (pode não ter config correto)
+                            if embedder not in embedding_manager.embedders:
+                                raise Exception(f"Embedder {embedder} não encontrado")
+                            
+                            embedder_obj = embedding_manager.embedders[embedder]
+                            embedder_config = {}
+                            
+                            # Gerar embedding da query expandida
+                            query_embeddings = await embedder_obj.vectorize(embedder_config, [search_query_mv])
+                            if query_embeddings and len(query_embeddings) > 0:
+                                query_vector = query_embeddings[0]
+                        
+                        if query_vector:
+                            
+                            # Obter configuração de Relative Score Fusion
+                            enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                            fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
+                            
+                            # Configurar query_properties para BM25 boosting
+                            query_properties = ["content", "title^2"]  # Boost de título
                             
                             # Criar searcher e executar busca multi-vector
                             searcher = MultiVectorSearcher()
                             multi_vector_result = await searcher.search_multi_vector(
                                 client=client,
                                 collection_name=collection_name,
-                                query=search_query,
+                                query=search_query_mv,  # Usar query expandida
                                 query_vector=query_vector,
                                 vectors=vectors_to_search,
                                 filters=combined_filter if combined_filter else None,
                                 limit=limit * 2,  # Buscar mais para ter opções
-                                alpha=rewritten_alpha
+                                alpha=rewritten_alpha,
+                                fusion_type=fusion_type,  # Relative Score Fusion
+                                query_properties=query_properties  # BM25 boosting
                             )
                             
                             # Converter resultados para formato de chunks
@@ -1177,6 +1628,13 @@ class EntityAwareRetriever(Retriever):
                 
                 # Se multi-vector não foi usado, usar busca normal
                 if not use_multi_vector:
+                    # Obter configuração de Relative Score Fusion
+                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
+                    
+                    # Configurar query_properties para BM25 boosting
+                    query_properties = ["content", "title^2"]  # Boost de título
+                    
                     if use_boost_only:
                         # MODO BOOST: Busca SEM filtro + boost na query
                         # Entidades já foram adicionadas à search_query (linha 758)
@@ -1191,6 +1649,8 @@ class EntityAwareRetriever(Retriever):
                         labels=labels,
                         document_uuids=document_uuids,
                         alpha=rewritten_alpha,
+                        fusion_type=fusion_type,  # Relative Score Fusion
+                        query_properties=query_properties,  # BM25 boosting
                     )
                 
                 elif use_strict_filter:
@@ -1199,6 +1659,13 @@ class EntityAwareRetriever(Retriever):
                     entity_property = query_filters_from_builder.get("entity_property", "section_entity_ids")
                     if not entity_property or entity_property.strip() == "":
                         entity_property = "section_entity_ids"
+                    
+                    # Obter configuração de Relative Score Fusion
+                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
+                    
+                    # Configurar query_properties para BM25 boosting
+                    query_properties = ["content", "title^2"]  # Boost de título
                     
                     if combined_filter:
                         msg.info(f"  Executando: Hybrid search com filtros combinados")
@@ -1213,6 +1680,8 @@ class EntityAwareRetriever(Retriever):
                             document_uuids=document_uuids,
                             filters=combined_filter,
                             alpha=rewritten_alpha,
+                            fusion_type=fusion_type,  # Relative Score Fusion
+                            query_properties=query_properties,  # BM25 boosting
                         )
                     elif entity_filter:
                         msg.info(f"  Executando: Hybrid search com entity filter")
@@ -1227,6 +1696,8 @@ class EntityAwareRetriever(Retriever):
                             document_uuids=document_uuids,
                             filters=entity_filter,
                             alpha=rewritten_alpha,
+                            fusion_type=fusion_type,  # Relative Score Fusion
+                            query_properties=query_properties,  # BM25 boosting
                         )
                     else:
                         # Sem filtros disponíveis
@@ -1241,6 +1712,8 @@ class EntityAwareRetriever(Retriever):
                             labels=labels,
                             document_uuids=document_uuids,
                             alpha=rewritten_alpha,
+                            fusion_type=fusion_type,  # Relative Score Fusion
+                            query_properties=query_properties,  # BM25 boosting
                         )
                     
                     # ADAPTIVE FALLBACK: Se poucos resultados (<3), tentar modo BOOST
@@ -1265,6 +1738,11 @@ class EntityAwareRetriever(Retriever):
                                 else:
                                     combined_fallback_filter = Filter.all_of(fallback_filters_list)
                                 
+                                # Obter configuração de Relative Score Fusion para fallback
+                                enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                                fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
+                                query_properties = ["content", "title^2"]
+                                
                                 chunks_fallback = await weaviate_manager.hybrid_chunks_with_filter(
                                     client=client,
                                     embedder=embedder,
@@ -1276,6 +1754,8 @@ class EntityAwareRetriever(Retriever):
                                     document_uuids=document_uuids,
                                     filters=combined_fallback_filter,
                                     alpha=rewritten_alpha,
+                                    fusion_type=fusion_type,  # Relative Score Fusion
+                                    query_properties=query_properties,  # BM25 boosting
                                 )
                                 
                                 if len(chunks_fallback) > len(chunks):
@@ -1289,6 +1769,12 @@ class EntityAwareRetriever(Retriever):
                         # Tentativa 2: Se ainda não encontrou, tentar modo BOOST (sem filtro)
                         if len(chunks) < 3:
                             msg.info(f"  💡 Tentando modo BOOST (sem filtro, apenas boost semântico)")
+                            
+                            # Obter configuração de Relative Score Fusion para fallback
+                            enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                            fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
+                            query_properties = ["content", "title^2"]
+                            
                             chunks_boost = await weaviate_manager.hybrid_chunks(
                                 client=client,
                                 embedder=embedder,
@@ -1299,6 +1785,8 @@ class EntityAwareRetriever(Retriever):
                                 labels=labels,
                                 document_uuids=document_uuids,
                                 alpha=rewritten_alpha,
+                                fusion_type=fusion_type,  # Relative Score Fusion
+                                query_properties=query_properties,  # BM25 boosting
                             )
                             if len(chunks_boost) > len(chunks):
                                 msg.good(f"  ✅ ADAPTIVE FALLBACK: encontrados {len(chunks_boost)} chunks com BOOST (vs {len(chunks)} com filtro)")
@@ -1309,6 +1797,14 @@ class EntityAwareRetriever(Retriever):
                 else:
                     # Sem filtros: busca normal
                     msg.info(f"  Executando: Hybrid search sem filtros")
+                    
+                    # Obter configuração de Relative Score Fusion
+                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
+                    
+                    # Configurar query_properties para BM25 boosting
+                    query_properties = ["content", "title^2"]  # Boost de título
+                    
                     chunks = await weaviate_manager.hybrid_chunks(
                         client=client,
                         embedder=embedder,
@@ -1319,6 +1815,8 @@ class EntityAwareRetriever(Retriever):
                         labels=labels,
                         document_uuids=document_uuids,
                         alpha=rewritten_alpha,
+                        fusion_type=fusion_type,  # Relative Score Fusion
+                        query_properties=query_properties,  # BM25 boosting
                     )
             
             except Exception as e:

@@ -19,6 +19,7 @@ import json
 import re
 import logging
 from datetime import datetime
+from typing import Optional
 
 # Reduz logging excessivo do Weaviate SDK para evitar rate limits
 # Logs de vetores individuais são muito verbosos e causam rate limit no Railway
@@ -1176,6 +1177,8 @@ class WeaviateManager:
         labels: list[str],
         document_uuids: list[str],
         alpha: float = 0.5,
+        fusion_type: Optional[str] = None,  # "RELATIVE_SCORE" ou None (usa padrão Weaviate)
+        query_properties: Optional[list[str]] = None,  # Propriedades para BM25 (ex: ["content", "title^2"])
     ):
         if await self.verify_embedding_collection(client, embedder):
             embedder_collection = client.collections.get(self.embedding_table[embedder])
@@ -1230,6 +1233,8 @@ class WeaviateManager:
         document_uuids: list[str],
         filters: "Filter" = None,
         alpha: float = 0.5,
+        fusion_type: Optional[str] = None,  # "RELATIVE_SCORE" ou None
+        query_properties: Optional[list[str]] = None,  # Propriedades para BM25
     ):
         """
         Hybrid search com filtros entity-aware aplicados PRIMEIRO.
@@ -1278,25 +1283,41 @@ class WeaviateManager:
                 for f in all_filters[1:]:
                     apply_filters = apply_filters & f
 
-            # Executa busca híbrida COM os filtros
+            # Preparar kwargs para hybrid query
+            hybrid_kwargs = {
+                "query": query,
+                "vector": vector,
+                "alpha": alpha,
+                "return_metadata": MetadataQuery(score=True, explain_score=False),
+                "filters": apply_filters,
+            }
+            
+            # Adicionar limit ou auto_limit baseado no modo
             if limit_mode == "Autocut":
-                chunks = await embedder_collection.query.hybrid(
-                    query=query,
-                    vector=vector,
-                    alpha=alpha,
-                    auto_limit=limit,
-                    return_metadata=MetadataQuery(score=True, explain_score=False),
-                    filters=apply_filters,
-                )
+                hybrid_kwargs["auto_limit"] = limit
             else:
-                chunks = await embedder_collection.query.hybrid(
-                    query=query,
-                    vector=vector,
-                    alpha=alpha,
-                    limit=limit,
-                    return_metadata=MetadataQuery(score=True, explain_score=False),
-                    filters=apply_filters,
-                )
+                hybrid_kwargs["limit"] = limit
+            
+            # Adicionar fusion_type se especificado
+            if fusion_type:
+                try:
+                    import weaviate.classes.query as wvc_query
+                    if fusion_type == "RELATIVE_SCORE":
+                        hybrid_kwargs["fusion_type"] = wvc_query.HybridFusion.RELATIVE_SCORE
+                except (AttributeError, ImportError):
+                    # Se fusion_type não disponível, ignora
+                    pass
+            
+            # Adicionar query_properties se especificado (BM25 boosting)
+            if query_properties:
+                try:
+                    hybrid_kwargs["query_properties"] = query_properties
+                except TypeError:
+                    # Se query_properties não suportado, ignora
+                    pass
+            
+            # Executa busca híbrida COM os filtros
+            chunks = await embedder_collection.query.hybrid(**hybrid_kwargs)
 
             return chunks.objects
 

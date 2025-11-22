@@ -20,7 +20,7 @@ def get_verba_standard_properties():
     Returns:
         Lista de Property objects do Weaviate
     """
-    from weaviate.classes.config import Property, DataType
+    from weaviate.classes.config import Property, DataType, Tokenization
     
     return [
         Property(name="chunk_id", data_type=DataType.NUMBER, description="ID único do chunk"),
@@ -32,7 +32,13 @@ def get_verba_standard_properties():
             index_filterable=True  # ⚡ Otimização: usado em temporal filtering
         ),
         Property(name="meta", data_type=DataType.TEXT, description="Metadados serializados em JSON"),
-        Property(name="content", data_type=DataType.TEXT, description="Conteúdo do chunk"),
+        Property(
+            name="content", 
+            data_type=DataType.TEXT, 
+            description="Conteúdo do chunk",
+            index_searchable=True,  # ⚡ Otimização BM25: crítico para busca híbrida
+            tokenization=Tokenization.WORD  # ⚡ Otimização BM25: word tokenization para matching de termos
+        ),
         Property(name="uuid", data_type=DataType.TEXT, description="UUID do chunk"),
         Property(
             name="doc_uuid", 
@@ -48,7 +54,13 @@ def get_verba_standard_properties():
             description="Labels do chunk",
             index_filterable=True  # ⚡ Otimização: usado em document filtering
         ),
-        Property(name="title", data_type=DataType.TEXT, description="Título do documento"),
+        Property(
+            name="title", 
+            data_type=DataType.TEXT, 
+            description="Título do documento",
+            index_searchable=True,  # ⚡ Otimização BM25: permite boost de título (title^2)
+            tokenization=Tokenization.WORD  # ⚡ Otimização BM25: word tokenization
+        ),
         Property(name="start_i", data_type=DataType.NUMBER, description="Índice inicial no documento"),
         Property(
             name="chunk_lang", 
@@ -187,26 +199,29 @@ def get_named_vector_text_properties():
     Returns:
         Lista de Property objects do Weaviate
     """
-    from weaviate.classes.config import Property, DataType
+    from weaviate.classes.config import Property, DataType, Tokenization
     
     return [
         Property(
             name="concept_text",
             data_type=DataType.TEXT,
             description="Texto focado em conceitos abstratos (frameworks, estratégias, metodologias) - usado para concept_vec",
-            tokenization="word"  # Word tokenization para busca textual
+            index_searchable=True,  # ⚡ Otimização BM25: permite BM25 em propriedades especializadas
+            tokenization=Tokenization.WORD  # Word tokenization para busca textual
         ),
         Property(
             name="sector_text",
             data_type=DataType.TEXT,
             description="Texto focado em setores/indústrias - usado para sector_vec",
-            tokenization="word"  # Word tokenization para busca textual
+            index_searchable=True,  # ⚡ Otimização BM25: permite BM25 em propriedades especializadas
+            tokenization=Tokenization.WORD  # Word tokenization para busca textual
         ),
         Property(
             name="company_text",
             data_type=DataType.TEXT,
             description="Texto focado em empresas específicas - usado para company_vec",
-            tokenization="word"  # Word tokenization para busca textual
+            index_searchable=True,  # ⚡ Otimização BM25: permite BM25 em propriedades especializadas
+            tokenization=Tokenization.WORD  # Word tokenization para busca textual
         ),
     ]
 
