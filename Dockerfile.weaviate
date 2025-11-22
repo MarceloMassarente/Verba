@@ -1,0 +1,120 @@
+# syntax=docker/dockerfile:1.6
+
+# ============================================================================
+# Weaviate 1.34.0 - BYOV Mode (Bring Your Own Vectors)
+# Otimizado para Verba RAG System
+# ============================================================================
+
+FROM cr.weaviate.io/semitechnologies/weaviate:1.34.0
+
+LABEL maintainer="Verba RAG Project"
+LABEL description="Weaviate BYOV - Production Ready for Verba"
+LABEL version="1.34.0"
+
+# ============================================================================
+# CONFIGURAÇÃO - BYOV MODE
+# ============================================================================
+
+# Sem módulos externos - Verba fornece seus próprios vetores
+# BM25 é nativo do Weaviate, não precisa de módulos
+ENV ENABLE_MODULES=""
+ENV DEFAULT_VECTORIZER_MODULE="none"
+
+# ============================================================================
+# WEAVIATE CORE CONFIG
+# ============================================================================
+
+# Autenticação: Permite acesso anônimo (ajuste conforme necessário)
+ENV AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED="true"
+
+# Persistência: Dados armazenados em volume
+ENV PERSISTENCE_DATA_PATH="/var/lib/weaviate"
+ENV PERSISTENCE_ENABLED="true"
+
+# Query defaults
+ENV QUERY_DEFAULTS_LIMIT="25"
+ENV QUERY_MAXIMUM_RESULTS="10000"
+
+# Cluster (single node para Railway)
+ENV CLUSTER_HOSTNAME="weaviate-node"
+ENV CLUSTER_GOSSIP_BIND_PORT="7100"
+ENV CLUSTER_DATA_BIND_PORT="7101"
+
+# Logging
+ENV LOG_LEVEL="info"
+ENV LOG_FORMAT="text"
+
+# ============================================================================
+# PERFORMANCE & OPTIMIZATION
+# ============================================================================
+
+# Cache de vetores em memória (70% da RAM disponível)
+ENV VECTOR_CACHE_MAINTENANCE_IN_MEMORY_PERCENTAGE="70"
+
+# Indexação paralela (0 = usar todos os CPUs disponíveis)
+ENV INDEXING_GO_MAX_PROCS="0"
+
+# Compressão GZIP para reduzir tráfego de rede
+ENV GZIP_ENABLED="true"
+ENV GZIP_MIN_LENGTH="1024"
+
+# Timeouts
+ENV REQUEST_TIMEOUT="60s"
+ENV REQUEST_IDLE_TIMEOUT="60s"
+
+# ============================================================================
+# NETWORK CONFIGURATION
+# ============================================================================
+
+# Suporte a gRPC para melhor performance (importante para Verba)
+ENV GRPC_PORT="50051"
+ENV GRPC_HOST="0.0.0.0"
+
+# ============================================================================
+# SETUP DIRECTORIES
+# ============================================================================
+
+RUN mkdir -p /var/lib/weaviate && \
+    chmod -R 777 /var/lib/weaviate && \
+    mkdir -p /var/log/weaviate && \
+    chmod -R 777 /var/log/weaviate
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+# Healthcheck otimizado para Railway
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8080/v1/.well-known/ready || exit 1
+
+# ============================================================================
+# PORTS
+# ============================================================================
+
+# HTTP/REST API
+EXPOSE 8080
+
+# gRPC API (importante para performance do Verba)
+EXPOSE 50051
+
+# Cluster ports (para multi-node, não usado em Railway single-node)
+EXPOSE 7100
+EXPOSE 7101
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
+VOLUME ["/var/lib/weaviate"]
+
+# ============================================================================
+# RUN
+# ============================================================================
+
+# Comando padrão - otimizado para Railway
+CMD ["/bin/weaviate", \
+     "--host", "0.0.0.0", \
+     "--port", "8080", \
+     "--scheme", "http", \
+     "--grpc-port", "50051"]
+
