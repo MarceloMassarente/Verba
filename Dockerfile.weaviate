@@ -107,9 +107,10 @@ EXPOSE 7101
 # Note: Railway manages volumes automatically, no need for VOLUME directive
 
 # Comando padrão - otimizado para Railway
+# Nota: gRPC é configurado via variáveis de ambiente (GRPC_PORT, GRPC_HOST)
+# Não use flags --grpc-port pois não são suportadas
 CMD ["/bin/weaviate", \
      "--host", "0.0.0.0", \
      "--port", "8080", \
-     "--scheme", "http", \
-     "--grpc-port", "50051"]
+     "--scheme", "http"]
 
