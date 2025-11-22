@@ -176,6 +176,27 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const renderConfigField = (configTitle: string, config: ConfigSetting) => {
     const isDisabled = disabledFields.has(configTitle);
     const hasWarning = warnings.some((w) => w.includes(configTitle));
+    
+    // Mensagem de ajuda para campos desabilitados
+    const getDisabledMessage = () => {
+      if (!isDisabled) return null;
+      const selected = RAGConfig.Retriever.selected;
+      const component = RAGConfig.Retriever.components[selected];
+      const twoPhase = component?.config["Two-Phase Search Mode"];
+      const aggregation = component?.config["Enable Aggregation"];
+      
+      if (configTitle === "Enable Entity Filter" || configTitle === "Entity Filter Mode") {
+        if (twoPhase?.value && twoPhase.value !== "disabled") {
+          return "Desabilite 'Two-Phase Search Mode' no bloco 'Modo de Busca' para ativar";
+        }
+        if (aggregation?.value) {
+          return "Desabilite 'Enable Aggregation' no bloco 'Modo de Busca' para ativar";
+        }
+      }
+      return null;
+    };
+    
+    const disabledMessage = getDisabledMessage();
 
     return (
       <div key={"Configuration" + configTitle} className="mb-4">
@@ -270,6 +291,16 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
             <p className="flex min-w-[8vw]"></p>
             <p className="text-xs text-warning-verba text-start">
               {warnings.find((w) => w.includes(configTitle))}
+            </p>
+          </div>
+        )}
+        
+        {/* Disabled Help Message */}
+        {isDisabled && disabledMessage && (
+          <div className="flex gap-2 items-center text-text-verba mt-2">
+            <p className="flex min-w-[8vw]"></p>
+            <p className="text-xs text-text-alt-verba italic text-start">
+              💡 {disabledMessage}
             </p>
           </div>
         )}
