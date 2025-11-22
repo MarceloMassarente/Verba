@@ -9,18 +9,18 @@ Reorganização de arquivos de análise e documentação que estavam na raiz do 
 ## 📁 Arquivos Movidos
 
 ### Para `docs/analyses/` (Análises Técnicas)
-- ✅ `ANALISE_COMPARATIVA_ARQUITETURA_AVANCADA.md`
-- ✅ `ANALISE_COMPLETA_FINAL.md`
-- ✅ `ANALISE_METODOLOGIAS_ETL_CHUNKING_RETRIEVAL.md`
+- ✅ `ANALISE_COMPARATIVA_ARQUITETURA_AVANCADA.md` (ignorado pelo .gitignore)
+- ✅ `ANALISE_COMPLETA_FINAL.md` (ignorado pelo .gitignore)
+- ✅ `ANALISE_METODOLOGIAS_ETL_CHUNKING_RETRIEVAL.md` (ignorado pelo .gitignore)
 
 ### Para `docs/diagnostics/` (Diagnósticos)
-- ✅ `ANALISE_ERRO_CONNECTION_INTERRUPTED.md`
-- ✅ `ANALISE_PROBLEMA_ENFILERAMENTO_ARQUIVOS.md`
+- ✅ `ANALISE_ERRO_CONNECTION_INTERRUPTED.md` (ignorado pelo .gitignore)
+- ✅ `ANALISE_PROBLEMA_ENFILERAMENTO_ARQUIVOS.md` (ignorado pelo .gitignore)
 - ✅ `DIAGNOSTIC_SECOND_FILE_FAILURE.md`
 - ✅ `LOG_ANALYSIS_REPORT.md`
 
 ### Para `docs/comparisons/` (Comparações)
-- ✅ `ANALISE_HAYSTACK.md`
+- ✅ `ANALISE_HAYSTACK.md` (ignorado pelo .gitignore)
 
 ### Para `docs/changelogs/` (Changelogs e Resumos)
 - ✅ `FIX_CONNECTION_INTERRUPTED_IMPLEMENTATION.md`
@@ -35,7 +35,7 @@ Reorganização de arquivos de análise e documentação que estavam na raiz do 
 - ✅ `LOG_ANALYSIS_GUIDE.md`
 
 ### Para `docs/troubleshooting/` (Soluções de Problemas)
-- ✅ `SOLUCAO_FINAL_ENFILERAMENTO_MULTIPLOS_ARQUIVOS.md`
+- ✅ `SOLUCAO_FINAL_ENFILERAMENTO_MULTIPLOS_ARQUIVOS.md` (ignorado pelo .gitignore)
 - ✅ `TLDR_SOLUCAO_FINAL.md`
 
 ### Para `docs/` (Documentação Geral)
