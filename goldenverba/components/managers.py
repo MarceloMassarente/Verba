@@ -74,6 +74,7 @@ from goldenverba.components.embedding.SentenceTransformersEmbedder import (
 
 # Import Retrievers
 from goldenverba.components.retriever.WindowRetriever import WindowRetriever
+from verba_extensions.plugins.entity_aware_retriever import EntityAwareRetriever
 
 # Import Generators
 from goldenverba.components.generation.CohereGenerator import CohereGenerator
@@ -121,7 +122,7 @@ if production != "Production":
         CohereEmbedder(),
         OpenAIEmbedder(),
     ]
-    retrievers = [WindowRetriever()]
+    retrievers = [WindowRetriever(), EntityAwareRetriever()]
     generators = [
         OllamaGenerator(),
         OpenAIGenerator(),
@@ -158,7 +159,7 @@ else:
         CohereEmbedder(),
         OpenAIEmbedder(),
     ]
-    retrievers = [WindowRetriever()]
+    retrievers = [WindowRetriever(), EntityAwareRetriever()]
     generators = [
         OpenAIGenerator(),
         AnthropicGenerator(),
