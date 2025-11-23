@@ -377,7 +377,9 @@ class EntityAwareRetriever(Retriever):
             
             phase2_filter = Filter.all_of(phase2_filter_list) if len(phase2_filter_list) > 1 else phase2_filter_list[0]
             
-            # Multi-Vector Search na Fase 2
+            # Multi-Vector Search ou Single Named Vector na Fase 2
+            # Se tem 2+ vetores, usar multi-vector search
+            # Se tem 1 vetor, usar target_vector na busca híbrida
             if enable_multi_vector and len(vectors_to_search) >= 2:
                 try:
                     from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
@@ -456,6 +458,12 @@ class EntityAwareRetriever(Retriever):
                     msg.warn(f"    Fase 2: Erro em multi-vector search: {str(e)}")
             
             # Fallback: busca híbrida simples na Fase 2
+            # Se tem apenas 1 named vector relevante, usar target_vector
+            target_vector_phase2 = None
+            if len(vectors_to_search) == 1:
+                target_vector_phase2 = vectors_to_search[0]
+                msg.info(f"    Fase 2: Usando target_vector único: {target_vector_phase2}")
+            
             phase2_chunks = await weaviate_manager.hybrid_chunks_with_filter(
                 client=client,
                 embedder=embedder,
@@ -467,6 +475,7 @@ class EntityAwareRetriever(Retriever):
                 document_uuids=document_uuids,
                 filters=phase2_filter,
                 alpha=rewritten_alpha,
+                target_vector=target_vector_phase2,  # Named vector único (se aplicável)
             )
             
             if phase2_chunks:
@@ -1552,8 +1561,12 @@ class EntityAwareRetriever(Retriever):
                     if len(vectors_to_search) >= 2:
                         use_multi_vector = True
                         msg.good(f"  🎯 Multi-vector search habilitado: {vectors_to_search}")
+                    elif len(vectors_to_search) == 1:
+                        # Apenas 1 vetor relevante - usar single named vector
+                        use_multi_vector = False
+                        msg.info(f"  🎯 Usando named vector único: {vectors_to_search[0]}")
                     else:
-                        msg.info(f"  ℹ️ Multi-vector não aplicável (apenas {len(vectors_to_search)} vetor(es) relevante(s))")
+                        msg.info(f"  ℹ️ Nenhum named vector relevante detectado - usando vetor padrão")
             except Exception as e:
                 msg.debug(f"  Erro ao verificar named vectors (não crítico): {str(e)}")
                 use_multi_vector = False
@@ -1826,6 +1839,12 @@ class EntityAwareRetriever(Retriever):
                     # Configurar query_properties para BM25 boosting
                     query_properties = ["content", "title^2"]  # Boost de título
                     
+                    # Se tem apenas 1 named vector relevante (não multi-vector), usar target_vector
+                    target_vector_single = None
+                    if not use_multi_vector and len(vectors_to_search) == 1:
+                        target_vector_single = vectors_to_search[0]
+                        msg.info(f"  🎯 Usando target_vector: {target_vector_single}")
+                    
                     if combined_filter:
                         msg.info(f"  Executando: Hybrid search com filtros combinados")
                         chunks = await weaviate_manager.hybrid_chunks_with_filter(
@@ -1841,6 +1860,7 @@ class EntityAwareRetriever(Retriever):
                             alpha=rewritten_alpha,
                             fusion_type=fusion_type,  # Relative Score Fusion
                             query_properties=query_properties,  # BM25 boosting
+                            target_vector=target_vector_single,  # Named vector único (se aplicável)
                         )
                     elif entity_filter:
                         msg.info(f"  Executando: Hybrid search com entity filter")
@@ -1857,6 +1877,7 @@ class EntityAwareRetriever(Retriever):
                             alpha=rewritten_alpha,
                             fusion_type=fusion_type,  # Relative Score Fusion
                             query_properties=query_properties,  # BM25 boosting
+                            target_vector=target_vector_single,  # Named vector único (se aplicável)
                         )
                     else:
                         # Sem filtros disponíveis

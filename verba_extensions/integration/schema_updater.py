@@ -490,6 +490,13 @@ def patch_weaviate_manager_verify_collection():
                         # Converte Property objects para dict format
                         properties_dict = []
                         for prop in all_properties:
+                            # Verifica se Property tem data_type antes de acessar
+                            if not hasattr(prop, 'data_type'):
+                                msg.warn(f"   ⚠️  Property {getattr(prop, 'name', 'unknown')} não tem atributo 'data_type' - pulando")
+                                import traceback
+                                msg.debug(f"   🔍 Traceback:\n{traceback.format_exc()}")
+                                continue
+                            
                             # Converte dataType para formato esperado pelo Weaviate
                             # Weaviate espera uma lista com o nome do tipo (ex: ["text"], ["number"], ["uuid"])
                             try:
@@ -518,8 +525,13 @@ def patch_weaviate_manager_verify_collection():
                                         data_type_value = data_type_str
                             except Exception as e:
                                 # Se falhar, usa string direta como último recurso
-                                msg.debug(f"   ⚠️  Erro ao converter dataType para {prop.name}: {str(e)}")
-                                data_type_value = str(prop.data_type).lower().replace("datatype.", "")
+                                msg.warn(f"   ⚠️  Erro ao converter dataType para {getattr(prop, 'name', 'unknown')}: {str(e)}")
+                                try:
+                                    data_type_value = str(prop.data_type).lower().replace("datatype.", "")
+                                except:
+                                    # Se ainda falhar, usa fallback genérico
+                                    msg.warn(f"   ⚠️  Não foi possível determinar dataType para {getattr(prop, 'name', 'unknown')} - usando 'text' como fallback")
+                                    data_type_value = "text"
                             
                             prop_dict = {
                                 "name": prop.name,

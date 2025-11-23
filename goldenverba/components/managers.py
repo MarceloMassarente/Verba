@@ -1236,6 +1236,7 @@ class WeaviateManager:
         alpha: float = 0.5,
         fusion_type: Optional[str] = None,  # "RELATIVE_SCORE" ou None
         query_properties: Optional[list[str]] = None,  # Propriedades para BM25
+        target_vector: Optional[Any] = None,  # Named vector ou TargetVectors (para named vectors)
     ):
         """
         Hybrid search com filtros entity-aware aplicados PRIMEIRO.
@@ -1292,6 +1293,14 @@ class WeaviateManager:
                 "return_metadata": MetadataQuery(score=True, explain_score=False),
                 "filters": apply_filters,
             }
+            
+            # Adicionar target_vector se especificado (para named vectors)
+            if target_vector:
+                try:
+                    hybrid_kwargs["target_vector"] = target_vector
+                except TypeError:
+                    # Se target_vector não suportado, ignora
+                    pass
             
             # Adicionar limit ou auto_limit baseado no modo
             if limit_mode == "Autocut":

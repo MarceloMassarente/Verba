@@ -55,9 +55,10 @@ def build_named_vectors_config(
     - company_vec: Empresas específicas (Apple, Microsoft, etc.)
     
     Modo BYOV (Bring Your Own Vector):
-    - Não usa vectorizer do Weaviate
-    - Embeddings são calculados manualmente e inseridos
-    - Permite usar qualquer modelo de embedding
+    - Verba gera embeddings usando seus próprios embedders (SentenceTransformers, OpenAI, etc.)
+    - Weaviate apenas armazena os vetores já gerados
+    - Permite usar qualquer modelo de embedding do Verba
+    - Mantém consistência: mesmo embedder usado para default e named vectors
     
     Args:
         enable_named_vectors: Se True, retorna vectorConfig com named vectors
@@ -78,6 +79,7 @@ def build_named_vectors_config(
     # - vectorizer DEVE ser um objeto {"none": {}}, não string
     # - Cada named vector precisa ter vectorizer, vectorIndexType e vectorIndexConfig
     # - É obrigatório ter um named vector "default" mesmo que não seja usado
+    # - Verba gera os embeddings usando seus próprios embedders (BYOV)
     base_vector_config = {
         "vectorizer": {
             "none": {}  # BYOV mode - Verba fornece os vetores
@@ -91,24 +93,28 @@ def build_named_vectors_config(
     
     # Named vectors especializados
     # NOTA: Incluímos "default" como requerido pelo Weaviate 1.34.0
-    # O usuário pode usar o mesmo vetor de um dos named vectors como default
+    # O Verba gera embeddings para cada named vector usando o mesmo embedder
+    # (SentenceTransformers, OpenAI, etc.) que foi usado para o vetor padrão
     vector_config = {
         "default": {
             **base_vector_config,
             # default: vetor padrão (obrigatório pelo Weaviate 1.34.0)
-            # Pode ser preenchido com o mesmo vetor de concept_vec ou outro
+            # Gerado pelo Verba usando o embedder selecionado
         },
         "concept_vec": {
             **base_vector_config,
             # concept_vec: para conceitos abstratos, frameworks, estratégias
+            # Gerado pelo Verba a partir de concept_text usando o mesmo embedder
         },
         "sector_vec": {
             **base_vector_config,
             # sector_vec: para setores, indústrias, domínios
+            # Gerado pelo Verba a partir de sector_text usando o mesmo embedder
         },
         "company_vec": {
             **base_vector_config,
             # company_vec: para empresas, organizações, entidades
+            # Gerado pelo Verba a partir de company_text usando o mesmo embedder
         }
     }
     
@@ -190,7 +196,7 @@ def validate_vector_config(vector_config: Optional[Dict[str, Any]]) -> bool:
             if key not in vector_config_data:
                 return False
         
-        # Validar vectorizer: deve ser objeto {"none": {}}, não string
+        # Validar vectorizer: deve ser objeto {"none": {}}, não string (BYOV mode)
         vectorizer = vector_config_data.get("vectorizer")
         if not isinstance(vectorizer, dict):
             return False

@@ -316,27 +316,121 @@ def patch_weaviate_manager():
                 # Aplica patch temporário
                 DataObject.__init__ = patched_data_object_init
                 
-                # Se tem named vectors, precisa gerar embeddings adicionais ANTES de criar DataObjects
-                # Isso requer modificar o método import_document para gerar embeddings extras
-                # Por enquanto, vamos apenas preparar os textos especializados nos chunks
-                if has_named_vectors and hasattr(document, 'chunks'):
+                # Se tem named vectors, gera embeddings adicionais usando o mesmo embedder do Verba
+                # BYOV mode: Verba gera embeddings, Weaviate apenas armazena
+                if has_named_vectors and hasattr(document, 'chunks') and document.chunks:
                     try:
                         from verba_extensions.utils.vector_extractor import get_vector_extractor
                         vector_extractor = get_vector_extractor()
                         
-                        # Extrai textos especializados e adiciona ao meta de cada chunk
-                        for chunk in document.chunks:
-                            if hasattr(chunk, 'meta') and chunk.meta:
-                                texts = vector_extractor.extract_all_texts(chunk)
-                                chunk.meta["concept_text"] = texts["concept_text"]
-                                chunk.meta["sector_text"] = texts["sector_text"]
-                                chunk.meta["company_text"] = texts["company_text"]
+                        # Obtém instância do embedder para gerar embeddings (mesmo usado para default)
+                        from goldenverba.components import managers
+                        embedding_manager = managers.EmbeddingManager()
+                        
+                        if embedder not in embedding_manager.embedders:
+                            msg.warn(f"[Named-Vectors] Embedder '{embedder}' não encontrado - named vectors não serão gerados")
+                        else:
+                            embedder_instance = embedding_manager.embedders[embedder]
+                            msg.info(f"[Named-Vectors] 🎯 Gerando embeddings para named vectors usando {embedder} (BYOV)")
+                            
+                            # Extrai textos especializados e gera embeddings para cada chunk
+                            for chunk_idx, chunk in enumerate(document.chunks):
+                                try:
+                                    # Extrai textos especializados
+                                    if not hasattr(chunk, 'meta') or not chunk.meta:
+                                        chunk.meta = {}
+                                    
+                                    texts = vector_extractor.extract_all_texts(chunk)
+                                    chunk.meta["concept_text"] = texts["concept_text"]
+                                    chunk.meta["sector_text"] = texts["sector_text"]
+                                    chunk.meta["company_text"] = texts["company_text"]
+                                    
+                                    # Gera embeddings para cada texto especializado usando o mesmo embedder
+                                    # Isso mantém consistência: mesmo modelo usado para default e named vectors
+                                    named_vectors = {
+                                        "default": chunk.vector  # Vetor padrão já existe
+                                    }
+                                    
+                                    # Gera embedding para concept_vec
+                                    if texts["concept_text"]:
+                                        try:
+                                            concept_embedding = await embedder_instance.embed(
+                                                texts["concept_text"], 
+                                                embedder
+                                            )
+                                            named_vectors["concept_vec"] = concept_embedding
+                                        except Exception as e:
+                                            msg.debug(f"[Named-Vectors] Erro ao gerar concept_vec para chunk {chunk_idx}: {str(e)}")
+                                            # Fallback: usa vetor padrão
+                                            named_vectors["concept_vec"] = chunk.vector
+                                    
+                                    # Gera embedding para sector_vec
+                                    if texts["sector_text"]:
+                                        try:
+                                            sector_embedding = await embedder_instance.embed(
+                                                texts["sector_text"], 
+                                                embedder
+                                            )
+                                            named_vectors["sector_vec"] = sector_embedding
+                                        except Exception as e:
+                                            msg.debug(f"[Named-Vectors] Erro ao gerar sector_vec para chunk {chunk_idx}: {str(e)}")
+                                            # Fallback: usa vetor padrão
+                                            named_vectors["sector_vec"] = chunk.vector
+                                    
+                                    # Gera embedding para company_vec
+                                    if texts["company_text"]:
+                                        try:
+                                            company_embedding = await embedder_instance.embed(
+                                                texts["company_text"], 
+                                                embedder
+                                            )
+                                            named_vectors["company_vec"] = company_embedding
+                                        except Exception as e:
+                                            msg.debug(f"[Named-Vectors] Erro ao gerar company_vec para chunk {chunk_idx}: {str(e)}")
+                                            # Fallback: usa vetor padrão
+                                            named_vectors["company_vec"] = chunk.vector
+                                    
+                                    # Armazena named vectors no chunk para uso no DataObject
+                                    chunk._named_vectors = named_vectors
+                                    
+                                    # Também armazena em dict global usando uuid ou content como chave
+                                    chunk_key = getattr(chunk, 'uuid', None) or (chunk.content[:100] if hasattr(chunk, 'content') else f"chunk_{chunk_idx}")
+                                    _chunk_named_vectors[chunk_key] = named_vectors
+                                    
+                                except Exception as e:
+                                    msg.warn(f"[Named-Vectors] Erro ao processar chunk {chunk_idx} (não crítico): {str(e)}")
+                                    # Fallback: chunk sem named vectors (usa apenas default)
+                                    if hasattr(chunk, 'vector'):
+                                        chunk._named_vectors = {"default": chunk.vector}
+                            
+                            msg.good(f"[Named-Vectors] ✅ Embeddings gerados para {len([c for c in document.chunks if hasattr(c, '_named_vectors')])} chunks (BYOV)")
+                            
                     except Exception as e:
-                        msg.debug(f"[Named-Vectors] Erro ao extrair textos especializados (não crítico): {str(e)}")
+                        msg.warn(f"[Named-Vectors] Erro ao gerar embeddings para named vectors (não crítico): {str(e)}")
+                        import traceback
+                        msg.debug(f"[Named-Vectors] Traceback: {traceback.format_exc()}")
+                
+                # Para named vectors, modifica temporariamente os chunks para usar dict de named vectors
+                # Isso permite que o código original funcione sem modificações
+                original_chunk_vectors = {}
+                if has_named_vectors and hasattr(document, 'chunks'):
+                    # Armazena vectors originais e substitui temporariamente por dict de named vectors
+                    for chunk in document.chunks:
+                        if hasattr(chunk, '_named_vectors') and chunk._named_vectors:
+                            original_chunk_vectors[id(chunk)] = chunk.vector
+                            # Substitui temporariamente chunk.vector por dict de named vectors
+                            chunk.vector = chunk._named_vectors
+                            msg.debug(f"[Named-Vectors] Chunk {id(chunk)} usando named vectors")
                 
                 try:
                     await original_import(self, client, document, embedder)
                 finally:
+                    # Restaura vectors originais dos chunks
+                    for chunk in document.chunks:
+                        chunk_id = id(chunk)
+                        if chunk_id in original_chunk_vectors:
+                            chunk.vector = original_chunk_vectors[chunk_id]
+                    
                     # Restaura método original
                     DataObject.__init__ = original_data_object_init
                 # Método original não retorna doc_uuid, então buscamos pelo título
