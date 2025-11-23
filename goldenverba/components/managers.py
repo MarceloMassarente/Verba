@@ -19,7 +19,7 @@ import json
 import re
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 # Reduz logging excessivo do Weaviate SDK para evitar rate limits
 # Logs de vetores individuais são muito verbosos e causam rate limit no Railway
