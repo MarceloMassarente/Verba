@@ -489,11 +489,13 @@ class EntityAwareRetriever(Retriever):
         
         Returns:
             True se Enable Named Vectors está habilitado (via env var ou config)
+            Padrão: True (named vectors habilitados por padrão)
         """
         import os
-        # Verificar variável de ambiente
-        if os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true":
-            return True
+        # Verificar variável de ambiente (permite desabilitar via env)
+        env_value = os.getenv("ENABLE_NAMED_VECTORS")
+        if env_value is not None:
+            return env_value.lower() == "true"
         
         # Tentar verificar via VerbaManager (se disponível)
         try:
@@ -501,11 +503,12 @@ class EntityAwareRetriever(Retriever):
             vm = VerbaManager()
             default_config = vm.create_config()
             if "Advanced" in default_config and "Enable Named Vectors" in default_config["Advanced"]:
-                return default_config["Advanced"]["Enable Named Vectors"].get("value", False)
+                return default_config["Advanced"]["Enable Named Vectors"].get("value", True)
         except Exception:
             pass
         
-        return False
+        # Padrão: True (named vectors habilitados por padrão)
+        return True
     
     def _validate_config_hierarchy(self, config: Dict) -> Tuple[Dict, List[str]]:
         """
@@ -1640,9 +1643,9 @@ class EntityAwareRetriever(Retriever):
                         except Exception as e:
                             msg.debug(f"  Query Expansion não disponível: {str(e)}")
                     
-                    # Decidir estratégia baseado no modo
-                    use_strict_filter = False
-                    use_boost_only = False
+                # Decidir estratégia baseado no modo
+                use_strict_filter = False
+                use_boost_only = False
                 
                 if not enable_entity_filter or not entity_filter:
                     # Filtro desabilitado ou sem entidades - busca normal
@@ -1723,8 +1726,8 @@ class EntityAwareRetriever(Retriever):
                             
                             # Gerar embedding da query expandida
                             query_embeddings = await embedder_obj.vectorize(embedder_config, [search_query_mv])
-                            if query_embeddings and len(query_embeddings) > 0:
-                                query_vector = query_embeddings[0]
+                        if query_embeddings and len(query_embeddings) > 0:
+                            query_vector = query_embeddings[0]
                         
                         if query_vector:
                             

@@ -712,7 +712,7 @@ class VerbaManager:
         advanced_config = {
             "Enable Named Vectors": {
                 "type": "bool",
-                "value": os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true",
+                "value": os.getenv("ENABLE_NAMED_VECTORS", "true").lower() == "true",
                 "description": "Enable named vectors (concept_vec, sector_vec, company_vec). Requires collection recreation. Increases memory usage (~3x).",
                 "values": []
             }

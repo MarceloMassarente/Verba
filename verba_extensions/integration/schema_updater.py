@@ -226,7 +226,7 @@ def get_named_vector_text_properties():
     ]
 
 
-def get_all_embedding_properties(include_named_vectors: bool = False):
+def get_all_embedding_properties(include_named_vectors: bool = True):
     """
     Retorna TODAS as propriedades para collections de embedding.
     
@@ -255,7 +255,7 @@ def get_all_embedding_properties(include_named_vectors: bool = False):
 
 
 def get_vector_config(
-    enable_named_vectors: bool = False,
+    enable_named_vectors: bool = True,
     estimated_count: int = 0,
     use_pq: bool = True
 ) -> Optional[Dict[str, Any]]:
@@ -415,7 +415,7 @@ def patch_weaviate_manager_verify_collection():
                 try:
                     # Verifica se named vectors estão habilitados
                     # 1. Tenta pegar da configuração do Verba salva no Weaviate
-                    enable_named_vectors = False
+                    enable_named_vectors = True  # Padrão: habilitado
                     try:
                         from goldenverba.verba_manager import VerbaManager
                         vm = VerbaManager()
@@ -425,7 +425,7 @@ def patch_weaviate_manager_verify_collection():
                                 client, vm.rag_config_uuid
                             )
                             if config and "Advanced" in config and "Enable Named Vectors" in config["Advanced"]:
-                                enable_named_vectors = config["Advanced"]["Enable Named Vectors"].get("value", False)
+                                enable_named_vectors = config["Advanced"]["Enable Named Vectors"].get("value", True)
                                 msg.info(f"📋 Named vectors lido da configuração: {enable_named_vectors}")
                         except:
                             # Se não conseguir ler, usa padrão do create_config
@@ -437,10 +437,14 @@ def patch_weaviate_manager_verify_collection():
                         msg.debug(f"[Schema-Updater] Erro ao ler config do VerbaManager: {str(e)}")
                     
                     # 2. Fallback para variável de ambiente (compatibilidade)
-                    if not enable_named_vectors:
-                        enable_named_vectors = os.getenv("ENABLE_NAMED_VECTORS", "false").lower() == "true"
+                    # Se variável de ambiente estiver definida, usa ela (permite desabilitar via env)
+                    env_value = os.getenv("ENABLE_NAMED_VECTORS")
+                    if env_value is not None:
+                        enable_named_vectors = env_value.lower() == "true"
                         if enable_named_vectors:
                             msg.info(f"📋 Named vectors lido de variável de ambiente: ENABLE_NAMED_VECTORS=true")
+                        else:
+                            msg.info(f"📋 Named vectors desabilitado via variável de ambiente: ENABLE_NAMED_VECTORS=false")
                     
                     # Obtém todas as propriedades (padrão Verba + ETL + opcionalmente named vectors)
                     all_properties = get_all_embedding_properties(include_named_vectors=enable_named_vectors)
@@ -483,29 +487,72 @@ def patch_weaviate_manager_verify_collection():
                         # Constrói schema completo como dict
                         from weaviate.classes.config import Configure
                         
+                        # Converte Property objects para dict format
+                        properties_dict = []
+                        for prop in all_properties:
+                            # Converte dataType para formato esperado pelo Weaviate
+                            # Weaviate espera uma lista com o nome do tipo (ex: ["text"], ["number"], ["uuid"])
+                            try:
+                                if hasattr(prop.data_type, 'value'):
+                                    # DataType enum tem atributo 'value' (ex: "text", "number", "uuid")
+                                    data_type_value = prop.data_type.value
+                                elif hasattr(prop.data_type, 'name'):
+                                    # Se for um enum, pega o nome e converte para lowercase
+                                    data_type_value = prop.data_type.name.lower()
+                                    # Mapeia nomes de enum para valores esperados pelo Weaviate
+                                    type_mapping = {
+                                        "number": "number",
+                                        "text": "text",
+                                        "uuid": "uuid",
+                                        "number_array": "number[]",
+                                        "text_array": "text[]",
+                                    }
+                                    data_type_value = type_mapping.get(data_type_value, data_type_value)
+                                else:
+                                    # Fallback: converte para string e remove prefixos comuns
+                                    data_type_str = str(prop.data_type).lower()
+                                    # Remove prefixos como "DataType." se existirem
+                                    if "." in data_type_str:
+                                        data_type_value = data_type_str.split(".")[-1]
+                                    else:
+                                        data_type_value = data_type_str
+                            except Exception as e:
+                                # Se falhar, usa string direta como último recurso
+                                msg.debug(f"   ⚠️  Erro ao converter dataType para {prop.name}: {str(e)}")
+                                data_type_value = str(prop.data_type).lower().replace("datatype.", "")
+                            
+                            prop_dict = {
+                                "name": prop.name,
+                                "dataType": [data_type_value],
+                            }
+                            
+                            # Adiciona description se existir
+                            if hasattr(prop, 'description') and prop.description:
+                                prop_dict["description"] = prop.description
+                            
+                            # Adiciona tokenization apenas se existir (propriedades TEXT podem ter)
+                            if hasattr(prop, 'tokenization') and prop.tokenization is not None:
+                                if hasattr(prop.tokenization, 'value'):
+                                    prop_dict["tokenization"] = prop.tokenization.value
+                                else:
+                                    prop_dict["tokenization"] = str(prop.tokenization)
+                            
+                            # Adiciona indexFilterable se True
+                            if hasattr(prop, 'index_filterable') and prop.index_filterable:
+                                prop_dict["indexFilterable"] = True
+                            
+                            # Adiciona indexSearchable se True
+                            if hasattr(prop, 'index_searchable') and prop.index_searchable:
+                                prop_dict["indexSearchable"] = True
+                            
+                            properties_dict.append(prop_dict)
+                        
                         schema_dict = {
                             "class": collection_name,
                             "description": f"Collection com named vectors: concept_vec, sector_vec, company_vec",
                             "vectorConfig": vector_config,
-                            "properties": [
-                                {
-                                    "name": prop.name,
-                                    "dataType": [prop.data_type.value] if hasattr(prop.data_type, 'value') else [str(prop.data_type)],
-                                    "description": prop.description or "",
-                                    "tokenization": prop.tokenization.value if hasattr(prop.tokenization, 'value') else str(prop.tokenization) if hasattr(prop, 'tokenization') and prop.tokenization else None,
-                                    "indexFilterable": prop.index_filterable if hasattr(prop, 'index_filterable') else False,
-                                    "indexSearchable": prop.index_searchable if hasattr(prop, 'index_searchable') else False,
-                                }
-                                for prop in all_properties
-                                if prop.tokenization is not None  # Remove None tokenization
-                            ]
+                            "properties": properties_dict
                         }
-                        
-                        # Remove None values do schema
-                        schema_dict["properties"] = [
-                            {k: v for k, v in prop.items() if v is not None}
-                            for prop in schema_dict["properties"]
-                        ]
                         
                         try:
                             # Usa create_from_dict para named vectors
@@ -513,7 +560,10 @@ def patch_weaviate_manager_verify_collection():
                             msg.info(f"   ✅ Collection criada usando create_from_dict (named vectors)")
                         except Exception as dict_error:
                             msg.warn(f"   ⚠️  Erro ao criar com create_from_dict: {str(dict_error)}")
+                            msg.warn(f"   📋 Total de propriedades no schema: {len(properties_dict)}")
                             msg.warn(f"   💡 Tentando criar sem named vectors como fallback...")
+                            import traceback
+                            msg.debug(f"   🔍 Traceback completo:\n{traceback.format_exc()}")
                             # Fallback: cria sem named vectors
                             collection = await client.collections.create(
                                 name=collection_name,
