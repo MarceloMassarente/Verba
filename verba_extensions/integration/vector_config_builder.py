@@ -73,8 +73,15 @@ def build_named_vectors_config(
     # Quantização PQ se collection grande
     pq_config = get_pq_config(estimated_count, threshold=50000) if use_pq else {}
     
-    # Configuração HNSW otimizada
+    # Configuração base para cada named vector (BYOV mode)
+    # IMPORTANTE: Para Weaviate 1.34.0 com named vectors:
+    # - vectorizer DEVE ser um objeto {"none": {}}, não string
+    # - Cada named vector precisa ter vectorizer, vectorIndexType e vectorIndexConfig
+    # - É obrigatório ter um named vector "default" mesmo que não seja usado
     base_vector_config = {
+        "vectorizer": {
+            "none": {}  # BYOV mode - Verba fornece os vetores
+        },
         "vectorIndexType": "hnsw",
         "vectorIndexConfig": {
             "distance": "cosine",
@@ -83,7 +90,14 @@ def build_named_vectors_config(
     }
     
     # Named vectors especializados
+    # NOTA: Incluímos "default" como requerido pelo Weaviate 1.34.0
+    # O usuário pode usar o mesmo vetor de um dos named vectors como default
     vector_config = {
+        "default": {
+            **base_vector_config,
+            # default: vetor padrão (obrigatório pelo Weaviate 1.34.0)
+            # Pode ser preenchido com o mesmo vetor de concept_vec ou outro
+        },
         "concept_vec": {
             **base_vector_config,
             # concept_vec: para conceitos abstratos, frameworks, estratégias
@@ -162,7 +176,11 @@ def validate_vector_config(vector_config: Optional[Dict[str, Any]]) -> bool:
         return False
     
     # Verificar que cada named vector tem estrutura correta
-    required_keys = ["vectorIndexType", "vectorIndexConfig"]
+    # Para Weaviate 1.34.0 com named vectors, cada vetor precisa:
+    # - vectorizer: objeto {"none": {}} (não string)
+    # - vectorIndexType: "hnsw" (ou outro)
+    # - vectorIndexConfig: dict com "distance"
+    required_keys = ["vectorizer", "vectorIndexType", "vectorIndexConfig"]
     
     for vector_name, vector_config_data in vector_config.items():
         if not isinstance(vector_config_data, dict):
@@ -172,6 +190,15 @@ def validate_vector_config(vector_config: Optional[Dict[str, Any]]) -> bool:
             if key not in vector_config_data:
                 return False
         
+        # Validar vectorizer: deve ser objeto {"none": {}}, não string
+        vectorizer = vector_config_data.get("vectorizer")
+        if not isinstance(vectorizer, dict):
+            return False
+        if "none" not in vectorizer:
+            return False
+        if not isinstance(vectorizer["none"], dict):
+            return False
+        
         # Validar vectorIndexConfig
         index_config = vector_config_data.get("vectorIndexConfig", {})
         if not isinstance(index_config, dict):
@@ -179,6 +206,10 @@ def validate_vector_config(vector_config: Optional[Dict[str, Any]]) -> bool:
         
         if "distance" not in index_config:
             return False
+    
+    # Verificar se tem named vector "default" (obrigatório pelo Weaviate 1.34.0)
+    if "default" not in vector_config:
+        return False
     
     return True
 
