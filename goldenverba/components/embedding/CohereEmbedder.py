@@ -56,15 +56,29 @@ class CohereEmbedder(Embedding):
         all_embeddings = []
 
         async with aiohttp.ClientSession() as session:
+            from verba_extensions.utils.retry import retry_with_backoff
+            
             for chunk in chunks(content, 96):
                 data = {"texts": chunk, "model": model, "input_type": "search_document"}
-                async with session.post(
-                    self.url + "/embed", data=json.dumps(data), headers=headers
-                ) as response:
-                    response.raise_for_status()
-                    response_data = await response.json()
-                    embeddings = response_data.get("embeddings", [])
-                    all_embeddings.extend(embeddings)
+                
+                # Função interna para fazer requisição com retry
+                async def make_request():
+                    async with session.post(
+                        self.url + "/embed", data=json.dumps(data), headers=headers
+                    ) as response:
+                        response.raise_for_status()
+                        response_data = await response.json()
+                        return response_data.get("embeddings", [])
+                
+                # Executa com retry
+                embeddings = await retry_with_backoff(
+                    make_request,
+                    max_retries=3,
+                    base_delay=2.0,
+                    retryable_status_codes=[429, 500, 502, 503, 504],
+                    operation_name=f"Cohere Embeddings API (batch {len(all_embeddings)//96 + 1})"
+                )
+                all_embeddings.extend(embeddings)
 
         return all_embeddings
 

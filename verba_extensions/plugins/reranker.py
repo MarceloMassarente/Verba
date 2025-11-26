@@ -308,6 +308,7 @@ class CohereReranker(BaseReranker):
         try:
             import aiohttp
             import json
+            from verba_extensions.utils.retry import retry_with_backoff
             
             # Cohere aceita até 100 documentos por request
             batch_size = 100
@@ -332,13 +333,24 @@ class CohereReranker(BaseReranker):
                         "top_n": min(top_k, len(batch_chunks)),
                     }
                     
-                    async with session.post(
-                        f"{self.url}/rerank",
-                        headers=headers,
-                        json=data
-                    ) as response:
-                        response.raise_for_status()
-                        result = await response.json()
+                    # Função interna para fazer requisição com retry
+                    async def make_request():
+                        async with session.post(
+                            f"{self.url}/rerank",
+                            headers=headers,
+                            json=data
+                        ) as response:
+                            response.raise_for_status()
+                            return await response.json()
+                    
+                    # Executa com retry
+                    result = await retry_with_backoff(
+                        make_request,
+                        max_retries=3,
+                        base_delay=1.0,
+                        retryable_status_codes=[429, 500, 502, 503, 504],
+                        operation_name=f"Cohere Rerank API (batch {i//batch_size + 1})"
+                    )
                         
                         # Cohere retorna resultados com índices e scores
                         reranked_indices = result.get("results", [])
@@ -412,13 +424,25 @@ class JinaReranker(BaseReranker):
                     "top_n": top_k,
                 }
                 
-                async with session.post(
-                    f"{self.url}/rerank",
-                    headers=headers,
-                    json=data
-                ) as response:
-                    response.raise_for_status()
-                    result = await response.json()
+                # Função interna para fazer requisição com retry
+                async def make_request():
+                    async with session.post(
+                        f"{self.url}/rerank",
+                        headers=headers,
+                        json=data
+                    ) as response:
+                        response.raise_for_status()
+                        return await response.json()
+                
+                # Executa com retry
+                from verba_extensions.utils.retry import retry_with_backoff
+                result = await retry_with_backoff(
+                    make_request,
+                    max_retries=3,
+                    base_delay=1.0,
+                    retryable_status_codes=[429, 500, 502, 503, 504],
+                    operation_name="Jina Rerank API"
+                )
                     
                     # Jina retorna resultados com índices e scores
                     reranked_results = result.get("results", [])
@@ -473,6 +497,7 @@ class VoyageAIReranker(BaseReranker):
         try:
             import aiohttp
             import json
+            from verba_extensions.utils.retry import retry_with_backoff
             
             # Prepara dados para API
             texts = [chunk.content for chunk in chunks]
@@ -489,16 +514,27 @@ class VoyageAIReranker(BaseReranker):
                     "top_n": top_k,
                 }
                 
-                async with session.post(
-                    f"{self.url}/rerank",
-                    headers=headers,
-                    json=data
-                ) as response:
-                    response.raise_for_status()
-                    result = await response.json()
+                # Função interna para fazer requisição com retry
+                async def make_request():
+                    async with session.post(
+                        f"{self.url}/rerank",
+                        headers=headers,
+                        json=data
+                    ) as response:
+                        response.raise_for_status()
+                        return await response.json()
+                
+                # Executa com retry
+                result = await retry_with_backoff(
+                    make_request,
+                    max_retries=3,
+                    base_delay=1.0,
+                    retryable_status_codes=[429, 500, 502, 503, 504],
+                    operation_name="VoyageAI Rerank API"
+                )
                     
-                    # VoyageAI retorna resultados com índices e scores
-                    reranked_results = result.get("results", [])
+                # VoyageAI retorna resultados com índices e scores
+                reranked_results = result.get("results", [])
                     
                     # Ordena por score (maior primeiro)
                     reranked_results.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -635,16 +671,28 @@ class ContextualAIReranker(BaseReranker):
                     if any(batch_metadata):  # Só adiciona se houver pelo menos um metadata não vazio
                         data["metadata"] = batch_metadata
                     
-                    async with session.post(
-                        f"{self.url}/rerank",
-                        headers=headers,
-                        json=data
-                    ) as response:
-                        response.raise_for_status()
-                        result = await response.json()
-                        
-                        # Contextual AI retorna resultados com índices e relevance_score
-                        reranked_results = result.get("results", [])
+                    # Função interna para fazer requisição com retry
+                    async def make_request():
+                        async with session.post(
+                            f"{self.url}/rerank",
+                            headers=headers,
+                            json=data
+                        ) as response:
+                            response.raise_for_status()
+                            return await response.json()
+                    
+                    # Executa com retry
+                    from verba_extensions.utils.retry import retry_with_backoff
+                    result = await retry_with_backoff(
+                        make_request,
+                        max_retries=3,
+                        base_delay=1.0,
+                        retryable_status_codes=[429, 500, 502, 503, 504],
+                        operation_name=f"ContextualAI Rerank API (batch {i//batch_size + 1})"
+                    )
+                    
+                    # Contextual AI retorna resultados com índices e relevance_score
+                    reranked_results = result.get("results", [])
                         
                         # Ordena por score (maior primeiro)
                         reranked_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)

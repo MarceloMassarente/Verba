@@ -248,28 +248,36 @@ class ContextualAIIngestor(Reader):
         # Não incluir se None ou vazio
         
         try:
+            from verba_extensions.utils.retry import retry_with_backoff
+            
             async with aiohttp.ClientSession() as session:
-                # POST para iniciar parse
-                async with session.post(
-                    api_url, headers=headers, data=form_data
-                ) as response:
-                    response.raise_for_status()
-                    json_response = await response.json()
-                    
-                    if "job_id" not in json_response:
-                        raise ValueError(f"API error: Resposta inválida: {json_response}")
-                    
-                    job_id = json_response["job_id"]
-                    msg.info(f"✅ Job iniciado: {job_id}")
+                # Função interna para fazer POST inicial com retry
+                async def make_initial_request():
+                    async with session.post(
+                        api_url, headers=headers, data=form_data
+                    ) as response:
+                        response.raise_for_status()
+                        json_response = await response.json()
+                        
+                        if "job_id" not in json_response:
+                            raise ValueError(f"API error: Resposta inválida: {json_response}")
+                        
+                        return json_response["job_id"]
                 
-                # Polling do resultado
+                # Executa POST inicial com retry
+                job_id = await retry_with_backoff(
+                    make_initial_request,
+                    max_retries=3,
+                    base_delay=1.0,
+                    retryable_status_codes=[429, 500, 502, 503, 504],
+                    operation_name=f"Contextual.ai Parse API (iniciar job para {fileConfig.filename})"
+                )
+                msg.info(f"✅ Job iniciado: {job_id}")
+                
+                # Polling do resultado (já tem retry interno melhorado)
                 result = await self._poll_job_result(session, api_key, job_id)
                 return result
         
-        except aiohttp.ClientError as e:
-            raise Exception(
-                f"Contextual.ai API request failed for {fileConfig.filename}: {str(e)}"
-            )
         except Exception as e:
             raise Exception(f"Failed to process {fileConfig.filename}: {str(e)}")
     
@@ -306,13 +314,32 @@ class ContextualAIIngestor(Reader):
             # Tenta cada endpoint possível
             for endpoint in endpoints_to_try:
                 try:
-                    async with session.get(endpoint, headers=headers) as response:
-                        if response.status == 404:
-                            # Endpoint não existe, tenta próximo
+                    from verba_extensions.utils.retry import retry_with_backoff
+                    
+                    # Função interna para fazer GET com retry (não retry em 404)
+                    async def make_get_request():
+                        async with session.get(endpoint, headers=headers) as response:
+                            if response.status == 404:
+                                # Endpoint não existe, levanta exceção para tentar próximo
+                                raise ValueError(f"Endpoint 404: {endpoint}")
+                            
+                            response.raise_for_status()
+                            return await response.json()
+                    
+                    # Executa GET com retry (apenas para erros retryáveis, não 404)
+                    try:
+                        result = await retry_with_backoff(
+                            make_get_request,
+                            max_retries=2,  # Menos retries para polling (já tem loop externo)
+                            base_delay=0.5,
+                            retryable_status_codes=[429, 500, 502, 503, 504],
+                            operation_name=f"Contextual.ai Polling (job {job_id})"
+                        )
+                    except ValueError as e:
+                        # 404 não é retryável, continua para próximo endpoint
+                        if "404" in str(e):
                             continue
-                        
-                        response.raise_for_status()
-                        result = await response.json()
+                        raise
                         
                         # Marca endpoint como funcionando
                         if not working_endpoint:

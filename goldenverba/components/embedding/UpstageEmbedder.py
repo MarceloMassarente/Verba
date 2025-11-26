@@ -73,7 +73,10 @@ class UpstageEmbedder(Embedding):
         payload_io = io.BytesIO(payload_bytes)
 
         async with aiohttp.ClientSession() as session:
-            try:
+            from verba_extensions.utils.retry import retry_with_backoff
+            
+            # Função interna para fazer requisição com retry
+            async def make_request():
                 async with session.post(
                     f"{base_url}/embeddings",
                     headers=headers,
@@ -93,12 +96,16 @@ class UpstageEmbedder(Embedding):
                         )
 
                     return embeddings
-
-            except aiohttp.ClientError as e:
-                if isinstance(e, aiohttp.ClientResponseError) and e.status == 429:
-                    raise Exception("Rate limit exceeded. Waiting before retrying...")
-                raise Exception(f"API request failed: {str(e)}")
-
+            
+            # Executa com retry (base_delay maior para rate limits mais restritivos)
+            try:
+                return await retry_with_backoff(
+                    make_request,
+                    max_retries=3,
+                    base_delay=2.0,
+                    retryable_status_codes=[429, 500, 502, 503, 504],
+                    operation_name="Upstage Embeddings API"
+                )
             except Exception as e:
                 msg.fail(f"Unexpected error: {type(e).__name__} - {str(e)}")
                 raise
