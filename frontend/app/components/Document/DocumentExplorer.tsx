@@ -60,20 +60,14 @@ const DocumentExplorer: React.FC<DocumentExplorerProps> = ({
   const [isFetching, setIsFetching] = useState(false);
   const [document, setDocument] = useState<VerbaDocument | null>(null);
 
-  useEffect(() => {
-    if (selectedDocument) {
-      handleFetchSelectedDocument();
-    } else {
-      setDocument(null);
-    }
-  }, [selectedDocument]);
-
   const handleSourceClick = (url: string) => {
     // Open a new tab with the specified URL
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const handleFetchSelectedDocument = async () => {
+  const handleFetchSelectedDocument = useCallback(async () => {
+    if (!selectedDocument) return;
+    
     try {
       setIsFetching(true);
 
@@ -97,7 +91,15 @@ const DocumentExplorer: React.FC<DocumentExplorerProps> = ({
       console.error("Failed to fetch document:", error);
       setIsFetching(false);
     }
-  };
+  }, [selectedDocument, credentials, setSelectedDocument]);
+
+  useEffect(() => {
+    if (selectedDocument) {
+      handleFetchSelectedDocument();
+    } else {
+      setDocument(null);
+    }
+  }, [selectedDocument, handleFetchSelectedDocument]);
 
   if (!selectedDocument) {
     return <div></div>;

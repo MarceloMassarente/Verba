@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Credentials, Suggestion } from "@/app/types";
 import { IoTrash, IoDocumentSharp, IoReload, IoCopy } from "react-icons/io5";
 import { FaWrench } from "react-icons/fa";
@@ -28,20 +28,17 @@ const SuggestionView: React.FC<SuggestionViewProps> = ({
   const [totalCount, setTotalCount] = useState(0);
   const pageSize = 20;
 
-  const handleSuggestionFetch = async () => {
+  const handleSuggestionFetch = useCallback(async () => {
     const suggestions = await fetchAllSuggestions(page, pageSize, credentials);
     if (suggestions) {
       setSuggestions(suggestions.suggestions);
       setTotalCount(suggestions.total_count);
     }
-  };
-  useEffect(() => {
-    handleSuggestionFetch();
-  }, []);
+  }, [page, pageSize, credentials]);
 
   useEffect(() => {
     handleSuggestionFetch();
-  }, [page]);
+  }, [handleSuggestionFetch]);
 
   const nextPage = () => {
     if (page * pageSize <= totalCount) {

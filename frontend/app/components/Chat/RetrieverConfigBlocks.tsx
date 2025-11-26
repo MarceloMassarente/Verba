@@ -163,6 +163,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
 
   // Carrega presets ao montar componente
   useEffect(() => {
+    if (!credentials) return;
+    
     const loadPresets = async () => {
       setLoadingPresets(true);
       try {
@@ -193,7 +195,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   }, [RAGConfig]);
 
   const handlePresetChange = async (presetName: string) => {
-    if (blocked) return;
+    if (blocked || !credentials) return;
     
     setSelectedPreset(presetName);
     

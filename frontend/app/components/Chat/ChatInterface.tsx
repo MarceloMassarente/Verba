@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { MdCancel, MdOutlineRefresh } from "react-icons/md";
 import { TbPlugConnected } from "react-icons/tb";
 import { IoChatbubbleSharp } from "react-icons/io5";
@@ -100,7 +100,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         "Model"
       ].value as string)
     : "No Config found";
-  useState("No Embedding Model");
+
+  const retrieveDatacount = useCallback(async () => {
+    try {
+      const data: DataCountPayload | null = await fetchDatacount(
+        currentEmbedding,
+        documentFilter,
+        credentials
+      );
+      const labels: LabelsResponse | null = await fetchLabels(credentials);
+      if (data) {
+        setCurrentDatacount(data.datacount);
+      }
+      if (labels) {
+        setLabels(labels.labels);
+      }
+    } catch (error) {
+      console.error("Failed to fetch from API:", error);
+      addStatusMessage("Failed to fetch datacount: " + error, "ERROR");
+    }
+  }, [currentEmbedding, documentFilter, credentials, addStatusMessage]);
 
   useEffect(() => {
     setReconnect(true);
@@ -112,7 +131,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     } else {
       setCurrentDatacount(0);
     }
-  }, [currentEmbedding, currentPage, documentFilter]);
+  }, [RAGConfig, retrieveDatacount]);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -338,25 +357,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const retrieveDatacount = async () => {
-    try {
-      const data: DataCountPayload | null = await fetchDatacount(
-        currentEmbedding,
-        documentFilter,
-        credentials
-      );
-      const labels: LabelsResponse | null = await fetchLabels(credentials);
-      if (data) {
-        setCurrentDatacount(data.datacount);
-      }
-      if (labels) {
-        setLabels(labels.labels);
-      }
-    } catch (error) {
-      console.error("Failed to fetch from API:", error);
-      addStatusMessage("Failed to fetch datacount: " + error, "ERROR");
-    }
-  };
 
   const reconnectToVerba = () => {
     setReconnect((prevState) => !prevState);
