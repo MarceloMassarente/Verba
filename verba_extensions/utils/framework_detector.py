@@ -180,14 +180,14 @@ class FrameworkDetector:
         """Detecta frameworks usando Gliner ou keyword matching com aliases"""
         detected_names = set()  # Nomes canônicos dos frameworks
         text_lower = text.lower()
-        
-        # Tenta usar Gliner primeiro
+
+        # Tenta usar Gliner primeiro (mais preciso)
         if self.gliner_model:
             try:
                 # Define labels para frameworks
                 labels = ["framework", "business model", "strategic framework"]
                 entities = self.gliner_model.predict_entities(text, labels, threshold=0.5)
-                
+
                 for entity in entities:
                     entity_text = entity.get("text", "").strip()
                     if entity_text:
@@ -200,31 +200,43 @@ class FrameworkDetector:
                                 break
             except Exception as e:
                 msg.debug(f"Erro ao usar Gliner para frameworks: {str(e)}")
-        
-        # Keyword matching: busca todos os aliases no texto
-        # Ordena aliases por tamanho (mais específicos primeiro) para evitar falsos positivos
-        sorted_aliases = sorted(self.frameworks_data.items(), key=lambda x: len(x[0]), reverse=True)
-        
+
+        # Keyword matching como fallback ou complemento
+        # Prioriza aliases curtos sobre longos para evitar que palavras curtas sejam "mascaradas"
+        sorted_aliases = sorted(self.frameworks_data.items(),
+                              key=lambda x: (len(x[0].split()), len(x[0])))  # Ordem normal (curtos primeiro)
+
         for alias, framework_name in sorted_aliases:
             # Ignora aliases muito genéricos que podem causar falsos positivos
             if alias in ["analysis", "framework", "model", "system", "method", "matrix", "index"]:
                 continue
-            
-            # Busca palavra completa (word boundary) para aliases curtos
-            if len(alias.split()) <= 3:
-                # Match exato com word boundary
+
+            # Para aliases curtos (1 palavra), busca exata com word boundary
+            if len(alias.split()) == 1:
                 pattern = r'\b' + re.escape(alias) + r'\b'
                 if re.search(pattern, text_lower):
                     detected_names.add(framework_name)
-            else:
-                # Match parcial para aliases longos (mas requer pelo menos 2 palavras)
+            # Para aliases curtos (2 palavras), busca exata
+            elif len(alias.split()) == 2:
+                pattern = r'\b' + re.escape(alias) + r'\b'
+                if re.search(pattern, text_lower):
+                    detected_names.add(framework_name)
+            # Para aliases médios (3 palavras), permite match mais flexível
+            elif len(alias.split()) == 3:
+                # Verifica se todas as palavras estão presentes (não necessariamente na ordem)
                 words_in_alias = alias.split()
-                if len(words_in_alias) >= 2:
-                    # Verifica se pelo menos 2 palavras do alias estão no texto
+                words_found = sum(1 for word in words_in_alias if word in text_lower)
+                if words_found == len(words_in_alias):
+                    detected_names.add(framework_name)
+            # Para aliases longos, permite match parcial mas requer mais palavras
+            else:
+                words_in_alias = alias.split()
+                if len(words_in_alias) >= 4:
+                    # Pelo menos 3 palavras do alias devem estar no texto
                     words_found = sum(1 for word in words_in_alias if word in text_lower)
-                    if words_found >= 2:
+                    if words_found >= 3:
                         detected_names.add(framework_name)
-        
+
         # Retorna nomes canônicos ordenados
         return sorted(list(detected_names))
     
