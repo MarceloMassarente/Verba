@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import FileComponent from "./FileComponent";
 import InfoComponent from "../Navigation/InfoComponent";
 import { IoMdAddCircle } from "react-icons/io";
@@ -49,7 +49,7 @@ const FileSelectionView: React.FC<FileSelectionViewProps> = ({
   reconnect,
   importAll,
 }) => {
-  const ref = React.useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (ref.current !== null) {
