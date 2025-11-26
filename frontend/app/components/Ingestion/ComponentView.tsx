@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { FaTrash } from "react-icons/fa";
 import { GoTriangleDown } from "react-icons/go";
 import { IoAddCircleSharp } from "react-icons/io5";
-import { RAGConfig, RAGComponentConfig } from "@/app/types";
+import { RAGConfig, RAGComponentConfig, Credentials } from "@/app/types";
 
 import { closeOnClick } from "@/app/util";
 
@@ -117,6 +117,8 @@ interface ComponentViewProps {
     selected_component: string,
     config: RAGComponentConfig
   ) => void;
+  credentials?: Credentials;
+  currentQuery?: string;
 }
 
 const ComponentView: React.FC<ComponentViewProps> = ({
@@ -127,6 +129,8 @@ const ComponentView: React.FC<ComponentViewProps> = ({
   saveComponentConfig,
   blocked,
   skip_component,
+  credentials,
+  currentQuery,
 }) => {
   function renderComponents(rag_config: RAGConfig) {
     return Object.entries(rag_config[component_name].components)
@@ -183,6 +187,8 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         selectComponent={selectComponent}
         updateConfig={updateConfig}
         saveComponentConfig={saveComponentConfig}
+        credentials={credentials || { deployment: "Local", url: "", key: "", default_deployment: "" }}
+        currentQuery={currentQuery || ""}
       />
     );
   }

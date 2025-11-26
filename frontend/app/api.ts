@@ -241,6 +241,54 @@ export const updateThemeConfig = async (
   }
 };
 
+// Endpoint /api/get_reranker_presets
+export const fetchRerankerPresets = async (
+  credentials: Credentials
+): Promise<{ presets: any[]; error: string } | null> => {
+  try {
+    const host = await detectHost();
+    const response = await fetch(`${host}/api/get_reranker_presets`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(credentials),
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error retrieving reranker presets:", error);
+    return null;
+  }
+};
+
+// Endpoint /api/apply_reranker_preset
+export const applyRerankerPreset = async (
+  preset_name: string,
+  query: string | null,
+  credentials: Credentials
+): Promise<{ status: number; preset_applied?: string; config?: any; status_msg?: string } | null> => {
+  try {
+    const host = await detectHost();
+    const response = await fetch(`${host}/api/apply_reranker_preset`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        preset_name: preset_name,
+        query: query,
+        credentials: credentials,
+      }),
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error applying reranker preset:", error);
+    return null;
+  }
+};
+
 // Endpoint /api/query
 export const sendUserQuery = async (
   query: string,

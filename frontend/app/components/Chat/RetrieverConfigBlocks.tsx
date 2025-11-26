@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { GoTriangleDown } from "react-icons/go";
-import { RAGConfig, RAGComponentConfig, ConfigSetting } from "@/app/types";
+import { RAGConfig, RAGComponentConfig, ConfigSetting, Credentials, RerankerPreset } from "@/app/types";
 import VerbaButton from "../Navigation/VerbaButton";
+import { fetchRerankerPresets, applyRerankerPreset } from "@/app/api";
 
 interface RetrieverConfigBlocksProps {
   RAGConfig: RAGConfig;
@@ -19,6 +20,8 @@ interface RetrieverConfigBlocksProps {
     selected_component: string,
     config: RAGComponentConfig
   ) => void;
+  credentials: Credentials;
+  currentQuery?: string;
 }
 
 interface ConfigBlock {
@@ -84,9 +87,14 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   selectComponent,
   updateConfig,
   saveComponentConfig,
+  credentials,
+  currentQuery = "",
 }) => {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
+  const [rerankerPresets, setRerankerPresets] = useState<RerankerPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState<string>("auto");
+  const [loadingPresets, setLoadingPresets] = useState(false);
 
   // Validação e auto-ajuste no cliente
   const validateAndAdjust = useCallback(
@@ -377,6 +385,88 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           />
         </div>
       </div>
+
+      {/* Reranker Presets Selector */}
+      {rerankerPresets.length > 0 && (
+        <div className="mb-6 p-4 bg-bg-alt-verba rounded-lg border border-button-verba/30">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-text-verba">
+              Reranker Presets
+            </h3>
+            <p className="text-sm text-text-alt-verba">
+              Selecione um preset otimizado para reranking (recomendado: Metadata + Haystack + 1 API)
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {rerankerPresets.map((preset) => (
+              <button
+                key={preset.name}
+                onClick={() => handlePresetChange(preset.name)}
+                disabled={blocked || !preset.available || loadingPresets}
+                className={`p-3 rounded-lg border-2 text-left transition-all ${
+                  selectedPreset === preset.name
+                    ? "border-button-verba bg-button-verba/20"
+                    : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
+                } ${
+                  !preset.available || blocked || loadingPresets
+                    ? "opacity-50 cursor-not-allowed"
+                    : "cursor-pointer"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-text-verba">
+                    {preset.display_name}
+                  </h4>
+                  {selectedPreset === preset.name && (
+                    <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
+                      Ativo
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-text-alt-verba mb-2">
+                  {preset.description}
+                </p>
+                <div className="flex gap-2 text-xs text-text-alt-verba">
+                  <span>⚡ {preset.latency_estimate}</span>
+                  <span>•</span>
+                  <span>⭐ {preset.quality_estimate}</span>
+                </div>
+                {!preset.available && preset.missing_requirements.length > 0 && (
+                  <p className="text-xs text-warning-verba mt-2">
+                    Faltam: {preset.missing_requirements.join(", ")}
+                  </p>
+                )}
+              </button>
+            ))}
+            <button
+              onClick={() => handlePresetChange("custom")}
+              disabled={blocked || loadingPresets}
+              className={`p-3 rounded-lg border-2 text-left transition-all ${
+                selectedPreset === "custom"
+                  ? "border-button-verba bg-button-verba/20"
+                  : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
+              } ${
+                blocked || loadingPresets
+                  ? "opacity-50 cursor-not-allowed"
+                  : "cursor-pointer"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-semibold text-text-verba">Custom</h4>
+                {selectedPreset === "custom" && (
+                  <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
+                    Ativo
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-text-alt-verba">
+                Configuração manual (use as opções abaixo)
+              </p>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Component Selector */}
       <div className="flex flex-col gap-2">

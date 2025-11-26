@@ -57,6 +57,8 @@ from goldenverba.server.types import (
     DataBatchPayload,
     ChunksPayload,
     FileStatus,
+    GetRerankerPresetsPayload,
+    ApplyRerankerPresetPayload,
 )
 
 load_dotenv()
@@ -840,6 +842,121 @@ async def update_theme_config(payload: SetThemeConfigPayload):
             content={
                 "status": 400,
                 "status_msg": f"Failed to set new RAG Config {str(e)}",
+            }
+        )
+
+
+### RERANKER PRESETS ENDPOINTS
+
+
+@app.post("/api/get_reranker_presets")
+async def get_reranker_presets(payload: GetRerankerPresetsPayload):
+    """Retorna lista de presets de reranker disponíveis com metadados."""
+    try:
+        presets = manager.get_reranker_presets()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "presets": presets,
+                "error": ""
+            }
+        )
+    except Exception as e:
+        msg.warn(f"Could not retrieve reranker presets: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "presets": [],
+                "error": f"Could not retrieve reranker presets: {str(e)}",
+            }
+        )
+
+
+@app.post("/api/apply_reranker_preset")
+async def apply_reranker_preset(payload: ApplyRerankerPresetPayload):
+    """Aplica preset de reranker ao RAG config."""
+    if production == "Demo":
+        return JSONResponse(
+            content={
+                "status": "200",
+                "status_msg": "Config can't be updated in Production Mode",
+            }
+        )
+    
+    try:
+        client = await client_manager.connect(payload.credentials)
+        
+        # Carrega config atual
+        current_config = await manager.load_rag_config(client)
+        
+        # Obtém plugin reranker
+        from verba_extensions.plugins.plugin_manager import get_plugin_manager
+        plugin_manager = get_plugin_manager()
+        reranker = None
+        for plugin in plugin_manager.plugins:
+            if plugin.name == "Reranker":
+                reranker = plugin
+                break
+        
+        if not reranker:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": 404,
+                    "status_msg": "Reranker plugin not found",
+                }
+            )
+        
+        # Aplica preset
+        if payload.preset_name == "auto" and payload.query:
+            # Auto-seleção baseada na query
+            selected_preset = reranker.select_optimal_preset(payload.query)
+            applied_config = reranker.apply_preset(selected_preset)
+        else:
+            applied_config = reranker.apply_preset(payload.preset_name)
+        
+        # Atualiza config do retriever com preset aplicado
+        if "Retriever" in current_config:
+            retriever_config = current_config["Retriever"]
+            if "components" in retriever_config:
+                # Encontra Entity-Aware retriever
+                entity_aware = retriever_config["components"].get("Entity-Aware")
+                if entity_aware and "config" in entity_aware:
+                    # Atualiza config com valores do preset
+                    for key, value in applied_config.items():
+                        if key in entity_aware["config"]:
+                            if isinstance(entity_aware["config"][key], dict):
+                                entity_aware["config"][key]["value"] = value
+                            else:
+                                entity_aware["config"][key] = value
+                    
+                    # Atualiza "Reranker Preset" para o preset aplicado
+                    preset_to_save = payload.preset_name
+                    if payload.preset_name == "auto" and payload.query:
+                        preset_to_save = reranker.select_optimal_preset(payload.query)
+                    
+                    if "Reranker Preset" in entity_aware["config"]:
+                        if isinstance(entity_aware["config"]["Reranker Preset"], dict):
+                            entity_aware["config"]["Reranker Preset"]["value"] = preset_to_save
+                        else:
+                            entity_aware["config"]["Reranker Preset"] = preset_to_save
+        
+        # Salva config atualizada
+        await manager.set_rag_config(client, current_config)
+        
+        return JSONResponse(
+            content={
+                "status": 200,
+                "preset_applied": preset_to_save if payload.preset_name == "auto" and payload.query else payload.preset_name,
+                "config": applied_config
+            }
+        )
+    except Exception as e:
+        msg.warn(f"Failed to apply reranker preset: {str(e)}")
+        return JSONResponse(
+            content={
+                "status": 400,
+                "status_msg": f"Failed to apply reranker preset: {str(e)}",
             }
         )
 

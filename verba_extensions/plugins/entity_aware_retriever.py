@@ -227,6 +227,13 @@ class EntityAwareRetriever(Retriever):
             values=[],
             block="optimizations",
         )
+        self.config["Reranker Preset"] = InputConfig(
+            type="dropdown",
+            value="auto",
+            description="Preset otimizado para reranking (auto seleciona baseado na query)",
+            values=["auto", "production", "max_quality", "local_only", "custom"],
+            block="optimizations",
+        )
         self.config["Query Rewriter Cache TTL"] = InputConfig(
             type="number",
             value=3600,
@@ -2114,6 +2121,29 @@ class EntityAwareRetriever(Retriever):
                     break
             
             if reranker:
+                # Aplica preset de reranker se configurado
+                reranker_preset_config = config.get("Reranker Preset", {})
+                reranker_preset = None
+                if reranker_preset_config:
+                    if hasattr(reranker_preset_config, 'value'):
+                        reranker_preset = reranker_preset_config.value
+                    elif isinstance(reranker_preset_config, str):
+                        reranker_preset = reranker_preset_config
+                
+                if reranker_preset and reranker_preset != "custom":
+                    # Se preset é "auto", seleciona baseado na query
+                    if reranker_preset == "auto":
+                        selected_preset = reranker.select_optimal_preset(query)
+                        msg.info(f"  🎯 Auto-selecionado preset: {selected_preset}")
+                    else:
+                        selected_preset = reranker_preset
+                    
+                    # Aplica preset ao reranker
+                    if hasattr(reranker, 'apply_preset'):
+                        applied_config = reranker.apply_preset(selected_preset)
+                        if applied_config:
+                            msg.good(f"  ✅ Preset '{selected_preset}' aplicado ao reranker")
+                
                 # Converte chunks Weaviate para Chunk objects para reranking
                 chunk_objects = []
                 for chunk in chunks:

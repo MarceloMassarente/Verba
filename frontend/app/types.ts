@@ -177,6 +177,17 @@ export type RAGSetting = {
   [key: string]: ConfigSetting;
 };
 
+export type RerankerPreset = {
+  name: string;
+  display_name: string;
+  description: string;
+  latency_estimate: string;
+  quality_estimate: string;
+  available: boolean;
+  missing_requirements: string[];
+  config: any;
+};
+
 export type FileData = {
   fileID: string;
   filename: string;

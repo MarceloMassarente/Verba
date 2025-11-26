@@ -3,6 +3,7 @@ import importlib
 import math
 import json
 from datetime import datetime
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from wasabi import msg
@@ -729,6 +730,47 @@ class VerbaManager:
 
     def create_user_config(self) -> dict:
         return {"getting_started": False}
+    
+    def get_reranker_presets(self) -> List[Dict[str, Any]]:
+        """
+        Retorna lista de presets de reranker disponíveis com metadados.
+        
+        Returns:
+            Lista de dicts com informações de cada preset (nome, descrição, latência, qualidade, disponibilidade)
+        """
+        try:
+            from verba_extensions.plugins.plugin_manager import get_plugin_manager
+            plugin_manager = get_plugin_manager()
+            
+            # Procura plugin Reranker
+            reranker = None
+            for plugin in plugin_manager.plugins:
+                if plugin.name == "Reranker":
+                    reranker = plugin
+                    break
+            
+            if reranker and hasattr(reranker, 'get_presets_metadata'):
+                return reranker.get_presets_metadata()
+            else:
+                # Fallback: retorna presets básicos sem verificação de disponibilidade
+                from verba_extensions.plugins.reranker import RerankerPresets
+                presets = RerankerPresets.get_all_presets()
+                return [
+                    {
+                        "name": name,
+                        "display_name": name.replace("_", " ").title(),
+                        "description": config.get("description", ""),
+                        "latency_estimate": config.get("latency_estimate", "N/A"),
+                        "quality_estimate": config.get("quality_estimate", "N/A"),
+                        "available": True,  # Não podemos verificar sem instância do reranker
+                        "missing_requirements": [],
+                        "config": config
+                    }
+                    for name, config in presets.items()
+                ]
+        except Exception as e:
+            msg.warn(f"Erro ao obter presets de reranker: {e}")
+            return []
 
     async def set_theme_config(self, client, config: dict):
         await self.weaviate_manager.set_config(client, self.theme_config_uuid, config)
@@ -786,6 +828,12 @@ class VerbaManager:
                         default_value = new_config_setting.get('value', 'N/A') if isinstance(new_config_setting, dict) else getattr(new_config_setting, 'value', 'N/A')
                         msg.info(f"Adding missing config field '{config_key}' to {component_key}.{component_name} with default value: {default_value}")
                         merged_component_config[config_key] = new_config_setting
+                    # Preserva "Reranker Preset" se já existe (não sobrescreve com default)
+                    elif config_key == "Reranker Preset" and config_key in merged_component_config:
+                        # Mantém valor existente, apenas atualiza estrutura se necessário
+                        if isinstance(merged_component_config[config_key], str):
+                            # Se é string simples, converte para formato InputConfig
+                            merged_component_config[config_key] = new_config_setting
         
         return merged_config
 

@@ -201,6 +201,16 @@ class SetRAGConfigPayload(BaseModel):
     credentials: Credentials
 
 
+class GetRerankerPresetsPayload(BaseModel):
+    credentials: Credentials
+
+
+class ApplyRerankerPresetPayload(BaseModel):
+    preset_name: str
+    query: str | None = None  # Opcional, para auto-seleção baseada em query
+    credentials: Credentials
+
+
 class SetUserConfigPayload(BaseModel):
     user_config: dict
     credentials: Credentials
