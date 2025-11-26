@@ -296,6 +296,8 @@ print(f'Total: {result.get("total_count", 0)}')
 
 Detecção automática de frameworks, empresas e setores durante chunking, armazenando em propriedades Weaviate para filtros precisos.
 
+**📚 Documentação completa:** [`docs/guides/FRAMEWORK_DETECTION.md`](../guides/FRAMEWORK_DETECTION.md)
+
 ### Como Funciona
 
 1. **Durante Chunking:**
@@ -308,6 +310,14 @@ Detecção automática de frameworks, empresas e setores durante chunking, armaz
 
 3. **Durante Busca:**
    - `EntityAwareRetriever` detecta frameworks/empresas/setores na query
+   - Aplica filtros automáticos baseados nas detecções
+
+### Frameworks Suportados
+
+- **71+ frameworks** com **336+ aliases** PT/EN
+- Categorias: Estratégia, Marketing, Operações, Inovação, Metodologia, etc.
+- Arquivo: `verba_extensions/resources/frameworks.json`
+- Script de geração: `scripts/generate_framework_aliases.py`
    - Aplica filtros automáticos se collection suporta
 
 ### Propriedades Weaviate

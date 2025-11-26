@@ -4,6 +4,8 @@ Detecta frameworks, empresas e setores em texto usando Gliner (NER local) com fa
 """
 
 import re
+import json
+import os
 from typing import List, Dict, Optional, Set
 from wasabi import msg
 
@@ -13,16 +15,23 @@ class FrameworkDetector:
     Detecta frameworks, empresas e setores em texto.
     
     Usa Gliner para NER quando disponível, com fallback para keyword matching.
+    Carrega frameworks de arquivo JSON com aliases PT/EN.
     """
     
     def __init__(self):
-        self.frameworks_list = [
+        # Lista hardcoded como fallback (compatibilidade)
+        self.frameworks_list_fallback = [
             "SWOT", "Porter", "BCG Matrix", "BCG", "EBITDA", "CAGR",
             "PEST", "PESTEL", "5 Forces", "Five Forces", "Value Chain",
             "Ansoff Matrix", "McKinsey 7S", "Balanced Scorecard",
             "Blue Ocean", "Red Ocean", "Business Model Canvas",
             "Lean Startup", "Agile", "Scrum", "Kanban"
         ]
+        
+        # Estrutura de frameworks carregada do JSON
+        self.frameworks_data = {}  # {alias: framework_name}
+        self.frameworks_by_name = {}  # {framework_name: {aliases, category, description}}
+        self._load_frameworks_from_json()
         
         self.sector_keywords = [
             "varejo", "retail", "bancos", "banking", "financeiro", "financial",
@@ -36,17 +45,77 @@ class FrameworkDetector:
         self.spacy_nlp = None
         self._load_models()
     
+    def _load_frameworks_from_json(self):
+        """Carrega frameworks do arquivo JSON com aliases"""
+        frameworks_json_paths = [
+            "verba_extensions/resources/frameworks.json",
+            os.path.join(os.path.dirname(__file__), "../resources/frameworks.json"),
+            "frameworks.json"
+        ]
+        
+        frameworks_json = None
+        for path in frameworks_json_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        frameworks_json = json.load(f)
+                    msg.info(f"Carregados frameworks de: {path}")
+                    break
+                except Exception as e:
+                    msg.warn(f"Erro ao carregar {path}: {str(e)}")
+                    continue
+        
+        if not frameworks_json:
+            msg.warn("Arquivo frameworks.json nao encontrado - usando lista hardcoded")
+            # Usa lista hardcoded como fallback
+            for framework in self.frameworks_list_fallback:
+                self.frameworks_data[framework.lower()] = framework
+                self.frameworks_by_name[framework] = {
+                    "aliases": [framework],
+                    "category": "Ferramentas Clássicas",
+                    "description": ""
+                }
+            return
+        
+        # Processa frameworks do JSON
+        frameworks = frameworks_json.get("frameworks", [])
+        for framework in frameworks:
+            name = framework.get("name", "")
+            aliases = framework.get("aliases", [])
+            category = framework.get("category", "")
+            description = framework.get("description", "")
+            
+            if not name:
+                continue
+            
+            # Armazena por nome canônico
+            self.frameworks_by_name[name] = {
+                "aliases": aliases,
+                "category": category,
+                "description": description
+            }
+            
+            # Mapeia cada alias para o nome canônico
+            for alias in aliases:
+                alias_lower = alias.lower().strip()
+                if alias_lower:
+                    # Se já existe, mantém o primeiro (prioridade)
+                    if alias_lower not in self.frameworks_data:
+                        self.frameworks_data[alias_lower] = name
+        
+        msg.info(f"Carregados {len(self.frameworks_by_name)} frameworks com {len(self.frameworks_data)} aliases")
+    
     def _load_models(self):
         """Carrega modelos de NER se disponíveis"""
         # Tenta carregar Gliner
         try:
             from gliner import GLiNER
             self.gliner_model = GLiNER.from_pretrained("urchade/gliner_small-v2.1")
-            msg.info("✅ Gliner carregado para detecção de frameworks")
+            msg.info("Gliner carregado para deteccao de frameworks")
         except ImportError:
-            msg.info("ℹ️  Gliner não disponível - usando fallback para keywords")
+            msg.info("Gliner nao disponivel - usando fallback para keywords")
         except Exception as e:
-            msg.warn(f"⚠️  Erro ao carregar Gliner: {str(e)} - usando fallback")
+            msg.warn(f"Erro ao carregar Gliner: {str(e)} - usando fallback")
         
         # Tenta carregar spaCy para detecção de empresas
         try:
@@ -59,11 +128,11 @@ class FrameworkDetector:
                 try:
                     self.spacy_nlp = spacy.load("en_core_web_sm")
                 except OSError:
-                    msg.info("ℹ️  spaCy não disponível - empresas serão detectadas via keywords")
+                    msg.info("spaCy nao disponivel - empresas serao detectadas via keywords")
         except ImportError:
-            msg.info("ℹ️  spaCy não disponível - empresas serão detectadas via keywords")
+            msg.info("spaCy nao disponivel - empresas serao detectadas via keywords")
         except Exception as e:
-            msg.warn(f"⚠️  Erro ao carregar spaCy: {str(e)}")
+            msg.warn(f"Erro ao carregar spaCy: {str(e)}")
     
     async def detect_frameworks(self, text: str) -> Dict[str, any]:
         """
@@ -108,8 +177,8 @@ class FrameworkDetector:
         return result
     
     def _detect_frameworks_in_text(self, text: str) -> List[str]:
-        """Detecta frameworks usando Gliner ou keyword matching"""
-        detected = set()
+        """Detecta frameworks usando Gliner ou keyword matching com aliases"""
+        detected_names = set()  # Nomes canônicos dos frameworks
         text_lower = text.lower()
         
         # Tenta usar Gliner primeiro
@@ -122,22 +191,42 @@ class FrameworkDetector:
                 for entity in entities:
                     entity_text = entity.get("text", "").strip()
                     if entity_text:
-                        # Verifica se corresponde a algum framework conhecido
-                        for framework in self.frameworks_list:
-                            if framework.lower() in entity_text.lower() or entity_text.lower() in framework.lower():
-                                detected.add(framework)
+                        entity_lower = entity_text.lower()
+                        # Verifica se corresponde a algum alias conhecido
+                        for alias, framework_name in self.frameworks_data.items():
+                            # Match parcial ou completo
+                            if alias in entity_lower or entity_lower in alias:
+                                detected_names.add(framework_name)
                                 break
             except Exception as e:
                 msg.debug(f"Erro ao usar Gliner para frameworks: {str(e)}")
         
-        # Fallback: keyword matching
-        for framework in self.frameworks_list:
-            # Busca framework no texto (case-insensitive)
-            pattern = r'\b' + re.escape(framework) + r'\b'
-            if re.search(pattern, text, re.IGNORECASE):
-                detected.add(framework)
+        # Keyword matching: busca todos os aliases no texto
+        # Ordena aliases por tamanho (mais específicos primeiro) para evitar falsos positivos
+        sorted_aliases = sorted(self.frameworks_data.items(), key=lambda x: len(x[0]), reverse=True)
         
-        return sorted(list(detected))
+        for alias, framework_name in sorted_aliases:
+            # Ignora aliases muito genéricos que podem causar falsos positivos
+            if alias in ["analysis", "framework", "model", "system", "method", "matrix", "index"]:
+                continue
+            
+            # Busca palavra completa (word boundary) para aliases curtos
+            if len(alias.split()) <= 3:
+                # Match exato com word boundary
+                pattern = r'\b' + re.escape(alias) + r'\b'
+                if re.search(pattern, text_lower):
+                    detected_names.add(framework_name)
+            else:
+                # Match parcial para aliases longos (mas requer pelo menos 2 palavras)
+                words_in_alias = alias.split()
+                if len(words_in_alias) >= 2:
+                    # Verifica se pelo menos 2 palavras do alias estão no texto
+                    words_found = sum(1 for word in words_in_alias if word in text_lower)
+                    if words_found >= 2:
+                        detected_names.add(framework_name)
+        
+        # Retorna nomes canônicos ordenados
+        return sorted(list(detected_names))
     
     async def _detect_companies_in_text(self, text: str) -> List[str]:
         """Detecta empresas usando spaCy NER ou keywords"""

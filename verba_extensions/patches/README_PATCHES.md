@@ -1290,12 +1290,137 @@ print('✅ Aggregation wrapper disponível')
 - ✅ **Multi-vector search** - combina resultados de múltiplos vetores para melhor recall
 - ✅ **GraphQL queries** - suporte a features avançadas do Weaviate
 - ✅ **Aggregation** - queries analíticas funcionam mesmo quando gRPC falha
-- ✅ **Framework detection** - filtros automáticos baseados em frameworks/empresas/setores
+- ✅ **Framework detection** - filtros automáticos baseados em frameworks/empresas/setores (71+ frameworks, 336+ aliases PT/EN)
 
 **Documentação completa:**
 - `docs/guides/MIGRATION_FRAMEWORK_PROPERTIES.md` - Migração de collections
+- `docs/guides/FRAMEWORK_DETECTION.md` - Sistema de detecção de frameworks
 - `verba_extensions/integration/vector_config_builder.py` - Documentação inline
 - `verba_extensions/plugins/multi_vector_searcher.py` - Documentação inline
+
+**Última atualização:** Janeiro 2025
+
+---
+
+### 11. **Reranker Multi-Provider** ⭐ NOVO - Suporte a Múltiplos Providers de Reranking
+
+**Arquivo:** `verba_extensions/plugins/reranker.py`
+
+**Status:** ✅ Plugin completo refatorado - não é patch, é extensão independente
+
+**O que faz:**
+
+**1. Providers Disponíveis:**
+- **Metadata Reranker**: Sempre disponível, baseado em metadata enriquecido e keywords
+- **Haystack Reranker**: Local, usando CrossEncoderRanker (requer `haystack-ai`)
+- **Cohere Reranker**: API, usando Cohere Rerank API (requer `COHERE_API_KEY`)
+- **Jina Reranker**: API, usando Jina Rerank API (requer `JINA_API_KEY`)
+- **VoyageAI Reranker**: API, usando VoyageAI Rerank API (requer `VOYAGE_API_KEY`)
+
+**2. Modos de Combinação:**
+- **Cascade**: Aplica rerankers sequencialmente (metadata → haystack → cohere)
+- **Parallel**: Aplica múltiplos rerankers em paralelo e combina scores usando RRF (Reciprocal Rank Fusion)
+- **Hybrid**: Combina paralelo e cascade (metadata+haystack em paralelo, depois APIs em cascade)
+
+**3. Arquitetura Modular:**
+- Classe base abstrata `BaseReranker` com interface comum
+- Cada provider é uma classe separada implementando `BaseReranker`
+- `RerankerPlugin` orquestra múltiplos providers baseado em configuração
+
+**Configuração:**
+```bash
+# API Keys (opcionais)
+export COHERE_API_KEY="sua-chave"
+export JINA_API_KEY="sua-chave"
+export VOYAGE_API_KEY="sua-chave"
+
+# Haystack (opcional)
+pip install haystack-ai
+```
+
+**Via Interface do Verba:**
+- **Reranker Provider**: Seleciona provider ou "Combined" para usar múltiplos
+- **Enable Metadata Reranker**: Ativar/desativar metadata reranker
+- **Enable Haystack Reranker**: Ativar/desativar Haystack (requer haystack-ai)
+- **Enable Cohere Reranker**: Ativar/desativar Cohere (requer COHERE_API_KEY)
+- **Enable Jina Reranker**: Ativar/desativar Jina (requer JINA_API_KEY)
+- **Enable VoyageAI Reranker**: Ativar/desativar VoyageAI (requer VOYAGE_API_KEY)
+- **Reranker Mode**: Cascade, Parallel ou Hybrid (quando usando "Combined")
+- **Top K**: Número de chunks a retornar após reranking
+
+**Como funciona:**
+
+**Metadata Reranker:**
+1. Calcula score baseado em metadata enriquecido (empresas, tópicos, keywords)
+2. Keyword matching (30%)
+3. Content length score (10%)
+4. Combina scores com pesos
+
+**Haystack Reranker:**
+1. Converte chunks Verba → Document Haystack
+2. Aplica CrossEncoderRanker com modelo configurado
+3. Converte resultados Haystack → Chunk Verba
+4. Retorna chunks ordenados por relevância
+
+**API Rerankers (Cohere, Jina, VoyageAI):**
+1. Prepara batch de textos para API
+2. Envia request para API de reranking
+3. Recebe resultados com scores
+4. Mapeia de volta para chunks Verba
+5. Retorna chunks ordenados por relevância
+
+**Combinação:**
+- **Cascade**: Aplica sequencialmente, refinando resultados a cada etapa
+- **Parallel**: Executa todos em paralelo, combina scores usando RRF
+- **Hybrid**: Metadata+Haystack em paralelo, depois APIs em cascade
+
+**Como verificar após upgrade:**
+```python
+# 1. Verificar se plugin está carregado:
+from verba_extensions.plugins.plugin_manager import get_plugin_manager
+plugin_manager = get_plugin_manager()
+reranker = None
+for plugin in plugin_manager.plugins:
+    if plugin.name == "Reranker":
+        reranker = plugin
+        break
+
+if reranker:
+    print('✅ Reranker plugin carregado')
+    print(f'   Providers disponíveis: {reranker.get_config()["available_providers"]}')
+
+# 2. Verificar providers disponíveis:
+config = reranker.get_config()
+providers = config["available_providers"]
+for name, available in providers.items():
+    status = "✅" if available else "❌"
+    print(f'{status} {name}: {"disponível" if available else "não disponível"}')
+
+# 3. Testar reranking:
+chunks = [...]  # Lista de chunks
+query = "test query"
+reranked = await reranker.process_chunks(chunks, query, {"top_k": 5})
+print(f'✅ Rerankou {len(reranked)} chunks')
+```
+
+**Onde é usado:**
+- `verba_extensions/plugins/entity_aware_retriever.py` linha ~2104-2186: Integração automática após recuperação de chunks
+- Chamado automaticamente quando `Reranker Top K > 0` na configuração
+
+**Se precisar reaplicar:**
+- Plugin é carregado automaticamente via `verba_extensions/plugins/plugin_manager.py`
+- Se não aparecer, verificar se `verba_extensions/plugins/reranker.py` existe
+- Verificar se `create_reranker()` retorna instância válida
+- Verificar se `process_chunks()`, `process_batch()`, `process_chunk()` existem
+
+**Impacto:**
+- ✅ **Reranking mais preciso** - múltiplos providers e estratégias
+- ✅ **Flexibilidade** - escolha entre local (Haystack) ou APIs (Cohere, Jina, VoyageAI)
+- ✅ **Combinação inteligente** - cascade, parallel ou hybrid
+- ✅ **Backward compatible** - funciona com configuração antiga (Metadata Only)
+- ✅ **Detecção automática** - detecta dependências e API keys automaticamente
+
+**Documentação completa:** `verba_extensions/plugins/RERANKER_README.md`
 
 **Última atualização:** Janeiro 2025
 
