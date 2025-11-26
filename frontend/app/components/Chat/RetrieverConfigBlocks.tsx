@@ -161,6 +161,60 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     }
   }, [RAGConfig, validateAndAdjust]);
 
+  // Carrega presets ao montar componente
+  useEffect(() => {
+    const loadPresets = async () => {
+      setLoadingPresets(true);
+      try {
+        const data = await fetchRerankerPresets(credentials);
+        if (data && data.presets) {
+          setRerankerPresets(data.presets);
+        }
+      } catch (error) {
+        console.error("Error loading reranker presets:", error);
+      } finally {
+        setLoadingPresets(false);
+      }
+    };
+    loadPresets();
+  }, [credentials]);
+
+  // Detecta preset atual do config
+  useEffect(() => {
+    if (RAGConfig?.Retriever) {
+      const selected = RAGConfig.Retriever.selected;
+      const component = RAGConfig.Retriever.components[selected];
+      const presetConfig = component?.config?.["Reranker Preset"];
+      if (presetConfig) {
+        const presetValue = typeof presetConfig.value === "string" ? presetConfig.value : "auto";
+        setSelectedPreset(presetValue);
+      }
+    }
+  }, [RAGConfig]);
+
+  const handlePresetChange = async (presetName: string) => {
+    if (blocked) return;
+    
+    setSelectedPreset(presetName);
+    
+    try {
+      const result = await applyRerankerPreset(
+        presetName,
+        currentQuery || null,
+        credentials
+      );
+      
+      if (result && result.status === 200) {
+        // Recarrega RAG config para refletir mudanças
+        window.location.reload();
+      } else {
+        console.error("Failed to apply preset:", result?.status_msg);
+      }
+    } catch (error) {
+      console.error("Error applying preset:", error);
+    }
+  };
+
   const renderConfigOptions = (configKey: string) => {
     const selected = RAGConfig.Retriever.selected;
     const component = RAGConfig.Retriever.components[selected];
