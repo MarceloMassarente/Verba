@@ -79,6 +79,30 @@ const BLOCKS: ConfigBlock[] = [
       "Chunk Window",
     ],
   },
+  {
+    name: "reranker",
+    title: "Reranker",
+    description: "Configurações de reranking para melhorar relevância dos resultados",
+    configs: [
+      "Reranker Provider",
+      "Reranker Mode",
+      "Top K",
+      "Enable Metadata Reranker",
+      "Enable Haystack Reranker",
+      "Enable Cohere Reranker",
+      "Enable Jina Reranker",
+      "Enable VoyageAI Reranker",
+      "Enable ContextualAI Reranker",
+      "Haystack Model",
+      "Cohere Model",
+      "Cohere API Key",
+      "Jina API Key",
+      "VoyageAI API Key",
+      "ContextualAI Model",
+      "ContextualAI Instruction",
+      "ContextualAI API Key",
+    ],
+  },
 ];
 
 const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({

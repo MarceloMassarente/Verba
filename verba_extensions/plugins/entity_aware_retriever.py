@@ -248,6 +248,30 @@ class EntityAwareRetriever(Retriever):
             values=[],
             block="optimizations",
         )
+        
+        # Adiciona configurações do Reranker Plugin
+        try:
+            from verba_extensions.plugins.reranker import RerankerPlugin
+            from goldenverba.components.types import InputConfig
+            reranker_plugin = RerankerPlugin()
+            reranker_config = reranker_plugin.config
+            # Mescla configurações do reranker no config do retriever
+            for key, value in reranker_config.items():
+                if key not in self.config:  # Não sobrescreve se já existe
+                    # Cria uma cópia com block="reranker" para aparecer no bloco correto
+                    new_config = InputConfig(
+                        type=value.type,
+                        value=value.value,
+                        description=value.description,
+                        values=getattr(value, 'values', []),
+                        block="reranker",
+                        warning=getattr(value, 'warning', None),
+                    )
+                    self.config[key] = new_config
+        except Exception as e:
+            msg.warn(f"Erro ao adicionar configurações do reranker: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     async def _execute_two_phase_search(
         self,
@@ -2110,12 +2134,12 @@ class EntityAwareRetriever(Retriever):
         
         # 6. ✨ RERANKING (se disponível)
         try:
-            from verba_extensions.plugins.plugin_manager import get_plugin_manager
-            plugin_manager = get_plugin_manager()
+            from verba_extensions.plugins.chunk_processor import get_chunk_processor
+            chunk_processor = get_chunk_processor()
             
             # Procura plugin Reranker
             reranker = None
-            for plugin in plugin_manager.plugins:
+            for plugin in chunk_processor.plugins:
                 if plugin.name == "Reranker":
                     reranker = plugin
                     break

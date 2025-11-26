@@ -231,10 +231,13 @@ Reranker Top K: 0
 
 - **Top K Pré-Rerank**: Implementado em `weaviate_manager.hybrid_chunks()` ou `hybrid_chunks_with_filter()`
 - **Top K Pós-Rerank**: Implementado em `reranker.process_chunks()` com `config={"top_k": ...}`
-- O reranker usa múltiplos fatores para calcular relevância:
-  - Metadata matching (40%)
-  - Keyword matching (30%)
-  - Content length (10%)
-  - Cross-encoder scoring (20%, se disponível)
-  - LLM scoring (30%, se disponível)
+- O reranker suporta múltiplos providers e estratégias:
+  - **Metadata Reranker** (sempre disponível): Metadata matching (40%), Keyword matching (30%), Content length (10%)
+  - **Haystack Reranker** (opcional): CrossEncoderRanker local usando modelos pré-treinados
+  - **Cohere Reranker** (opcional): API de reranking multilíngue de alta qualidade
+  - **Jina Reranker** (opcional): API de reranking rápida
+  - **VoyageAI Reranker** (opcional): API de reranking de alta qualidade
+  - **Modos de combinação**: Cascade (sequencial), Parallel (paralelo com RRF), Hybrid (híbrido)
+  
+Para mais detalhes, consulte: `verba_extensions/plugins/RERANKER_README.md`
 

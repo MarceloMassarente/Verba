@@ -50,6 +50,9 @@ class ContextualAIIngestor(Reader):
             "preserva descrições de gráficos completas. ETL automático."
         )
         
+        # Tipo de reader (FILE para aparecer na interface de upload de arquivos)
+        self.type = "FILE"
+        
         # Extensões suportadas
         self.extension = ["pdf", "doc", "docx", "ppt", "pptx"]
         

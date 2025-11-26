@@ -21,11 +21,11 @@ def initialize_extensions():
     Deve ser chamado ANTES de importar goldenverba.server.api
     """
     try:
-        from verba_extensions.plugin_manager import PluginManager
+        from verba_extensions.extension_loader import ExtensionLoader
         from verba_extensions.version_checker import VersionChecker
         
         # Inicializa managers
-        plugin_manager = PluginManager()
+        extension_loader = ExtensionLoader()
         version_checker = VersionChecker()
         
         # Verifica compatibilidade
@@ -39,10 +39,10 @@ def initialize_extensions():
         
         # Carrega plugins
         plugins_dir = os.getenv("VERBA_PLUGINS_DIR", "verba_extensions/plugins")
-        plugin_manager.load_plugins_from_dir(plugins_dir)
+        extension_loader.load_plugins_from_dir(plugins_dir)
         
         # Aplica hooks
-        plugin_manager.apply_hooks()
+        extension_loader.apply_hooks()
         
         # Aplica compatibilidade com Weaviate v3 (se necessário)
         try:
@@ -75,7 +75,7 @@ def initialize_extensions():
             msg.warn(f"Patch Tika fallback não aplicado: {str(e)}")
         
         # Executa registradores de hooks dos plugins
-        for plugin_name, plugin_data in plugin_manager.plugins.items():
+        for plugin_name, plugin_data in extension_loader.plugins.items():
             if hasattr(plugin_data['module'], 'register_hooks'):
                 try:
                     plugin_data['module'].register_hooks()
@@ -83,12 +83,12 @@ def initialize_extensions():
                     msg.warn(f"Erro ao registrar hooks do plugin {plugin_name}: {str(e)}")
         
         # Salva instância global para uso posterior
-        sys.modules['verba_extensions']._plugin_manager = plugin_manager
+        sys.modules['verba_extensions']._extension_loader = extension_loader
         sys.modules['verba_extensions']._version_checker = version_checker
         
-        msg.good(f"Extensões inicializadas: {len(plugin_manager.list_plugins())} plugins carregados")
+        msg.good(f"Extensões inicializadas: {len(extension_loader.list_plugins())} plugins carregados")
         
-        return plugin_manager, version_checker
+        return extension_loader, version_checker
         
     except Exception as e:
         msg.warn(f"Erro ao inicializar extensões (continuando sem extensões): {str(e)}")

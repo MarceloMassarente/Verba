@@ -37,13 +37,13 @@ from goldenverba.components.managers import (
     WeaviateManager,
 )
 
-# Plugin Manager for chunk enrichment
+# Chunk Processor for chunk enrichment
 try:
-    from verba_extensions.plugins.plugin_manager import get_plugin_manager
+    from verba_extensions.plugins.chunk_processor import get_chunk_processor
     PLUGINS_AVAILABLE = True
 except ImportError:
     PLUGINS_AVAILABLE = False
-    msg.warn("Plugin extensions not available - chunk enrichment plugins disabled")
+    msg.warn("Chunk processor extensions not available - chunk enrichment plugins disabled")
 
 load_dotenv()
 
@@ -458,15 +458,15 @@ class VerbaManager:
             # Apply plugin enrichment (e.g., LLMMetadataExtractor)
             if PLUGINS_AVAILABLE:
                 try:
-                    plugin_manager = get_plugin_manager()
-                    if plugin_manager.plugins:
-                        msg.info(f"Applying {len(plugin_manager.plugins)} plugin(s) to enrich chunks")
+                    chunk_processor = get_chunk_processor()
+                    if chunk_processor.plugins:
+                        msg.info(f"Applying {len(chunk_processor.plugins)} plugin(s) to enrich chunks")
                         enriched_documents = []
                         for doc in chunked_documents:
-                            enriched_doc = await plugin_manager.process_document_chunks(doc)
+                            enriched_doc = await chunk_processor.process_document_chunks(doc)
                             enriched_documents.append(enriched_doc)
                         chunked_documents = enriched_documents
-                        msg.good(f"Chunks enriched with {plugin_manager.get_enabled_plugins()}")
+                        msg.good(f"Chunks enriched with {chunk_processor.get_enabled_plugins()}")
                 except Exception as e:
                     msg.warn(f"Plugin processing failed (non-critical): {str(e)}")
                     # Continue without enrichment if plugins fail
@@ -739,12 +739,12 @@ class VerbaManager:
             Lista de dicts com informações de cada preset (nome, descrição, latência, qualidade, disponibilidade)
         """
         try:
-            from verba_extensions.plugins.plugin_manager import get_plugin_manager
-            plugin_manager = get_plugin_manager()
+            from verba_extensions.plugins.chunk_processor import get_chunk_processor
+            chunk_processor = get_chunk_processor()
             
             # Procura plugin Reranker
             reranker = None
-            for plugin in plugin_manager.plugins:
+            for plugin in chunk_processor.plugins:
                 if plugin.name == "Reranker":
                     reranker = plugin
                     break

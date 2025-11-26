@@ -26,7 +26,7 @@ Plugin Reranker has no process_chunk or process_batch method
 ### Raiz do Problema
 O `RerankerPlugin` implementava `process_chunks()` mas o `PluginManager` procurava por `process_chunk()` ou `process_batch()`.
 
-### Solução Implementada
+### Solução Implementada (2025-11-04)
 
 **Arquivo:** `verba_extensions/plugins/reranker.py`
 
@@ -76,6 +76,31 @@ async def process_batch(self, chunks, config=None):
 - ✅ Plugin agora é totalmente compatível com o sistema de plugins
 - ✅ Reranking em batch é aplicado corretamente durante import
 - ✅ Chunks são reordenados por relevância
+
+### Atualização: Reranker Multi-Provider (2025-01-XX)
+
+O reranker foi completamente refatorado para suportar múltiplos providers:
+
+**Novos Providers:**
+- **Metadata Reranker**: Sempre disponível, baseado em metadata e keywords
+- **Haystack Reranker**: Local, usando CrossEncoderRanker (requer `haystack-ai`)
+- **Cohere Reranker**: API, usando Cohere Rerank API (requer `COHERE_API_KEY`)
+- **Jina Reranker**: API, usando Jina Rerank API (requer `JINA_API_KEY`)
+- **VoyageAI Reranker**: API, usando VoyageAI Rerank API (requer `VOYAGE_API_KEY`)
+
+**Modos de Combinação:**
+- **Cascade**: Aplica rerankers sequencialmente (metadata → haystack → cohere)
+- **Parallel**: Aplica múltiplos rerankers em paralelo e combina scores usando RRF
+- **Hybrid**: Combina paralelo e cascade (metadata+haystack em paralelo, depois APIs em cascade)
+
+**Melhorias:**
+- ✅ Arquitetura modular com `BaseReranker` e providers específicos
+- ✅ Detecção automática de dependências e API keys
+- ✅ Configuração via InputConfig com validação
+- ✅ Suporte a combinação de múltiplas estratégias
+- ✅ Backward compatible com implementação anterior
+
+**Documentação:** `verba_extensions/plugins/RERANKER_README.md`
 
 ### Teste
 ```bash

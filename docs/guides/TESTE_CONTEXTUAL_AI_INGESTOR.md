@@ -169,3 +169,5 @@ python scripts/tests/test_contextual_ai_ingestor.py
 **Última atualização**: Janeiro 2025  
 **API Key de teste**: Fornecida pelo usuário
 
+
+

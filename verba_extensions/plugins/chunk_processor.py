@@ -1,8 +1,15 @@
 """
-Plugin Manager for Verba
+Chunk Processor - Processa e enriquece chunks durante indexação
 
-Gerencia plugins que processam chunks durante indexação.
-Carrega automaticamente plugins disponíveis e os aplica no pipeline.
+Este sistema gerencia plugins que processam chunks durante a indexação
+(como llm_metadata_extractor e reranker). Diferente do ExtensionLoader
+(verba_extensions/extension_loader.py), este NÃO adiciona componentes RAG,
+apenas processa chunks existentes.
+
+Plugins devem implementar:
+- async process_chunk(chunk: Chunk, config: Optional[Dict]) -> Chunk
+- async process_batch(chunks: List[Chunk], config: Optional[Dict]) -> List[Chunk]
+- installed: bool
 """
 
 import os
@@ -15,7 +22,7 @@ from goldenverba.components.document import Document
 logger = logging.getLogger(__name__)
 
 
-class PluginManager:
+class ChunkProcessor:
     """
     Gerencia plugins que enriquecem chunks durante indexação.
     
@@ -171,13 +178,19 @@ class PluginManager:
 
 
 # Singleton instance
-_plugin_manager: Optional[PluginManager] = None
+_chunk_processor: Optional[ChunkProcessor] = None
 
 
-def get_plugin_manager() -> PluginManager:
-    """Retorna instância singleton do PluginManager."""
-    global _plugin_manager
-    if _plugin_manager is None:
-        _plugin_manager = PluginManager()
-    return _plugin_manager
+def get_chunk_processor() -> ChunkProcessor:
+    """Retorna instância singleton do ChunkProcessor."""
+    global _chunk_processor
+    if _chunk_processor is None:
+        _chunk_processor = ChunkProcessor()
+    return _chunk_processor
+
+
+# Alias para compatibilidade (deprecated - usar get_chunk_processor)
+def get_plugin_manager() -> ChunkProcessor:
+    """DEPRECATED: Use get_chunk_processor() instead."""
+    return get_chunk_processor()
 

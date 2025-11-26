@@ -22,7 +22,7 @@ def patch_verba_imports():
         from verba_extensions.startup import initialize_extensions
         
         # Inicializa se ainda não foi
-        if not hasattr(sys.modules.get('verba_extensions'), '_plugin_manager'):
+        if not hasattr(sys.modules.get('verba_extensions'), '_extension_loader'):
             initialize_extensions()
         
         return True

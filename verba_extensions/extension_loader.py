@@ -1,5 +1,16 @@
 """
-Plugin Manager - Gerencia extensões do Verba sem modificar código core
+Extension Loader - Carrega e registra componentes RAG (readers, chunkers, etc)
+
+Este sistema carrega extensões do Verba que adicionam novos componentes RAG
+(readers, chunkers, retrievers, generators) via função register().
+
+Diferente do ChunkProcessor (verba_extensions/plugins/chunk_processor.py),
+este sistema adiciona componentes aos managers do Verba, não processa chunks.
+
+Uso:
+    loader = ExtensionLoader()
+    loader.load_plugins_from_dir("verba_extensions/plugins")
+    loader.apply_hooks()  # Adiciona componentes aos managers
 """
 
 import os
@@ -9,7 +20,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from wasabi import msg
 
-class PluginManager:
+class ExtensionLoader:
     """
     Gerencia plugins/extensões do Verba usando hooks e monkey patching.
     Permite atualizar Verba sem perder as extensões.
@@ -82,10 +93,16 @@ class PluginManager:
             msg.warn(f"Diretório de plugins não encontrado: {plugins_dir}")
             return
         
+        msg.info(f"Carregando plugins de: {plugins_dir}")
+        loaded_count = 0
         for plugin_file in plugins_path.glob("*.py"):
             if plugin_file.name.startswith("_") or plugin_file.name == "__init__.py":
                 continue
-            self.load_plugin(str(plugin_file))
+            msg.debug(f"Tentando carregar plugin: {plugin_file.name}")
+            if self.load_plugin(str(plugin_file)):
+                loaded_count += 1
+        
+        msg.info(f"Total de plugins carregados: {loaded_count}")
     
     def apply_hooks(self):
         """Aplica hooks para injetar extensões no Verba sem modificar código core"""
@@ -154,17 +171,25 @@ class PluginManager:
             from goldenverba.components import managers
             
             original_readers = managers.readers.copy()
+            added_count = 0
             
             for plugin_name, plugin_data in self.plugins.items():
                 if 'readers' in plugin_data['info']:
                     for reader in plugin_data['info']['readers']:
                         if reader not in original_readers:
                             original_readers.append(reader)
-                            msg.info(f"Reader adicionado: {reader.name}")
+                            msg.info(f"Reader adicionado: {reader.name} (tipo: {getattr(reader, 'type', 'N/A')})")
+                            added_count += 1
+                        else:
+                            msg.debug(f"Reader {reader.name} já existe, pulando")
             
             managers.readers = original_readers
+            if added_count > 0:
+                msg.good(f"Total de {added_count} reader(s) adicionado(s) via plugins")
         except Exception as e:
             msg.warn(f"Erro ao aplicar hook de readers: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def _hook_chunkers(self):
         """Adiciona chunkers customizados aos managers"""

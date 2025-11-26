@@ -77,9 +77,9 @@ _import_semaphore = asyncio.Semaphore(1)
 try:
     import verba_extensions.startup
     from verba_extensions.startup import initialize_extensions
-    plugin_manager, version_checker = initialize_extensions()
-    if plugin_manager:
-        msg.good(f"Extensoes carregadas: {len(plugin_manager.list_plugins())} plugins")
+    extension_loader, version_checker = initialize_extensions()
+    if extension_loader:
+        msg.good(f"Extensoes carregadas: {len(extension_loader.list_plugins())} plugins")
 except ImportError:
     msg.info("Extensoes nao disponiveis (continuando sem extensoes)")
 except Exception as e:
@@ -890,10 +890,10 @@ async def apply_reranker_preset(payload: ApplyRerankerPresetPayload):
         current_config = await manager.load_rag_config(client)
         
         # Obtém plugin reranker
-        from verba_extensions.plugins.plugin_manager import get_plugin_manager
-        plugin_manager = get_plugin_manager()
+        from verba_extensions.plugins.chunk_processor import get_chunk_processor
+        chunk_processor = get_chunk_processor()
         reranker = None
-        for plugin in plugin_manager.plugins:
+        for plugin in chunk_processor.plugins:
             if plugin.name == "Reranker":
                 reranker = plugin
                 break

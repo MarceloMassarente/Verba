@@ -181,6 +181,28 @@ msg.good(f"  ⚙️ CONFIG RETRIEVER: limit={limit} (busca inicial), reranker_to
 msg.info(f"  📦 Chunk Window: {chunk_window} (vai combinar chunks adjacentes)")
 ```
 
+## Atualização: Reranker Multi-Provider (2025-01-XX)
+
+O reranker foi refatorado para suportar múltiplos providers:
+
+- **Metadata Reranker**: Sempre disponível, baseado em metadata e keywords
+- **Haystack Reranker**: Local, usando CrossEncoderRanker (requer `haystack-ai`)
+- **Cohere Reranker**: API, usando Cohere Rerank API (requer `COHERE_API_KEY`)
+- **Jina Reranker**: API, usando Jina Rerank API (requer `JINA_API_KEY`)
+- **VoyageAI Reranker**: API, usando VoyageAI Rerank API (requer `VOYAGE_API_KEY`)
+
+**Modos de combinação:**
+- **Cascade**: Aplica rerankers sequencialmente
+- **Parallel**: Aplica múltiplos rerankers em paralelo e combina com RRF
+- **Hybrid**: Combina paralelo e cascade
+
+**Configuração:**
+- `Reranker Provider`: Seleciona provider ou "Combined" para usar múltiplos
+- `Reranker Mode`: Cascade, Parallel ou Hybrid (quando usando "Combined")
+- `Top K`: Número de chunks a retornar após reranking (substitui "Reranker Top K" em alguns contextos)
+
+Para mais detalhes, consulte: `verba_extensions/plugins/RERANKER_README.md`
+
 ## Recomendações
 
 1. **Resetar configuração do Retriever** (botão "Reset" na interface)

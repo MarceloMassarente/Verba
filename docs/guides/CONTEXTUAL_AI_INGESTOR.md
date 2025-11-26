@@ -287,3 +287,5 @@ Após importação, você pode usar o **Entity-Aware Retriever** para buscar:
 **Status**: Implementado e funcional  
 **Compatibilidade**: Verba 2.1.x + ETL A2 Inteligente
 
+
+

@@ -5,9 +5,9 @@ Mantém compatibilidade com atualizações futuras do Verba sem modificar códig
 
 __version__ = "1.0.0"
 
-from .plugin_manager import PluginManager
+from .extension_loader import ExtensionLoader
 from .version_checker import VersionChecker
 from .hooks import VerbaHooks
 
-__all__ = ["PluginManager", "VersionChecker", "VerbaHooks"]
+__all__ = ["ExtensionLoader", "VersionChecker", "VerbaHooks"]
 
