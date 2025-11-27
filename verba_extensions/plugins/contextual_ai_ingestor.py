@@ -42,7 +42,8 @@ class ContextualAIIngestor(Reader):
     
     def __init__(self):
         super().__init__()
-        self.requires_env = ["CONTEXTUAL_AI_API_KEY"]
+        # Não requer variável de ambiente - permite configurar via UI
+        self.requires_env = []
         self.name = "Contextual.ai Ingestor (Otimizado)"
         self.description = (
             "Ingestor integrado Contextual.ai com chunking otimizado: "
@@ -58,6 +59,18 @@ class ContextualAIIngestor(Reader):
         
         # Configurações
         self.config = {
+            "API Key": InputConfig(
+                type="password",
+                value=os.getenv("CONTEXTUAL_AI_API_KEY", "") or "",
+                description="Sua Contextual.ai API Key (ou configure CONTEXTUAL_AI_API_KEY env var)",
+                values=[],
+            ),
+            "Base URL": InputConfig(
+                type="text",
+                value=os.getenv("CONTEXTUAL_AI_BASE_URL", "https://api.contextual.ai/v1"),
+                description="Contextual.ai API Base URL (padrão: https://api.contextual.ai/v1)",
+                values=[],
+            ),
             "Parse Mode": InputConfig(
                 type="dropdown",
                 value="standard",
@@ -84,8 +97,8 @@ class ContextualAIIngestor(Reader):
             ),
             "Max Split Table Cells": InputConfig(
                 type="number",
-                value=None,
-                description="Número máximo de células para dividir tabelas (só se Enable Split Tables = true)",
+                value=0,
+                description="Número máximo de células para dividir tabelas (só se Enable Split Tables = true). Use 0 para desabilitar.",
                 values=[],
             ),
             "Page Range": InputConfig(
@@ -95,15 +108,6 @@ class ContextualAIIngestor(Reader):
                 values=[],
             ),
         }
-        
-        # Adiciona campo de API Key se não estiver em variável de ambiente
-        if os.getenv("CONTEXTUAL_AI_API_KEY") is None:
-            self.config["API Key"] = InputConfig(
-                type="password",
-                value="",
-                description="Sua Contextual.ai API Key (ou configure CONTEXTUAL_AI_API_KEY)",
-                values=[],
-            )
     
     async def load(
         self, config: dict[str, InputConfig], fileConfig: FileConfig
@@ -112,26 +116,32 @@ class ContextualAIIngestor(Reader):
         Carrega documento, faz parse via API Contextual.ai, chunking otimizado
         e retorna Document com chunks já criados e ETL habilitado.
         """
-        # 1. Valida API key
-        api_key = get_environment(
-            config,
-            "API Key",
-            "CONTEXTUAL_AI_API_KEY",
-            "No Contextual.ai API Key detected",
-        )
+        # 1. Valida API key (prioriza config, depois env var)
+        api_key = config.get("API Key", InputConfig(type="text", value="", description="", values=[])).value
+        if not api_key:
+            api_key = os.getenv("CONTEXTUAL_AI_API_KEY", "")
+        if not api_key:
+            raise ValueError("No Contextual.ai API Key detected. Configure via UI ou CONTEXTUAL_AI_API_KEY env var")
         
         # Remove prefixo "key-" se presente (será adicionado no header)
         if api_key.startswith("key-"):
             api_key = api_key[4:]
         
-        # 2. Valida extensão
+        # 2. Obtém Base URL (prioriza config, depois env var, depois default)
+        base_url = config.get("Base URL", InputConfig(type="text", value="", description="", values=[])).value
+        if not base_url:
+            base_url = os.getenv("CONTEXTUAL_AI_BASE_URL", "https://api.contextual.ai/v1")
+        # Remove trailing slash se presente
+        base_url = base_url.rstrip("/")
+        
+        # 3. Valida extensão
         if fileConfig.extension.lower() not in self.extension:
             raise ValueError(
                 f"Formato não suportado: {fileConfig.extension}. "
                 f"Suportados: {', '.join(self.extension)}"
             )
         
-        # 3. Prepara parâmetros
+        # 4. Prepara parâmetros
         parse_mode = config["Parse Mode"].value
         enable_hierarchy = config["Enable Document Hierarchy"].value
         figure_mode = config["Figure Caption Mode"].value
@@ -148,14 +158,14 @@ class ContextualAIIngestor(Reader):
             msg.warn("⚠️ Figure Caption Mode detailed não permitido em modo basic. Usando concise.")
             figure_mode = "concise"
         
-        if enable_split and max_cells is None:
-            msg.warn("⚠️ Max Split Table Cells deve ser especificado se Enable Split Tables = true.")
+        if enable_split and (max_cells is None or max_cells == 0):
+            msg.warn("⚠️ Max Split Table Cells deve ser especificado (maior que 0) se Enable Split Tables = true.")
             enable_split = False
         
         # 4. Parse via API
         msg.info(f"📄 Parseando {fileConfig.filename} com Contextual.ai...")
         result = await self._parse_with_contextual_ai(
-            fileConfig, api_key, parse_mode, enable_hierarchy, 
+            fileConfig, api_key, base_url, parse_mode, enable_hierarchy, 
             figure_mode, enable_split, max_cells, page_range
         )
         
@@ -198,6 +208,7 @@ class ContextualAIIngestor(Reader):
         self,
         fileConfig: FileConfig,
         api_key: str,
+        base_url: str,
         parse_mode: str,
         enable_hierarchy: bool,
         figure_mode: str,
@@ -208,9 +219,8 @@ class ContextualAIIngestor(Reader):
         """
         Faz parse do arquivo via API Contextual.ai com polling do resultado.
         """
-        # Endpoint conforme documentação: POST /parse (sem /v1)
-        # Mas o código de teste funcionou com /v1/parse, então mantemos
-        api_url = "https://api.contextual.ai/v1/parse"
+        # Endpoint usando Base URL do config
+        api_url = f"{base_url}/parse"
         headers = {
             "Authorization": f"Bearer key-{api_key}",  # Formato correto: "Bearer key-{api_key}"
         }
@@ -275,7 +285,7 @@ class ContextualAIIngestor(Reader):
                 msg.info(f"✅ Job iniciado: {job_id}")
                 
                 # Polling do resultado (já tem retry interno melhorado)
-                result = await self._poll_job_result(session, api_key, job_id)
+                result = await self._poll_job_result(session, api_key, base_url, job_id)
                 return result
         
         except Exception as e:
@@ -284,7 +294,8 @@ class ContextualAIIngestor(Reader):
     async def _poll_job_result(
         self, 
         session: aiohttp.ClientSession, 
-        api_key: str, 
+        api_key: str,
+        base_url: str,
         job_id: str,
         max_attempts: int = 60, 
         poll_interval: float = 2.0
@@ -299,7 +310,7 @@ class ContextualAIIngestor(Reader):
         
         # Endpoint correto para status: /parse/jobs/{job_id}/status
         possible_endpoints = [
-            f"https://api.contextual.ai/v1/parse/jobs/{job_id}/status",
+            f"{base_url}/parse/jobs/{job_id}/status",
         ]
         
         working_endpoint = None  # Endpoint que funcionou
@@ -369,11 +380,11 @@ class ContextualAIIngestor(Reader):
                             
                             # Lista de endpoints possíveis (baseado em padrões comuns de API)
                             alt_endpoints = [
-                                f"https://api.contextual.ai/v1/parse/jobs/{job_id}",  # Sem /status
-                                f"https://api.contextual.ai/v1/parse/{job_id}",  # Formato alternativo
-                                f"https://api.contextual.ai/v1/parse/{job_id}/result",  # Com /result
-                                f"https://api.contextual.ai/v1/jobs/{job_id}",  # Formato jobs/
-                                f"https://api.contextual.ai/v1/jobs/{job_id}/result",  # Jobs com result
+                                f"{base_url}/parse/jobs/{job_id}",  # Sem /status
+                                f"{base_url}/parse/{job_id}",  # Formato alternativo
+                                f"{base_url}/parse/{job_id}/result",  # Com /result
+                                f"{base_url}/jobs/{job_id}",  # Formato jobs/
+                                f"{base_url}/jobs/{job_id}/result",  # Jobs com result
                             ]
                             
                             # Tenta cada endpoint

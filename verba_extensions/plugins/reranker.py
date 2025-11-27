@@ -292,14 +292,18 @@ class CohereReranker(BaseReranker):
         chunks: List[Chunk],
         query: str,
         top_k: int,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
     ) -> List[Chunk]:
         """Reranks chunks usando Cohere Rerank API."""
-        if not self.available or not chunks or not query:
+        if not chunks or not query:
             return chunks[:top_k]
         
         model = model or self.default_model
-        api_key = self.api_key
+        # Prioriza API key do parâmetro, depois do config, depois da env var
+        api_key = api_key or self.api_key
+        base_url = base_url or self.url
         
         if not api_key:
             logger.warning("Cohere API key não configurada")
@@ -336,7 +340,7 @@ class CohereReranker(BaseReranker):
                     # Função interna para fazer requisição com retry
                     async def make_request():
                         async with session.post(
-                            f"{self.url}/rerank",
+                            f"{base_url}/rerank",
                             headers=headers,
                             json=data
                         ) as response:
@@ -393,13 +397,17 @@ class JinaReranker(BaseReranker):
         self,
         chunks: List[Chunk],
         query: str,
-        top_k: int
+        top_k: int,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
     ) -> List[Chunk]:
         """Reranks chunks usando Jina Rerank API."""
-        if not self.available or not chunks or not query:
+        if not chunks or not query:
             return chunks[:top_k]
         
-        api_key = self.api_key
+        # Prioriza API key do parâmetro, depois do config, depois da env var
+        api_key = api_key or self.api_key
+        base_url = base_url or self.url
         
         if not api_key:
             logger.warning("Jina API key não configurada")
@@ -427,7 +435,7 @@ class JinaReranker(BaseReranker):
                 # Função interna para fazer requisição com retry
                 async def make_request():
                     async with session.post(
-                        f"{self.url}/rerank",
+                        f"{base_url}/rerank",
                         headers=headers,
                         json=data
                     ) as response:
@@ -482,13 +490,17 @@ class VoyageAIReranker(BaseReranker):
         self,
         chunks: List[Chunk],
         query: str,
-        top_k: int
+        top_k: int,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
     ) -> List[Chunk]:
         """Reranks chunks usando VoyageAI Rerank API."""
-        if not self.available or not chunks or not query:
+        if not chunks or not query:
             return chunks[:top_k]
         
-        api_key = self.api_key
+        # Prioriza API key do parâmetro, depois do config, depois da env var
+        api_key = api_key or self.api_key
+        base_url = base_url or self.url
         
         if not api_key:
             logger.warning("VoyageAI API key não configurada")
@@ -517,7 +529,7 @@ class VoyageAIReranker(BaseReranker):
                 # Função interna para fazer requisição com retry
                 async def make_request():
                     async with session.post(
-                        f"{self.url}/rerank",
+                        f"{base_url}/rerank",
                         headers=headers,
                         json=data
                     ) as response:
@@ -582,7 +594,9 @@ class ContextualAIReranker(BaseReranker):
         query: str,
         top_k: int,
         model: Optional[str] = None,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
     ) -> List[Chunk]:
         """
         Reranks chunks usando Contextual AI Rerank API.
@@ -593,15 +607,19 @@ class ContextualAIReranker(BaseReranker):
             top_k: Número de chunks a retornar
             model: Modelo a usar (opcional)
             instruction: Instruções customizadas para orientar o reranking (opcional)
+            api_key: API key (opcional, usa do config/env se não fornecido)
+            base_url: Base URL (opcional, usa do config/env se não fornecido)
         
         Returns:
             Chunks rerankeados (ordenados por relevância)
         """
-        if not self.available or not chunks or not query:
+        if not chunks or not query:
             return chunks[:top_k]
         
         model = model or self.default_model
-        api_key = self.api_key
+        # Prioriza API key do parâmetro, depois do config, depois da env var
+        api_key = api_key or self.api_key
+        base_url = base_url or self.url
         
         if not api_key:
             logger.warning("Contextual AI API key não configurada")
@@ -674,7 +692,7 @@ class ContextualAIReranker(BaseReranker):
                     # Função interna para fazer requisição com retry
                     async def make_request():
                         async with session.post(
-                            f"{self.url}/rerank",
+                            f"{base_url}/rerank",
                             headers=headers,
                             json=data
                         ) as response:
@@ -877,7 +895,11 @@ class RerankerPlugin:
     
     def _build_config(self) -> Dict[str, InputConfig]:
         """Constrói configuração do plugin."""
-        # Detecta providers disponíveis
+        # Sempre mostra todos os providers no dropdown (mesmo sem API key)
+        # Isso permite que o usuário configure API keys e endpoints via UI
+        all_providers = ["Metadata Only", "Haystack", "Cohere", "Jina", "VoyageAI", "ContextualAI"]
+        
+        # Detecta providers disponíveis (com API key configurada)
         available_providers = ["Metadata Only"]
         if self.haystack_reranker.available:
             available_providers.append("Haystack")
@@ -892,14 +914,14 @@ class RerankerPlugin:
         
         # Se múltiplos providers disponíveis, adiciona "Combined"
         if len(available_providers) > 2:
-            available_providers.append("Combined")
+            all_providers.append("Combined")
         
         config = {
             "Reranker Provider": InputConfig(
                 type="dropdown",
-                value=available_providers[0],
+                value=all_providers[0],
                 description="Selecione o provider de reranking",
-                values=available_providers,
+                values=all_providers,
             ),
             "Enable Metadata Reranker": InputConfig(
                 type="bool",
@@ -957,76 +979,101 @@ class RerankerPlugin:
         }
         
         # Adiciona configurações específicas de providers
-        if self.haystack_reranker.available:
-            config["Haystack Model"] = InputConfig(
-                type="dropdown",
-                value="cross-encoder/ms-marco-MiniLM-L-6-v2",
-                description="Modelo Haystack CrossEncoderRanker",
-                values=[
-                    "cross-encoder/ms-marco-MiniLM-L-6-v2",
-                    "cross-encoder/ms-marco-MiniLM-L-12-v2",
-                    "cross-encoder/ms-marco-electra-base",
-                ],
-            )
+        # Sempre mostra campos de configuração, mesmo se provider não está disponível
+        # Isso permite que o usuário configure via UI
         
-        if self.cohere_reranker.available:
-            config["Cohere Model"] = InputConfig(
-                type="dropdown",
-                value="rerank-english-v3.0",
-                description="Modelo Cohere Rerank",
-                values=[
-                    "rerank-english-v3.0",
-                    "rerank-multilingual-v3.0",
-                ],
-            )
-            if not get_token("COHERE_API_KEY"):
-                config["Cohere API Key"] = InputConfig(
-                    type="password",
-                    value="",
-                    description="Cohere API Key (ou configure COHERE_API_KEY env var)",
-                    values=[],
-                )
+        # Haystack Model (sempre disponível se haystack-ai instalado)
+        config["Haystack Model"] = InputConfig(
+            type="dropdown",
+            value="cross-encoder/ms-marco-MiniLM-L-6-v2",
+            description="Modelo Haystack CrossEncoderRanker",
+            values=[
+                "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                "cross-encoder/ms-marco-MiniLM-L-12-v2",
+                "cross-encoder/ms-marco-electra-base",
+            ],
+        )
         
-        if self.jina_reranker.available and not get_token("JINA_API_KEY"):
-            config["Jina API Key"] = InputConfig(
-                type="password",
-                value="",
-                description="Jina API Key (ou configure JINA_API_KEY env var)",
-                values=[],
-            )
+        # Cohere configurações
+        config["Cohere Model"] = InputConfig(
+            type="dropdown",
+            value="rerank-english-v3.0",
+            description="Modelo Cohere Rerank",
+            values=[
+                "rerank-english-v3.0",
+                "rerank-multilingual-v3.0",
+            ],
+        )
+        config["Cohere API Key"] = InputConfig(
+            type="password",
+            value=get_token("COHERE_API_KEY", "") or "",
+            description="Cohere API Key (ou configure COHERE_API_KEY env var)",
+            values=[],
+        )
+        config["Cohere Base URL"] = InputConfig(
+            type="text",
+            value=os.getenv("COHERE_BASE_URL", "https://api.cohere.com/v1"),
+            description="Cohere API Base URL (padrão: https://api.cohere.com/v1)",
+            values=[],
+        )
         
-        if self.voyageai_reranker.available and not get_token("VOYAGE_API_KEY"):
-            config["VoyageAI API Key"] = InputConfig(
-                type="password",
-                value="",
-                description="VoyageAI API Key (ou configure VOYAGE_API_KEY env var)",
-                values=[],
-            )
+        # Jina configurações
+        config["Jina API Key"] = InputConfig(
+            type="password",
+            value=get_token("JINA_API_KEY", "") or "",
+            description="Jina API Key (ou configure JINA_API_KEY env var)",
+            values=[],
+        )
+        config["Jina Base URL"] = InputConfig(
+            type="text",
+            value=os.getenv("JINA_BASE_URL", "https://api.jina.ai/v1"),
+            description="Jina API Base URL (padrão: https://api.jina.ai/v1)",
+            values=[],
+        )
         
-        if self.contextualai_reranker.available:
-            config["ContextualAI Model"] = InputConfig(
-                type="dropdown",
-                value="ctxl-rerank-v2-instruct-multilingual",
-                description="Modelo Contextual AI Rerank",
-                values=[
-                    "ctxl-rerank-v2-instruct-multilingual",
-                    "ctxl-rerank-v2-instruct-multilingual-mini",
-                    "ctxl-rerank-v1-instruct",
-                ],
-            )
-            config["ContextualAI Instruction"] = InputConfig(
-                type="text",
-                value="",
-                description="Instruções customizadas para orientar o reranking (opcional). Ex: 'Prioritize recent documents and internal sales documents over market analysis.'",
-                values=[],
-            )
-            if not get_token("CONTEXTUAL_API_KEY"):
-                config["ContextualAI API Key"] = InputConfig(
-                    type="password",
-                    value="",
-                    description="Contextual AI API Key (ou configure CONTEXTUAL_API_KEY env var)",
-                    values=[],
-                )
+        # VoyageAI configurações
+        config["VoyageAI API Key"] = InputConfig(
+            type="password",
+            value=get_token("VOYAGE_API_KEY", "") or "",
+            description="VoyageAI API Key (ou configure VOYAGE_API_KEY env var)",
+            values=[],
+        )
+        config["VoyageAI Base URL"] = InputConfig(
+            type="text",
+            value=os.getenv("VOYAGE_BASE_URL", "https://api.voyageai.com/v1"),
+            description="VoyageAI API Base URL (padrão: https://api.voyageai.com/v1)",
+            values=[],
+        )
+        
+        # ContextualAI configurações
+        config["ContextualAI Model"] = InputConfig(
+            type="dropdown",
+            value="ctxl-rerank-v2-instruct-multilingual",
+            description="Modelo Contextual AI Rerank",
+            values=[
+                "ctxl-rerank-v2-instruct-multilingual",
+                "ctxl-rerank-v2-instruct-multilingual-mini",
+                "ctxl-rerank-v1-instruct",
+            ],
+        )
+        config["ContextualAI Instruction"] = InputConfig(
+            type="text",
+            value="",
+            description="Instruções customizadas para orientar o reranking (opcional). Ex: 'Prioritize recent documents and internal sales documents over market analysis.'",
+            values=[],
+        )
+        config["ContextualAI API Key"] = InputConfig(
+            type="password",
+            value=get_token("CONTEXTUAL_API_KEY", "") or "",
+            description="Contextual AI API Key (ou configure CONTEXTUAL_API_KEY env var)",
+            values=[],
+        )
+        config["ContextualAI Base URL"] = InputConfig(
+            type="text",
+            value=os.getenv("CONTEXTUAL_BASE_URL", "https://api.contextual.ai/v1"),
+            description="Contextual AI API Base URL (padrão: https://api.contextual.ai/v1)",
+            values=[],
+        )
         
         return config
     
@@ -1104,17 +1151,57 @@ class RerankerPlugin:
             result = await self.metadata_reranker.rerank(chunks, query, top_k)
         elif provider == "Haystack" and self.haystack_reranker.available:
             result = await self.haystack_reranker.rerank(chunks, query, top_k)
-        elif provider == "Cohere" and self.cohere_reranker.available:
-            cohere_model = self._get_config_value(config, "Cohere Model", "rerank-english-v3.0")
-            result = await self.cohere_reranker.rerank(chunks, query, top_k, cohere_model)
-        elif provider == "Jina" and self.jina_reranker.available:
-            result = await self.jina_reranker.rerank(chunks, query, top_k)
-        elif provider == "VoyageAI" and self.voyageai_reranker.available:
-            result = await self.voyageai_reranker.rerank(chunks, query, top_k)
-        elif provider == "ContextualAI" and self.contextualai_reranker.available:
-            contextualai_model = self._get_config_value(config, "ContextualAI Model", "ctxl-rerank-v2-instruct-multilingual")
-            contextualai_instruction = self._get_config_value(config, "ContextualAI Instruction", None)
-            result = await self.contextualai_reranker.rerank(chunks, query, top_k, contextualai_model, contextualai_instruction)
+        elif provider == "Cohere":
+            cohere_model = self._get_config_value(merged_config, "Cohere Model", "rerank-english-v3.0")
+            cohere_api_key = self._get_config_value(merged_config, "Cohere API Key", None)
+            cohere_base_url = self._get_config_value(merged_config, "Cohere Base URL", None)
+            # Tenta usar API key do config, se não disponível usa a do reranker (env var)
+            if cohere_api_key or self.cohere_reranker.available:
+                result = await self.cohere_reranker.rerank(
+                    chunks, query, top_k, cohere_model, 
+                    api_key=cohere_api_key, base_url=cohere_base_url
+                )
+            else:
+                logger.warning("Cohere API key não configurada, usando Metadata Only")
+                result = await self.metadata_reranker.rerank(chunks, query, top_k)
+        elif provider == "Jina":
+            jina_api_key = self._get_config_value(merged_config, "Jina API Key", None)
+            jina_base_url = self._get_config_value(merged_config, "Jina Base URL", None)
+            # Tenta usar API key do config, se não disponível usa a do reranker (env var)
+            if jina_api_key or self.jina_reranker.available:
+                result = await self.jina_reranker.rerank(
+                    chunks, query, top_k,
+                    api_key=jina_api_key, base_url=jina_base_url
+                )
+            else:
+                logger.warning("Jina API key não configurada, usando Metadata Only")
+                result = await self.metadata_reranker.rerank(chunks, query, top_k)
+        elif provider == "VoyageAI":
+            voyageai_api_key = self._get_config_value(merged_config, "VoyageAI API Key", None)
+            voyageai_base_url = self._get_config_value(merged_config, "VoyageAI Base URL", None)
+            # Tenta usar API key do config, se não disponível usa a do reranker (env var)
+            if voyageai_api_key or self.voyageai_reranker.available:
+                result = await self.voyageai_reranker.rerank(
+                    chunks, query, top_k,
+                    api_key=voyageai_api_key, base_url=voyageai_base_url
+                )
+            else:
+                logger.warning("VoyageAI API key não configurada, usando Metadata Only")
+                result = await self.metadata_reranker.rerank(chunks, query, top_k)
+        elif provider == "ContextualAI":
+            contextualai_model = self._get_config_value(merged_config, "ContextualAI Model", "ctxl-rerank-v2-instruct-multilingual")
+            contextualai_instruction = self._get_config_value(merged_config, "ContextualAI Instruction", None)
+            contextualai_api_key = self._get_config_value(merged_config, "ContextualAI API Key", None)
+            contextualai_base_url = self._get_config_value(merged_config, "ContextualAI Base URL", None)
+            # Tenta usar API key do config, se não disponível usa a do reranker (env var)
+            if contextualai_api_key or self.contextualai_reranker.available:
+                result = await self.contextualai_reranker.rerank(
+                    chunks, query, top_k, contextualai_model, contextualai_instruction,
+                    api_key=contextualai_api_key, base_url=contextualai_base_url
+                )
+            else:
+                logger.warning("ContextualAI API key não configurada, usando Metadata Only")
+                result = await self.metadata_reranker.rerank(chunks, query, top_k)
         elif provider == "Combined":
             # Modo combinado: usa configurações individuais
             result = await self._rerank_combined(
@@ -1248,31 +1335,47 @@ class RerankerPlugin:
             )
         
         # 3. Cohere (se habilitado)
-        if use_cohere and self.cohere_reranker.available:
+        if use_cohere:
             cohere_model = self._get_config_value(config, "Cohere Model", "rerank-english-v3.0")
-            current_chunks = await self.cohere_reranker.rerank(
-                current_chunks, query, top_k, cohere_model
-            )
+            cohere_api_key = self._get_config_value(config, "Cohere API Key", None)
+            cohere_base_url = self._get_config_value(config, "Cohere Base URL", None)
+            if cohere_api_key or self.cohere_reranker.available:
+                current_chunks = await self.cohere_reranker.rerank(
+                    current_chunks, query, top_k, cohere_model,
+                    api_key=cohere_api_key, base_url=cohere_base_url
+                )
         
         # 4. Jina (se habilitado)
-        if use_jina and self.jina_reranker.available:
-            current_chunks = await self.jina_reranker.rerank(
-                current_chunks, query, top_k
-            )
+        if use_jina:
+            jina_api_key = self._get_config_value(config, "Jina API Key", None)
+            jina_base_url = self._get_config_value(config, "Jina Base URL", None)
+            if jina_api_key or self.jina_reranker.available:
+                current_chunks = await self.jina_reranker.rerank(
+                    current_chunks, query, top_k,
+                    api_key=jina_api_key, base_url=jina_base_url
+                )
         
         # 5. VoyageAI (se habilitado)
-        if use_voyageai and self.voyageai_reranker.available:
-            current_chunks = await self.voyageai_reranker.rerank(
-                current_chunks, query, top_k
-            )
+        if use_voyageai:
+            voyageai_api_key = self._get_config_value(config, "VoyageAI API Key", None)
+            voyageai_base_url = self._get_config_value(config, "VoyageAI Base URL", None)
+            if voyageai_api_key or self.voyageai_reranker.available:
+                current_chunks = await self.voyageai_reranker.rerank(
+                    current_chunks, query, top_k,
+                    api_key=voyageai_api_key, base_url=voyageai_base_url
+                )
         
         # 6. ContextualAI (se habilitado)
-        if use_contextualai and self.contextualai_reranker.available:
+        if use_contextualai:
             contextualai_model = self._get_config_value(config, "ContextualAI Model", "ctxl-rerank-v2-instruct-multilingual")
             contextualai_instruction = self._get_config_value(config, "ContextualAI Instruction", None)
-            current_chunks = await self.contextualai_reranker.rerank(
-                current_chunks, query, top_k, contextualai_model, contextualai_instruction
-            )
+            contextualai_api_key = self._get_config_value(config, "ContextualAI API Key", None)
+            contextualai_base_url = self._get_config_value(config, "ContextualAI Base URL", None)
+            if contextualai_api_key or self.contextualai_reranker.available:
+                current_chunks = await self.contextualai_reranker.rerank(
+                    current_chunks, query, top_k, contextualai_model, contextualai_instruction,
+                    api_key=contextualai_api_key, base_url=contextualai_base_url
+                )
         
         return current_chunks[:top_k]
     
@@ -1302,24 +1405,48 @@ class RerankerPlugin:
             tasks.append(self.haystack_reranker.rerank(chunks, query, len(chunks)))
             reranker_names.append("haystack")
         
-        if use_cohere and self.cohere_reranker.available:
+        if use_cohere:
             cohere_model = self._get_config_value(config, "Cohere Model", "rerank-english-v3.0")
-            tasks.append(self.cohere_reranker.rerank(chunks, query, len(chunks), cohere_model))
-            reranker_names.append("cohere")
+            cohere_api_key = self._get_config_value(config, "Cohere API Key", None)
+            cohere_base_url = self._get_config_value(config, "Cohere Base URL", None)
+            if cohere_api_key or self.cohere_reranker.available:
+                tasks.append(self.cohere_reranker.rerank(
+                    chunks, query, len(chunks), cohere_model,
+                    api_key=cohere_api_key, base_url=cohere_base_url
+                ))
+                reranker_names.append("cohere")
         
-        if use_jina and self.jina_reranker.available:
-            tasks.append(self.jina_reranker.rerank(chunks, query, len(chunks)))
-            reranker_names.append("jina")
+        if use_jina:
+            jina_api_key = self._get_config_value(config, "Jina API Key", None)
+            jina_base_url = self._get_config_value(config, "Jina Base URL", None)
+            if jina_api_key or self.jina_reranker.available:
+                tasks.append(self.jina_reranker.rerank(
+                    chunks, query, len(chunks),
+                    api_key=jina_api_key, base_url=jina_base_url
+                ))
+                reranker_names.append("jina")
         
-        if use_voyageai and self.voyageai_reranker.available:
-            tasks.append(self.voyageai_reranker.rerank(chunks, query, len(chunks)))
-            reranker_names.append("voyageai")
+        if use_voyageai:
+            voyageai_api_key = self._get_config_value(config, "VoyageAI API Key", None)
+            voyageai_base_url = self._get_config_value(config, "VoyageAI Base URL", None)
+            if voyageai_api_key or self.voyageai_reranker.available:
+                tasks.append(self.voyageai_reranker.rerank(
+                    chunks, query, len(chunks),
+                    api_key=voyageai_api_key, base_url=voyageai_base_url
+                ))
+                reranker_names.append("voyageai")
         
-        if use_contextualai and self.contextualai_reranker.available:
+        if use_contextualai:
             contextualai_model = self._get_config_value(config, "ContextualAI Model", "ctxl-rerank-v2-instruct-multilingual")
             contextualai_instruction = self._get_config_value(config, "ContextualAI Instruction", None)
-            tasks.append(self.contextualai_reranker.rerank(chunks, query, len(chunks), contextualai_model, contextualai_instruction))
-            reranker_names.append("contextualai")
+            contextualai_api_key = self._get_config_value(config, "ContextualAI API Key", None)
+            contextualai_base_url = self._get_config_value(config, "ContextualAI Base URL", None)
+            if contextualai_api_key or self.contextualai_reranker.available:
+                tasks.append(self.contextualai_reranker.rerank(
+                    chunks, query, len(chunks), contextualai_model, contextualai_instruction,
+                    api_key=contextualai_api_key, base_url=contextualai_base_url
+                ))
+                reranker_names.append("contextualai")
         
         if not tasks:
             # Nenhum reranker habilitado, retorna original
@@ -1412,28 +1539,44 @@ class RerankerPlugin:
             current_chunks = chunks
         
         # Fase 2: APIs em cascade (se habilitadas)
-        if use_cohere and self.cohere_reranker.available:
+        if use_cohere:
             cohere_model = self._get_config_value(config, "Cohere Model", "rerank-english-v3.0")
-            current_chunks = await self.cohere_reranker.rerank(
-                current_chunks, query, top_k, cohere_model
-            )
+            cohere_api_key = self._get_config_value(config, "Cohere API Key", None)
+            cohere_base_url = self._get_config_value(config, "Cohere Base URL", None)
+            if cohere_api_key or self.cohere_reranker.available:
+                current_chunks = await self.cohere_reranker.rerank(
+                    current_chunks, query, top_k, cohere_model,
+                    api_key=cohere_api_key, base_url=cohere_base_url
+                )
         
-        if use_jina and self.jina_reranker.available:
-            current_chunks = await self.jina_reranker.rerank(
-                current_chunks, query, top_k
-            )
+        if use_jina:
+            jina_api_key = self._get_config_value(config, "Jina API Key", None)
+            jina_base_url = self._get_config_value(config, "Jina Base URL", None)
+            if jina_api_key or self.jina_reranker.available:
+                current_chunks = await self.jina_reranker.rerank(
+                    current_chunks, query, top_k,
+                    api_key=jina_api_key, base_url=jina_base_url
+                )
         
-        if use_voyageai and self.voyageai_reranker.available:
-            current_chunks = await self.voyageai_reranker.rerank(
-                current_chunks, query, top_k
-            )
+        if use_voyageai:
+            voyageai_api_key = self._get_config_value(config, "VoyageAI API Key", None)
+            voyageai_base_url = self._get_config_value(config, "VoyageAI Base URL", None)
+            if voyageai_api_key or self.voyageai_reranker.available:
+                current_chunks = await self.voyageai_reranker.rerank(
+                    current_chunks, query, top_k,
+                    api_key=voyageai_api_key, base_url=voyageai_base_url
+                )
         
-        if use_contextualai and self.contextualai_reranker.available:
+        if use_contextualai:
             contextualai_model = self._get_config_value(config, "ContextualAI Model", "ctxl-rerank-v2-instruct-multilingual")
             contextualai_instruction = self._get_config_value(config, "ContextualAI Instruction", None)
-            current_chunks = await self.contextualai_reranker.rerank(
-                current_chunks, query, top_k, contextualai_model, contextualai_instruction
-            )
+            contextualai_api_key = self._get_config_value(config, "ContextualAI API Key", None)
+            contextualai_base_url = self._get_config_value(config, "ContextualAI Base URL", None)
+            if contextualai_api_key or self.contextualai_reranker.available:
+                current_chunks = await self.contextualai_reranker.rerank(
+                    current_chunks, query, top_k, contextualai_model, contextualai_instruction,
+                    api_key=contextualai_api_key, base_url=contextualai_base_url
+                )
         
         return current_chunks[:top_k]
     
