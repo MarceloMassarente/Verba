@@ -252,7 +252,6 @@ class EntityAwareRetriever(Retriever):
         # Adiciona configurações do Reranker Plugin
         try:
             from verba_extensions.plugins.reranker import RerankerPlugin
-            from goldenverba.components.types import InputConfig
             reranker_plugin = RerankerPlugin()
             reranker_config = reranker_plugin.config
             # Mescla configurações do reranker no config do retriever

@@ -351,18 +351,18 @@ class CohereReranker(BaseReranker):
                         retryable_status_codes=[429, 500, 502, 503, 504],
                         operation_name=f"Cohere Rerank API (batch {i//batch_size + 1})"
                     )
-                        
-                        # Cohere retorna resultados com índices e scores
-                        reranked_indices = result.get("results", [])
-                        
-                        # Ordena por score (maior primeiro)
-                        reranked_indices.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
-                        
-                        # Mapeia de volta para chunks
-                        for item in reranked_indices[:top_k]:
-                            index = item.get("index", 0)
-                            if 0 <= index < len(batch_chunks):
-                                all_results.append((item.get("relevance_score", 0), batch_chunks[index]))
+                    
+                    # Cohere retorna resultados com índices e scores
+                    reranked_indices = result.get("results", [])
+                    
+                    # Ordena por score (maior primeiro)
+                    reranked_indices.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+                    
+                    # Mapeia de volta para chunks
+                    for item in reranked_indices[:top_k]:
+                        index = item.get("index", 0)
+                        if 0 <= index < len(batch_chunks):
+                            all_results.append((item.get("relevance_score", 0), batch_chunks[index]))
             
             # Ordena todos os resultados e retorna top_k
             all_results.sort(key=lambda x: x[0], reverse=True)
@@ -443,19 +443,19 @@ class JinaReranker(BaseReranker):
                     retryable_status_codes=[429, 500, 502, 503, 504],
                     operation_name="Jina Rerank API"
                 )
-                    
-                    # Jina retorna resultados com índices e scores
-                    reranked_results = result.get("results", [])
-                    
-                    # Ordena por score (maior primeiro)
-                    reranked_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-                    
-                    # Mapeia de volta para chunks
-                    reranked_chunks = []
-                    for item in reranked_results[:top_k]:
-                        index = item.get("index", 0)
-                        if 0 <= index < len(chunks):
-                            reranked_chunks.append(chunks[index])
+                
+                # Jina retorna resultados com índices e scores
+                reranked_results = result.get("results", [])
+                
+                # Ordena por score (maior primeiro)
+                reranked_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+                
+                # Mapeia de volta para chunks
+                reranked_chunks = []
+                for item in reranked_results[:top_k]:
+                    index = item.get("index", 0)
+                    if 0 <= index < len(chunks):
+                        reranked_chunks.append(chunks[index])
                     
                     logger.info(f"JinaReranker rerankou {len(reranked_chunks)} chunks")
                     return reranked_chunks
@@ -532,22 +532,22 @@ class VoyageAIReranker(BaseReranker):
                     retryable_status_codes=[429, 500, 502, 503, 504],
                     operation_name="VoyageAI Rerank API"
                 )
-                    
+                
                 # VoyageAI retorna resultados com índices e scores
                 reranked_results = result.get("results", [])
-                    
-                    # Ordena por score (maior primeiro)
-                    reranked_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-                    
-                    # Mapeia de volta para chunks
-                    reranked_chunks = []
-                    for item in reranked_results[:top_k]:
-                        index = item.get("index", 0)
-                        if 0 <= index < len(chunks):
-                            reranked_chunks.append(chunks[index])
-                    
-                    logger.info(f"VoyageAIReranker rerankou {len(reranked_chunks)} chunks")
-                    return reranked_chunks
+                
+                # Ordena por score (maior primeiro)
+                reranked_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+                
+                # Mapeia de volta para chunks
+                reranked_chunks = []
+                for item in reranked_results[:top_k]:
+                    index = item.get("index", 0)
+                    if 0 <= index < len(chunks):
+                        reranked_chunks.append(chunks[index])
+                
+                logger.info(f"VoyageAIReranker rerankou {len(reranked_chunks)} chunks")
+                return reranked_chunks
                     
         except Exception as e:
             logger.error(f"Erro ao rerankear com VoyageAI: {e}")
@@ -693,18 +693,18 @@ class ContextualAIReranker(BaseReranker):
                     
                     # Contextual AI retorna resultados com índices e relevance_score
                     reranked_results = result.get("results", [])
-                        
-                        # Ordena por score (maior primeiro)
-                        reranked_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
-                        
-                        # Mapeia de volta para chunks
-                        for item in reranked_results:
-                            index = item.get("index", 0)
-                            # Ajusta índice para o batch atual
-                            original_index = i + index
-                            if 0 <= original_index < len(chunks):
-                                score = item.get("relevance_score", 0)
-                                all_results.append((score, chunks[original_index]))
+                    
+                    # Ordena por score (maior primeiro)
+                    reranked_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+                    
+                    # Mapeia de volta para chunks
+                    for item in reranked_results:
+                        index = item.get("index", 0)
+                        # Ajusta índice para o batch atual
+                        original_index = i + index
+                        if 0 <= original_index < len(chunks):
+                            score = item.get("relevance_score", 0)
+                            all_results.append((score, chunks[original_index]))
             
             # Ordena todos os resultados e retorna top_k
             all_results.sort(key=lambda x: x[0], reverse=True)
