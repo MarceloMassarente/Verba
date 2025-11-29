@@ -179,6 +179,13 @@ class EntityAwareRetriever(Retriever):
             disables=["Enable Entity Filter"],
             warning="Entity Filter será desabilitado automaticamente (redundante com Two-Phase Search)",
         )
+        self.config["Two-Phase Search Filter Level"] = InputConfig(
+            type="dropdown",
+            value="chunk",
+            description="Filter level for Phase 1: 'chunk' filters individual chunks, 'document' filters entire documents (better context, less fragmentation)",
+            values=["chunk", "document"],
+            block="search_mode",
+        )
         self.config["Enable Multi-Vector Search"] = InputConfig(
             type="bool",
             value=False,
@@ -522,6 +529,420 @@ class EntityAwareRetriever(Retriever):
             traceback.print_exc()
             return []
     
+    async def _execute_two_phase_search_document_level(
+        self,
+        client,
+        weaviate_manager,
+        embedder: str,
+        query: str,
+        search_query: str,
+        vector: List[float],
+        entity_ids: List[str],
+        entity_texts: List[str],
+        semantic_terms: List[str],
+        detected_frameworks: List[str],
+        detected_companies: List[str],
+        detected_sectors: List[str],
+        combined_filter,
+        lang_filter,
+        temporal_filter,
+        framework_filter,
+        limit_mode: str,
+        limit: int,
+        labels: List[str],
+        document_uuids: List[str],
+        rewritten_alpha: float,
+        enable_query_expansion: bool,
+        enable_multi_vector: bool,
+        vectors_to_search: List[str],
+        cache_ttl: int,
+        debug_info: Dict[str, Any],
+        rag_config: Optional[Dict[str, Any]] = None
+    ) -> List[Any]:
+        """
+        Executa Two-Phase Search com filtro por DOCUMENTOS (não chunks):
+        Fase 1: Encontra documentos que contêm entidades (subespaço documental)
+        Fase 2: Busca semanticamente dentro de TODOS os chunks desses documentos
+        
+        Vantagens:
+        - ✅ Mantém contexto completo dos documentos
+        - ✅ Evita fragmentação artificial
+        - ✅ Preserva relacionamentos entre chunks
+        - ✅ Melhor para evitar contaminação de documentos irrelevantes
+        """
+        
+        try:
+            from verba_extensions.utils.document_entity_filter import (
+                get_documents_by_multiple_entities
+            )
+            from verba_extensions.compatibility.weaviate_imports import Filter
+            
+            # FASE 1: Filtrar DOCUMENTOS que contêm entidades (não chunks)
+            msg.info(f"  🔍 Fase 1 (Document-Level): Filtrando documentos por entidades...")
+            
+            normalized = weaviate_manager._normalize_embedder_name(embedder)
+            collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+            
+            # Coletar todas as entidades para buscar documentos
+            entities_to_search = []
+            
+            if entity_ids:
+                entities_to_search.extend(entity_ids)
+                msg.info(f"    Buscando documentos com entity_ids: {entity_ids}")
+            
+            if entity_texts:
+                # entity_texts podem ser nomes de entidades ou IDs
+                # Tentar usar ambos
+                entities_to_search.extend(entity_texts)
+                msg.info(f"    Buscando documentos com entity_texts: {entity_texts}")
+            
+            if not entities_to_search:
+                msg.warn(f"    Fase 1: Nenhuma entidade detectada para filtrar documentos")
+                return []
+            
+            # Buscar documentos que contêm QUALQUER uma das entidades
+            # (documento pode ter Apple OU Microsoft, não precisa ter ambas)
+            phase1_doc_uuids = await get_documents_by_multiple_entities(
+                client=client,
+                collection_name=collection_name,
+                entity_ids=entities_to_search,
+                require_all=False,  # Documento precisa ter QUALQUER entidade, não todas
+                limit=1000  # Buscar até 1000 chunks para extrair documentos
+            )
+            
+            if not phase1_doc_uuids:
+                msg.warn(f"    Fase 1: Nenhum documento encontrado com entidades {entities_to_search}")
+                return []
+            
+            msg.good(f"    Fase 1: {len(phase1_doc_uuids)} documentos no subespaço")
+            debug_info["two_phase_search"]["phase1_results"] = len(phase1_doc_uuids)
+            debug_info["two_phase_search"]["filter_level"] = "document"
+            
+            # Combinar com document_uuids já filtrados (se houver)
+            if document_uuids:
+                phase1_doc_uuids = list(set(phase1_doc_uuids) & set(document_uuids))
+                if not phase1_doc_uuids:
+                    msg.warn(f"    Fase 1: Nenhum documento após combinar com filtros existentes")
+                    return []
+                msg.info(f"    Fase 1: {len(phase1_doc_uuids)} documentos após combinar com filtros")
+            
+            # 🎯 NOVO: Identificar chunks específicos que mencionam entidades para boost de proximidade
+            # Isso ajuda a encontrar chunks adjacentes que podem conter o assunto pesquisado
+            entity_chunk_positions = {}  # {doc_uuid: [chunk_ids]}
+            try:
+                collection = client.collections.get(collection_name)
+                
+                # Buscar chunks que mencionam as entidades nos documentos filtrados
+                entity_chunk_filter_list = [
+                    Filter.by_property("doc_uuid").contains_any(phase1_doc_uuids)
+                ]
+                
+                if entity_ids:
+                    entity_filter = Filter.by_property("section_entity_ids").contains_any(entity_ids)
+                    entity_chunk_filter_list.append(entity_filter)
+                elif entity_texts:
+                    entity_filter = Filter.by_property("entities_local_ids").contains_any(entity_texts)
+                    entity_chunk_filter_list.append(entity_filter)
+                
+                if len(entity_chunk_filter_list) > 1:
+                    entity_chunk_filter = Filter.all_of(entity_chunk_filter_list)
+                else:
+                    entity_chunk_filter = entity_chunk_filter_list[0] if entity_chunk_filter_list else None
+                
+                if entity_chunk_filter:
+                    entity_chunks_response = await collection.query.fetch_objects(
+                        filters=entity_chunk_filter,
+                        limit=500,  # Buscar até 500 chunks com entidades
+                        return_properties=["doc_uuid", "chunk_id"]
+                    )
+                    
+                    # Agrupar por documento
+                    for chunk_obj in entity_chunks_response.objects:
+                        doc_uuid = str(chunk_obj.properties.get("doc_uuid", ""))
+                        chunk_id = chunk_obj.properties.get("chunk_id")
+                        
+                        if doc_uuid and chunk_id is not None:
+                            try:
+                                chunk_id_int = int(float(chunk_id))  # Converter para int
+                                if doc_uuid not in entity_chunk_positions:
+                                    entity_chunk_positions[doc_uuid] = []
+                                entity_chunk_positions[doc_uuid].append(chunk_id_int)
+                            except (ValueError, TypeError):
+                                continue  # Ignorar chunk_id inválido
+                    
+                    # Remover duplicatas e ordenar
+                    for doc_uuid in entity_chunk_positions:
+                        entity_chunk_positions[doc_uuid] = sorted(list(set(entity_chunk_positions[doc_uuid])))
+                    
+                    if entity_chunk_positions:
+                        total_entity_chunks = sum(len(ids) for ids in entity_chunk_positions.values())
+                        msg.info(f"    📍 Identificados {total_entity_chunks} chunks com entidades em {len(entity_chunk_positions)} documentos (para boost de proximidade)")
+            except Exception as e:
+                msg.debug(f"    Aviso: Não foi possível identificar chunks com entidades para boost de proximidade: {str(e)}")
+                entity_chunk_positions = {}
+            
+            # FASE 2: Busca Semântica dentro de TODOS os chunks dos documentos filtrados
+            msg.info(f"  🎯 Fase 2: Busca semântica em TODOS os chunks dos {len(phase1_doc_uuids)} documentos...")
+            
+            # Query Expansion (Fase 2: Temas)
+            expanded_queries_phase2 = [search_query]  # Fallback
+            
+            if enable_query_expansion:
+                try:
+                    from verba_extensions.plugins.query_expander import QueryExpanderPlugin
+                    query_expander = QueryExpanderPlugin(cache_ttl_seconds=cache_ttl)
+                    expanded_queries_phase2 = await query_expander.expand_query_for_themes(search_query, use_cache=True)
+                    msg.info(f"    Query Expansion (Fase 2): {len(expanded_queries_phase2)} variações")
+                    debug_info["query_expansion_phase2"] = expanded_queries_phase2
+                except Exception as e:
+                    msg.debug(f"    Query Expansion não disponível: {str(e)}")
+            
+            # Usar primeira variação expandida (ou query original)
+            phase2_query = expanded_queries_phase2[0] if expanded_queries_phase2 else search_query
+            
+            # Construir filtro para Fase 2: documentos filtrados + outros filtros
+            phase2_filter_list = [
+                Filter.by_property("doc_uuid").contains_any(phase1_doc_uuids)  # ← Filtra por DOCUMENTOS!
+            ]
+            
+            if temporal_filter:
+                phase2_filter_list.append(temporal_filter)
+            if framework_filter:
+                phase2_filter_list.append(framework_filter)
+            if lang_filter:
+                phase2_filter_list.append(lang_filter)
+            
+            phase2_filter = Filter.all_of(phase2_filter_list) if len(phase2_filter_list) > 1 else phase2_filter_list[0]
+            
+            # Multi-Vector Search ou Single Named Vector na Fase 2
+            if enable_multi_vector and len(vectors_to_search) >= 2:
+                try:
+                    from verba_extensions.plugins.multi_vector_searcher import MultiVectorSearcher
+                    from goldenverba.components.managers import EmbeddingManager
+                    
+                    # Gerar embedding da query
+                    embedding_manager = EmbeddingManager()
+                    
+                    if rag_config:
+                        query_vector_phase2 = await embedding_manager.vectorize_query(
+                            embedder=embedder,
+                            content=phase2_query,
+                            rag_config=rag_config
+                        )
+                    else:
+                        if embedder not in embedding_manager.embedders:
+                            raise Exception(f"Embedder {embedder} não encontrado")
+                        
+                        embedder_obj = embedding_manager.embedders[embedder]
+                        embedder_config = {}
+                        query_embeddings = await embedder_obj.vectorize(embedder_config, [phase2_query])
+                        if not query_embeddings or len(query_embeddings) == 0:
+                            raise Exception("Falha ao gerar embedding da query")
+                        query_vector_phase2 = query_embeddings[0]
+                    
+                    # Configurar fusion type
+                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
+                    
+                    # Configurar query_properties para BM25 boosting
+                    query_properties = ["content", "title^2"]
+                    
+                    # Executar multi-vector search
+                    multi_vector_searcher = MultiVectorSearcher()
+                    result = await multi_vector_searcher.search_multi_vector(
+                        client=client,
+                        collection_name=collection_name,
+                        query=phase2_query,
+                        query_vector=query_vector_phase2,
+                        vectors=vectors_to_search,
+                        filters=phase2_filter,
+                        limit=limit,
+                        alpha=rewritten_alpha,
+                        fusion_type=fusion_type,
+                        query_properties=query_properties
+                    )
+                    
+                    if result and result.get("results"):
+                        phase2_uuids = [r.get("_uuid") for r in result["results"] if r.get("_uuid")]
+                        
+                        if phase2_uuids:
+                            collection = client.collections.get(collection_name)
+                            phase2_objects = await collection.query.fetch_objects(
+                                filters=Filter.by_property("uuid").contains_any(phase2_uuids)
+                            )
+                            
+                            if phase2_objects and hasattr(phase2_objects, 'objects'):
+                                phase2_chunks = phase2_objects.objects
+                                
+                                # 🎯 APLICAR BOOST DE PROXIMIDADE também no multi-vector
+                                if entity_chunk_positions:
+                                    boosted_chunks = self._apply_proximity_boost(
+                                        phase2_chunks, 
+                                        entity_chunk_positions,
+                                        proximity_window=2
+                                    )
+                                    phase2_chunks = boosted_chunks[:limit]  # Limitar ao número solicitado
+                                    msg.info(f"    📍 Boost de proximidade aplicado (multi-vector)")
+                                
+                                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados (multi-vector)")
+                                debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+                                debug_info["two_phase_search"]["fusion_type"] = fusion_type
+                                if entity_chunk_positions:
+                                    debug_info["two_phase_search"]["proximity_boost_applied"] = True
+                                
+                                return phase2_chunks
+                except Exception as e:
+                    msg.warn(f"    Fase 2: Erro em multi-vector search: {str(e)}")
+            
+            # Fallback: busca híbrida simples na Fase 2
+            target_vector_phase2 = None
+            if len(vectors_to_search) == 1:
+                target_vector_phase2 = vectors_to_search[0]
+                msg.info(f"    Fase 2: Usando target_vector único: {target_vector_phase2}")
+            
+            # Busca híbrida normal dentro dos documentos filtrados
+            # Aumentar limit temporariamente para ter mais chunks para aplicar boost de proximidade
+            phase2_limit = limit * 2 if entity_chunk_positions else limit  # Buscar mais se temos chunks com entidades
+            
+            phase2_chunks = await weaviate_manager.hybrid_chunks_with_filter(
+                client=client,
+                embedder=embedder,
+                query=phase2_query,
+                vector=vector,
+                limit_mode=limit_mode,
+                limit=phase2_limit,
+                labels=labels,
+                document_uuids=phase1_doc_uuids,  # ← Filtrar por documentos, não por UUIDs de chunks
+                filters=phase2_filter,
+                alpha=rewritten_alpha,
+                target_vector=target_vector_phase2,
+            )
+            
+            if phase2_chunks:
+                # 🎯 APLICAR BOOST DE PROXIMIDADE: Priorizar chunks adjacentes aos que mencionam entidades
+                if entity_chunk_positions:
+                    boosted_chunks = self._apply_proximity_boost(
+                        phase2_chunks, 
+                        entity_chunk_positions,
+                        proximity_window=2  # Considerar chunks ±2 posições
+                    )
+                    phase2_chunks = boosted_chunks
+                    
+                    # Limitar ao número original solicitado
+                    phase2_chunks = phase2_chunks[:limit]
+                    
+                    # Log apenas se houver boost aplicado
+                    if len(boosted_chunks) != len(phase2_chunks):
+                        msg.info(f"    📍 Boost de proximidade aplicado: priorizou chunks próximos aos que mencionam entidades")
+                
+                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados dos {len(phase1_doc_uuids)} documentos")
+                debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+                if entity_chunk_positions:
+                    debug_info["two_phase_search"]["proximity_boost_applied"] = True
+                return phase2_chunks
+            else:
+                msg.warn(f"    Fase 2: Nenhum chunk retornado")
+                return []
+                
+        except Exception as e:
+            msg.warn(f"  Erro em Two-Phase Search (Document-Level): {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _apply_proximity_boost(
+        self,
+        chunks: List[Any],
+        entity_chunk_positions: Dict[str, List[int]],
+        proximity_window: int = 2
+    ) -> List[Any]:
+        """
+        Aplica boost de proximidade aos chunks: prioriza chunks que estão próximos
+        aos chunks que mencionam entidades.
+        
+        Exemplo:
+        - Chunk 1: Menciona "Apple" (chunk_id=0)
+        - Chunk 2: Fala sobre "governança" (chunk_id=1, não menciona Apple)
+        - Chunk 3: Fala sobre "inovação" (chunk_id=2)
+        
+        Com proximity_window=2:
+        - Chunk 2 (id=1) está a ±1 de chunk 0 → BOOST ALTO
+        - Chunk 3 (id=2) está a ±2 de chunk 0 → BOOST MÉDIO
+        
+        Args:
+            chunks: Lista de chunks retornados da busca semântica
+            entity_chunk_positions: {doc_uuid: [chunk_ids]} - Posições dos chunks com entidades
+            proximity_window: Janela de proximidade (chunks ±N posições)
+        
+        Returns:
+            Lista de chunks reordenada com boost de proximidade aplicado
+        """
+        if not chunks or not entity_chunk_positions:
+            return chunks
+        
+        try:
+            # Criar lista de (score_boosted, chunk) para reordenar
+            boosted_chunks = []
+            
+            for chunk in chunks:
+                if not hasattr(chunk, 'properties'):
+                    boosted_chunks.append((0.0, chunk))
+                    continue
+                
+                doc_uuid = str(chunk.properties.get("doc_uuid", ""))
+                chunk_id_raw = chunk.properties.get("chunk_id")
+                
+                if not doc_uuid or chunk_id_raw is None:
+                    boosted_chunks.append((0.0, chunk))
+                    continue
+                
+                try:
+                    chunk_id = int(float(chunk_id_raw))
+                except (ValueError, TypeError):
+                    boosted_chunks.append((0.0, chunk))
+                    continue
+                
+                # Calcular boost baseado em proximidade
+                proximity_boost = 0.0
+                
+                if doc_uuid in entity_chunk_positions:
+                    entity_chunk_ids = entity_chunk_positions[doc_uuid]
+                    
+                    # Verificar proximidade a qualquer chunk com entidade
+                    for entity_chunk_id in entity_chunk_ids:
+                        distance = abs(chunk_id - entity_chunk_id)
+                        
+                        if distance == 0:
+                            # Chunk é o próprio chunk com entidade
+                            proximity_boost = max(proximity_boost, 1.0)
+                        elif distance <= proximity_window:
+                            # Boost decresce com a distância
+                            # Distância 1: boost 0.8, Distância 2: boost 0.5
+                            boost_value = 1.0 - (distance * 0.3)
+                            proximity_boost = max(proximity_boost, max(0.0, boost_value))
+                
+                # Score original do chunk (se disponível)
+                original_score = 0.0
+                if hasattr(chunk, 'metadata') and hasattr(chunk.metadata, 'score'):
+                    original_score = float(chunk.metadata.score) if chunk.metadata.score else 0.0
+                
+                # Score combinado: 70% original + 30% boost de proximidade
+                # Isso garante que chunks semanticamente relevantes ainda sejam priorizados
+                combined_score = (original_score * 0.7) + (proximity_boost * 0.3)
+                
+                boosted_chunks.append((combined_score, chunk))
+            
+            # Ordenar por score combinado (maior primeiro)
+            boosted_chunks.sort(key=lambda x: x[0], reverse=True)
+            
+            # Retornar apenas os chunks (sem scores)
+            return [chunk for _, chunk in boosted_chunks]
+            
+        except Exception as e:
+            msg.debug(f"    Erro ao aplicar boost de proximidade: {str(e)}")
+            # Em caso de erro, retornar chunks originais
+            return chunks
+    
     def _check_named_vectors_enabled(self) -> bool:
         """
         Verifica se Named Vectors estão habilitados globalmente.
@@ -701,6 +1122,36 @@ class EntityAwareRetriever(Retriever):
         
         return any(keyword in query_lower for keyword in aggregation_keywords)
     
+    def _detect_document_listing_query(self, query: str) -> bool:
+        """
+        Detecta queries que pedem listagem de documentos.
+        
+        Padrões que indicam listagem:
+        - "quais documentos"
+        - "liste documentos"
+        - "documentos que têm"
+        - "quais ... têm ... framework"
+        - "documentos com ... framework"
+        
+        Args:
+            query: Query do usuário
+        
+        Returns:
+            True se é query de listagem de documentos
+        """
+        import re
+        query_lower = query.lower()
+        patterns = [
+            r"quais documentos",
+            r"liste documentos", 
+            r"documentos que",
+            r"quais .* têm .* framework",
+            r"documentos com .* framework",
+            r"documentos.*framework",
+            r"lista.*documentos.*framework"
+        ]
+        return any(re.search(pattern, query_lower) for pattern in patterns)
+    
     def _extract_group_by_from_query(self, query: str) -> Optional[List[str]]:
         """
         Extrai propriedades para group_by da query.
@@ -731,7 +1182,36 @@ class EntityAwareRetriever(Retriever):
             if term in query_lower:
                 group_by.append(property_name)
         
+        # Se é query de listagem de documentos, adicionar doc_uuid
+        if self._detect_document_listing_query(query):
+            if "doc_uuid" not in group_by:
+                group_by.append("doc_uuid")
+        
         return group_by if group_by else None
+    
+    def _format_document_list_result(self, documents_info: List[Dict], query: str) -> List[Chunk]:
+        """
+        Formata resultado de listagem de documentos como chunks para LLM.
+        
+        Args:
+            documents_info: Lista de dicionários com informações dos documentos
+            query: Query original do usuário
+        
+        Returns:
+            Lista de chunks sintéticos com lista formatada
+        """
+        formatted_text = f"Documentos encontrados para a query '{query}':\n\n"
+        for i, doc in enumerate(documents_info, 1):
+            formatted_text += f"{i}. {doc['title']} ({doc['chunk_count']} chunks)\n"
+        
+        # Retornar como chunk para compatibilidade com pipeline
+        synthetic_chunk = Chunk(
+            content=formatted_text,
+            chunk_id=0,
+            start_i=0,
+            end_i=len(formatted_text)
+        )
+        return [synthetic_chunk]
     
     async def retrieve(
         self,
@@ -822,9 +1302,12 @@ class EntityAwareRetriever(Retriever):
         
         # 0.5. VERIFICAR SE É QUERY DE AGREGAÇÃO
         is_aggregation_query = False
+        is_document_listing_query = False
         if enable_aggregation:
             is_aggregation_query = self._detect_aggregation_query(query)
-            if is_aggregation_query:
+            is_document_listing_query = self._detect_document_listing_query(query)
+            
+            if is_aggregation_query or is_document_listing_query:
                 try:
                     # Normalizar nome da collection
                     normalized = weaviate_manager._normalize_embedder_name(embedder)
@@ -832,19 +1315,110 @@ class EntityAwareRetriever(Retriever):
                     
                     # Executar aggregation
                     from verba_extensions.utils.aggregation_wrapper import get_aggregation_wrapper
+                    from verba_extensions.utils.framework_detector import get_framework_detector
                     aggregation_wrapper = get_aggregation_wrapper()
                     
                     # Detectar propriedades para group_by
                     group_by = self._extract_group_by_from_query(query)
                     
-                    # Executar aggregation
-                    result = await aggregation_wrapper.aggregate_over_all(
-                        client=client,
-                        collection_name=collection_name,
-                        group_by=group_by,
-                        total_count=True,
-                        use_http_fallback=True
-                    )
+                    # Detectar frameworks para aplicar filtros (se necessário)
+                    framework_filter = None
+                    if is_document_listing_query:
+                        try:
+                            framework_detector = get_framework_detector()
+                            framework_data = await framework_detector.detect_frameworks(query)
+                            detected_frameworks = framework_data.get("frameworks", [])
+                            detected_companies = framework_data.get("companies", [])
+                            detected_sectors = framework_data.get("sectors", [])
+                            
+                            # Construir filtros de framework se detectados
+                            framework_filters = []
+                            if detected_frameworks:
+                                framework_filters.append(
+                                    Filter.by_property("frameworks").contains_any(detected_frameworks)
+                                )
+                            if detected_companies:
+                                framework_filters.append(
+                                    Filter.by_property("companies").contains_any(detected_companies)
+                                )
+                            if detected_sectors:
+                                framework_filters.append(
+                                    Filter.by_property("sectors").contains_any(detected_sectors)
+                                )
+                            
+                            if len(framework_filters) == 1:
+                                framework_filter = framework_filters[0]
+                            elif len(framework_filters) > 1:
+                                framework_filter = Filter.all_of(framework_filters)
+                        except Exception as e:
+                            msg.debug(f"  Erro ao detectar frameworks para listagem (não crítico): {str(e)}")
+                    
+                    # Executar aggregation (com filtros se necessário)
+                    if framework_filter:
+                        result = await aggregation_wrapper.aggregate_with_filters(
+                            client=client,
+                            collection_name=collection_name,
+                            filters=framework_filter,
+                            group_by=group_by,
+                            total_count=True,
+                            use_http_fallback=True
+                        )
+                    else:
+                        result = await aggregation_wrapper.aggregate_over_all(
+                            client=client,
+                            collection_name=collection_name,
+                            group_by=group_by,
+                            total_count=True,
+                            use_http_fallback=True
+                        )
+                    
+                    # Se group_by contém doc_uuid, processar listagem de documentos
+                    if group_by and "doc_uuid" in group_by:
+                        documents_info = []
+                        
+                        # Lidar com resultado do SDK (objeto) ou HTTP fallback (dict)
+                        groups = []
+                        if hasattr(result, 'groups'):
+                            # Resultado do SDK (objeto)
+                            groups = result.groups
+                        elif isinstance(result, dict) and 'data' in result:
+                            # Resultado do HTTP fallback (formato GraphQL)
+                            groups = result.get('data', {}).get('Aggregate', {}).get(collection_name, [])
+                        elif isinstance(result, dict) and 'groups' in result:
+                            # Resultado do HTTP fallback (formato direto)
+                            groups = result.get('groups', [])
+                        
+                        for group in groups:
+                            # Extrair doc_uuid (pode ser objeto ou dict)
+                            if isinstance(group, dict):
+                                grouped_by = group.get('groupedBy', {})
+                                if isinstance(grouped_by, dict):
+                                    doc_uuid = grouped_by.get('value') or grouped_by.get('doc_uuid')
+                                else:
+                                    doc_uuid = str(grouped_by)
+                                chunk_count = group.get('total_count') or group.get('count', 0)
+                            else:
+                                # Objeto do SDK
+                                doc_uuid = group.grouped_by.value if hasattr(group.grouped_by, 'value') else str(group.grouped_by)
+                                chunk_count = group.total_count if hasattr(group, 'total_count') else (group.count if hasattr(group, 'count') else 0)
+                            
+                            if not doc_uuid:
+                                continue
+                            
+                            # Buscar título do documento
+                            doc = await weaviate_manager.get_document(client, doc_uuid)
+                            if doc:
+                                documents_info.append({
+                                    "doc_uuid": str(doc_uuid),
+                                    "title": doc.get("title", "Sem título"),
+                                    "chunk_count": chunk_count,
+                                    "metadata": doc.get("metadata", {})
+                                })
+                        
+                        if documents_info:
+                            # Retornar formato estruturado para LLM
+                            msg.good(f"  ✅ Listagem de documentos: {len(documents_info)} documentos encontrados")
+                            return self._format_document_list_result(documents_info, query)
                     
                     # Converter resultado para formato de chunks (para compatibilidade)
                     # Retornar resultado formatado
@@ -857,6 +1431,7 @@ class EntityAwareRetriever(Retriever):
                 except Exception as e:
                     msg.warn(f"  ⚠️ Erro ao executar aggregation: {str(e)}, usando busca normal")
                     is_aggregation_query = False
+                    is_document_listing_query = False
         
         # 0. QUERY BUILDING (antes de parsing) - QueryBuilder inteligente com schema
         rewritten_query = query
@@ -1492,6 +2067,131 @@ class EntityAwareRetriever(Retriever):
             filters_list.append(framework_filter)
             # Log já foi feito acima
         
+        # 2.5. FILTROS V019 (se habilitado e collection suporta)
+        v019_filter = None
+        builder_v019_filters = query_filters_from_builder.get("slide_position") or query_filters_from_builder.get("slide_type") or query_filters_from_builder.get("pattern_genetics") or query_filters_from_builder.get("reusability_score") or query_filters_from_builder.get("visual_archetype") or query_filters_from_builder.get("semantic_bridge_quality")
+        
+        if builder_v019_filters:
+            try:
+                from verba_extensions.integration.schema_validator import collection_has_v019_properties
+                
+                # Normalizar nome da collection
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                # Verifica se collection tem propriedades V019
+                has_v019_props = await collection_has_v019_properties(client, collection_name)
+                
+                if has_v019_props:
+                    v019_filters = []
+                    
+                    # Filtro por slide_position
+                    slide_position = query_filters_from_builder.get("slide_position")
+                    if slide_position:
+                        v019_filters.append(
+                            Filter.by_property("slide_position").equal(slide_position)
+                        )
+                        msg.info(f"  ✅ Filtro V019 (slide_position): {slide_position}")
+                    
+                    # Filtro por slide_type
+                    slide_type = query_filters_from_builder.get("slide_type")
+                    if slide_type:
+                        v019_filters.append(
+                            Filter.by_property("slide_type").equal(slide_type)
+                        )
+                        msg.info(f"  ✅ Filtro V019 (slide_type): {slide_type}")
+                    
+                    # Filtro por pattern_genetics
+                    pattern_genetics = query_filters_from_builder.get("pattern_genetics")
+                    if pattern_genetics:
+                        if isinstance(pattern_genetics, list):
+                            v019_filters.append(
+                                Filter.by_property("pattern_genetics").contains_any(pattern_genetics)
+                            )
+                        else:
+                            v019_filters.append(
+                                Filter.by_property("pattern_genetics").contains_any([pattern_genetics])
+                            )
+                        msg.info(f"  ✅ Filtro V019 (pattern_genetics): {pattern_genetics}")
+                    
+                    # Filtro por reusability_score (range)
+                    reusability_score = query_filters_from_builder.get("reusability_score")
+                    if reusability_score is not None:
+                        if isinstance(reusability_score, dict):
+                            min_score = reusability_score.get("min")
+                            max_score = reusability_score.get("max")
+                            if min_score is not None and max_score is not None:
+                                v019_filters.append(
+                                    Filter.by_property("reusability_score").greater_or_equal(min_score) &
+                                    Filter.by_property("reusability_score").less_or_equal(max_score)
+                                )
+                            elif min_score is not None:
+                                v019_filters.append(
+                                    Filter.by_property("reusability_score").greater_or_equal(min_score)
+                                )
+                            elif max_score is not None:
+                                v019_filters.append(
+                                    Filter.by_property("reusability_score").less_or_equal(max_score)
+                                )
+                        else:
+                            # Valor único (igual a)
+                            v019_filters.append(
+                                Filter.by_property("reusability_score").equal(float(reusability_score))
+                            )
+                        msg.info(f"  ✅ Filtro V019 (reusability_score): {reusability_score}")
+                    
+                    # Filtro por visual_archetype
+                    visual_archetype = query_filters_from_builder.get("visual_archetype")
+                    if visual_archetype:
+                        v019_filters.append(
+                            Filter.by_property("visual_archetype").equal(visual_archetype)
+                        )
+                        msg.info(f"  ✅ Filtro V019 (visual_archetype): {visual_archetype}")
+                    
+                    # Filtro por semantic_bridge_quality (range)
+                    semantic_bridge_quality = query_filters_from_builder.get("semantic_bridge_quality")
+                    if semantic_bridge_quality is not None:
+                        if isinstance(semantic_bridge_quality, dict):
+                            min_quality = semantic_bridge_quality.get("min")
+                            max_quality = semantic_bridge_quality.get("max")
+                            if min_quality is not None and max_quality is not None:
+                                v019_filters.append(
+                                    Filter.by_property("semantic_bridge_quality").greater_or_equal(min_quality) &
+                                    Filter.by_property("semantic_bridge_quality").less_or_equal(max_quality)
+                                )
+                            elif min_quality is not None:
+                                v019_filters.append(
+                                    Filter.by_property("semantic_bridge_quality").greater_or_equal(min_quality)
+                                )
+                            elif max_quality is not None:
+                                v019_filters.append(
+                                    Filter.by_property("semantic_bridge_quality").less_or_equal(max_quality)
+                                )
+                        else:
+                            # Valor único (igual a)
+                            v019_filters.append(
+                                Filter.by_property("semantic_bridge_quality").equal(float(semantic_bridge_quality))
+                            )
+                        msg.info(f"  ✅ Filtro V019 (semantic_bridge_quality): {semantic_bridge_quality}")
+                    
+                    # Combina filtros V019 (AND - todos devem estar presentes)
+                    if len(v019_filters) == 1:
+                        v019_filter = v019_filters[0]
+                    elif len(v019_filters) > 1:
+                        v019_filter = Filter.all_of(v019_filters)
+                    
+                    if v019_filter:
+                        msg.good(f"  ✅ Filtro V019 aplicado com {len(v019_filters)} condições")
+                else:
+                    msg.info(f"  ℹ️ Collection não tem propriedades V019 - filtros não serão aplicados")
+            except Exception as e:
+                msg.debug(f"  Erro ao aplicar filtro V019 (não crítico): {str(e)}")
+        
+        # Filtro V019: aplicar se disponível e collection suporta
+        if v019_filter:
+            filters_list.append(v019_filter)
+            # Log já foi feito acima
+        
         if len(filters_list) == 1:
             combined_filter = filters_list[0]
         elif len(filters_list) > 1:
@@ -1629,35 +2329,72 @@ class EntityAwareRetriever(Retriever):
             try:
                 # Se Two-Phase Search está ativo, executar Fase 1 primeiro
                 if should_use_two_phase:
-                    chunks = await self._execute_two_phase_search(
-                        client=client,
-                        weaviate_manager=weaviate_manager,
-                        embedder=embedder,
-                        query=query,
-                        search_query=search_query,
-                        vector=vector,
-                        entity_ids=entity_ids,
-                        entity_texts=entity_texts,
-                        semantic_terms=semantic_terms,
-                        detected_frameworks=detected_frameworks,
-                        detected_companies=detected_companies,
-                        detected_sectors=detected_sectors,
-                        combined_filter=combined_filter,
-                        lang_filter=lang_filter,
-                        temporal_filter=temporal_filter,
-                        framework_filter=framework_filter,
-                        limit_mode=limit_mode,
-                        limit=limit,
-                        labels=labels,
-                        document_uuids=document_uuids,
-                        rewritten_alpha=rewritten_alpha,
-                        enable_query_expansion=enable_query_expansion,
-                        enable_multi_vector=enable_multi_vector,
-                        vectors_to_search=vectors_to_search,
-                        cache_ttl=cache_ttl,
-                        debug_info=debug_info,
-                        rag_config=rag_config
-                    )
+                    # Verificar qual nível de filtro usar (chunk ou document)
+                    filter_level_config = config.get("Two-Phase Search Filter Level", {})
+                    filter_level = filter_level_config.value if isinstance(filter_level_config, InputConfig) else "chunk"
+                    
+                    if filter_level == "document":
+                        msg.info(f"  📄 Two-Phase Search: Modo Document-Level (filtra por documentos, melhor contexto)")
+                        chunks = await self._execute_two_phase_search_document_level(
+                            client=client,
+                            weaviate_manager=weaviate_manager,
+                            embedder=embedder,
+                            query=query,
+                            search_query=search_query,
+                            vector=vector,
+                            entity_ids=entity_ids,
+                            entity_texts=entity_texts,
+                            semantic_terms=semantic_terms,
+                            detected_frameworks=detected_frameworks,
+                            detected_companies=detected_companies,
+                            detected_sectors=detected_sectors,
+                            combined_filter=combined_filter,
+                            lang_filter=lang_filter,
+                            temporal_filter=temporal_filter,
+                            framework_filter=framework_filter,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            rewritten_alpha=rewritten_alpha,
+                            enable_query_expansion=enable_query_expansion,
+                            enable_multi_vector=enable_multi_vector,
+                            vectors_to_search=vectors_to_search,
+                            cache_ttl=cache_ttl,
+                            debug_info=debug_info,
+                            rag_config=rag_config
+                        )
+                    else:  # chunk (padrão)
+                        msg.info(f"  🔍 Two-Phase Search: Modo Chunk-Level (filtra por chunks individuais)")
+                        chunks = await self._execute_two_phase_search(
+                            client=client,
+                            weaviate_manager=weaviate_manager,
+                            embedder=embedder,
+                            query=query,
+                            search_query=search_query,
+                            vector=vector,
+                            entity_ids=entity_ids,
+                            entity_texts=entity_texts,
+                            semantic_terms=semantic_terms,
+                            detected_frameworks=detected_frameworks,
+                            detected_companies=detected_companies,
+                            detected_sectors=detected_sectors,
+                            combined_filter=combined_filter,
+                            lang_filter=lang_filter,
+                            temporal_filter=temporal_filter,
+                            framework_filter=framework_filter,
+                            limit_mode=limit_mode,
+                            limit=limit,
+                            labels=labels,
+                            document_uuids=document_uuids,
+                            rewritten_alpha=rewritten_alpha,
+                            enable_query_expansion=enable_query_expansion,
+                            enable_multi_vector=enable_multi_vector,
+                            vectors_to_search=vectors_to_search,
+                            cache_ttl=cache_ttl,
+                            debug_info=debug_info,
+                            rag_config=rag_config
+                        )
                     
                     if chunks:
                         msg.good(f"  ✅ Two-Phase Search retornou {len(chunks)} chunks")
@@ -2183,6 +2920,16 @@ class EntityAwareRetriever(Retriever):
                             chunk_obj.meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
                         except:
                             chunk_obj.meta = {}
+                        
+                        # Copia propriedades V019 de chunk.properties para chunk.meta (para reranker acessar)
+                        v019_properties = [
+                            "slide_position", "slide_type", "pattern_genetics", 
+                            "reusability_score", "visual_archetype", "semantic_bridge_quality"
+                        ]
+                        for prop in v019_properties:
+                            if prop in chunk.properties and chunk.properties[prop] is not None:
+                                chunk_obj.meta[prop] = chunk.properties[prop]
+                        
                         # Copia outros campos relevantes
                         chunk_obj.uuid = chunk.uuid
                         chunk_obj.doc_uuid = chunk.properties.get("doc_uuid")

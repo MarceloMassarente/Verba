@@ -48,6 +48,10 @@ from goldenverba.server.types import (
     GetAllSuggestionsPayload,
     DeleteSuggestionPayload,
     GetContentPayload,
+    DocumentSearchFilters,
+    DocumentByFrameworkPayload,
+    DocumentByCompanyPayload,
+    DocumentBySectorPayload,
     SetThemeConfigPayload,
     SetUserConfigPayload,
     SearchQueryPayload,
@@ -1249,6 +1253,417 @@ async def aggregate_query(payload: QueryPayload):
 
 
 ### DOCUMENT ENDPOINTS
+
+# Helper function para buscar documentos por propriedade (framework, company, sector)
+async def _get_documents_by_property(
+    property_name: str,  # "frameworks", "companies", "sectors"
+    property_value: str,
+    client: WeaviateAsyncClient,
+    weaviate_manager,
+    embedder: str = None
+) -> dict:
+    """
+    Helper para buscar documentos que contêm uma propriedade específica.
+    
+    Args:
+        property_name: Nome da propriedade ("frameworks", "companies", "sectors")
+        property_value: Valor a buscar (ex: "SWOT Analysis", "Apple")
+        client: Cliente Weaviate
+        weaviate_manager: Instância do WeaviateManager
+        embedder: Nome do embedder (opcional, usa padrão se None)
+    
+    Returns:
+        Dict com informações dos documentos encontrados
+    """
+    from verba_extensions.utils.aggregation_wrapper import get_aggregation_wrapper
+    from verba_extensions.compatibility.weaviate_imports import Filter
+    
+    # Obter collection name
+    if embedder:
+        normalized = weaviate_manager._normalize_embedder_name(embedder)
+        collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+    else:
+        # Usar primeiro embedder disponível como padrão
+        if not weaviate_manager.embedding_table:
+            return {
+                "error": "Nenhum embedder configurado",
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+        collection_name = list(weaviate_manager.embedding_table.values())[0]
+    
+    # Verificar se collection existe
+    try:
+        if not await client.collections.exists(collection_name):
+            return {
+                "error": f"Collection {collection_name} não encontrada",
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+    except Exception as e:
+        return {
+            "error": f"Erro ao verificar collection: {str(e)}",
+            "total_documents": 0,
+            "total_chunks": 0,
+            "documents": []
+        }
+    
+    # Executar aggregation com filtro
+    aggregation_wrapper = get_aggregation_wrapper()
+    result = await aggregation_wrapper.aggregate_with_filters(
+        client=client,
+        collection_name=collection_name,
+        filters=Filter.by_property(property_name).contains_any([property_value]),
+        group_by=["doc_uuid"],
+        total_count=True,
+        use_http_fallback=True
+    )
+    
+    # Buscar títulos dos documentos
+    documents = []
+    
+    # Lidar com resultado do SDK (objeto) ou HTTP fallback (dict)
+    groups = []
+    total_chunks = 0
+    
+    if hasattr(result, 'groups'):
+        # Resultado do SDK (objeto)
+        groups = result.groups
+        total_chunks = result.total_count if hasattr(result, 'total_count') else 0
+    elif isinstance(result, dict) and 'data' in result:
+        # Resultado do HTTP fallback (formato GraphQL)
+        groups = result.get('data', {}).get('Aggregate', {}).get(collection_name, [])
+        total_chunks = result.get('data', {}).get('Aggregate', {}).get('meta', {}).get('count', 0)
+    elif isinstance(result, dict) and 'groups' in result:
+        # Resultado do HTTP fallback (formato direto)
+        groups = result.get('groups', [])
+        total_chunks = result.get('total_count', 0)
+    
+    for group in groups:
+        # Extrair doc_uuid (pode ser objeto ou dict)
+        if isinstance(group, dict):
+            grouped_by = group.get('groupedBy', {})
+            if isinstance(grouped_by, dict):
+                doc_uuid = grouped_by.get('value') or grouped_by.get('doc_uuid')
+            else:
+                doc_uuid = str(grouped_by)
+            chunk_count = group.get('total_count') or group.get('count', 0)
+        else:
+            # Objeto do SDK
+            doc_uuid = group.grouped_by.value if hasattr(group.grouped_by, 'value') else str(group.grouped_by)
+            chunk_count = group.total_count if hasattr(group, 'total_count') else (group.count if hasattr(group, 'count') else 0)
+        
+        if not doc_uuid:
+            continue
+        
+        # Buscar documento
+        doc = await weaviate_manager.get_document(client, doc_uuid)
+        if doc:
+            documents.append({
+                "doc_uuid": str(doc_uuid),
+                "title": doc.get("title", "Sem título"),
+                "chunk_count": chunk_count,
+                "metadata": doc.get("metadata", {})
+            })
+    
+    return {
+        property_name: property_value,
+        "total_documents": len(documents),
+        "total_chunks": total_chunks,
+        "documents": documents
+    }
+
+
+@app.post("/api/documents/by-framework/{framework}")
+async def get_documents_by_framework(
+    framework: str,
+    payload: DocumentByFrameworkPayload
+):
+    """
+    Lista documentos que contêm um framework específico.
+    
+    Args:
+        framework: Nome do framework (ex: "SWOT Analysis")
+        credentials: Credenciais do Weaviate
+    
+    Returns:
+    {
+        "framework": "SWOT Analysis",
+        "total_documents": 5,
+        "total_chunks": 23,
+        "documents": [
+            {
+                "doc_uuid": "...",
+                "title": "Análise Estratégica",
+                "chunk_count": 5,
+                "metadata": {...}
+            }
+        ]
+    }
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        result = await _get_documents_by_property(
+            property_name="frameworks",
+            property_value=framework,
+            client=client,
+            weaviate_manager=manager.weaviate_manager
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        msg.warn(f"Erro ao buscar documentos por framework: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "framework": framework,
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+        )
+
+
+@app.post("/api/documents/by-company/{company}")
+async def get_documents_by_company(
+    company: str,
+    payload: DocumentByCompanyPayload
+):
+    """
+    Lista documentos que mencionam uma empresa específica.
+    
+    Args:
+        company: Nome da empresa (ex: "Apple")
+        credentials: Credenciais do Weaviate
+    
+    Returns:
+        JSON com lista de documentos
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        result = await _get_documents_by_property(
+            property_name="companies",
+            property_value=company,
+            client=client,
+            weaviate_manager=manager.weaviate_manager
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        msg.warn(f"Erro ao buscar documentos por empresa: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "company": company,
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+        )
+
+
+@app.post("/api/documents/by-sector/{sector}")
+async def get_documents_by_sector(
+    sector: str,
+    payload: DocumentBySectorPayload
+):
+    """
+    Lista documentos que mencionam um setor específico.
+    
+    Args:
+        sector: Nome do setor (ex: "technology")
+        credentials: Credenciais do Weaviate
+    
+    Returns:
+        JSON com lista de documentos
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        result = await _get_documents_by_property(
+            property_name="sectors",
+            property_value=sector,
+            client=client,
+            weaviate_manager=manager.weaviate_manager
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        msg.warn(f"Erro ao buscar documentos por setor: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "sector": sector,
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+        )
+
+
+@app.post("/api/documents/search")
+async def search_documents(
+    payload: DocumentSearchFilters
+):
+    """
+    Busca documentos com múltiplos filtros.
+    
+    Body:
+    {
+        "frameworks": ["SWOT"],
+        "companies": ["Apple"],
+        "sectors": ["technology"],
+        "limit": 10,
+        "offset": 0
+    }
+    
+    Returns:
+        JSON com lista de documentos que atendem aos filtros
+    """
+    try:
+        from verba_extensions.utils.aggregation_wrapper import get_aggregation_wrapper
+        from verba_extensions.compatibility.weaviate_imports import Filter
+        
+        client = await client_manager.connect(payload.credentials)
+        weaviate_manager = manager.weaviate_manager
+        
+        # Obter collection name (usar primeiro embedder disponível)
+        if not weaviate_manager.embedding_table:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Nenhum embedder configurado",
+                    "total_documents": 0,
+                    "total_chunks": 0,
+                    "documents": []
+                }
+            )
+        
+        collection_name = list(weaviate_manager.embedding_table.values())[0]
+        
+        # Construir filtros combinados
+        framework_filters = []
+        if payload.frameworks:
+            framework_filters.append(
+                Filter.by_property("frameworks").contains_any(payload.frameworks)
+            )
+        if payload.companies:
+            framework_filters.append(
+                Filter.by_property("companies").contains_any(payload.companies)
+            )
+        if payload.sectors:
+            framework_filters.append(
+                Filter.by_property("sectors").contains_any(payload.sectors)
+            )
+        
+        # Combinar filtros (AND - todos devem estar presentes)
+        combined_filter = None
+        if len(framework_filters) == 1:
+            combined_filter = framework_filters[0]
+        elif len(framework_filters) > 1:
+            combined_filter = Filter.all_of(framework_filters)
+        
+        if not combined_filter:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Nenhum filtro especificado",
+                    "total_documents": 0,
+                    "total_chunks": 0,
+                    "documents": []
+                }
+            )
+        
+        # Executar aggregation
+        aggregation_wrapper = get_aggregation_wrapper()
+        result = await aggregation_wrapper.aggregate_with_filters(
+            client=client,
+            collection_name=collection_name,
+            filters=combined_filter,
+            group_by=["doc_uuid"],
+            total_count=True,
+            use_http_fallback=True
+        )
+        
+        # Buscar títulos dos documentos
+        documents = []
+        
+        # Lidar com resultado do SDK (objeto) ou HTTP fallback (dict)
+        groups = []
+        total_chunks = 0
+        
+        if hasattr(result, 'groups'):
+            # Resultado do SDK (objeto)
+            groups = result.groups
+            total_chunks = result.total_count if hasattr(result, 'total_count') else 0
+        elif isinstance(result, dict) and 'data' in result:
+            # Resultado do HTTP fallback (formato GraphQL)
+            groups = result.get('data', {}).get('Aggregate', {}).get(collection_name, [])
+            total_chunks = result.get('data', {}).get('Aggregate', {}).get('meta', {}).get('count', 0)
+        elif isinstance(result, dict) and 'groups' in result:
+            # Resultado do HTTP fallback (formato direto)
+            groups = result.get('groups', [])
+            total_chunks = result.get('total_count', 0)
+        
+        # Aplicar paginação
+        start_idx = payload.offset
+        end_idx = start_idx + payload.limit
+        groups_slice = groups[start_idx:end_idx] if groups else []
+        
+        for group in groups_slice:
+            # Extrair doc_uuid (pode ser objeto ou dict)
+            if isinstance(group, dict):
+                grouped_by = group.get('groupedBy', {})
+                if isinstance(grouped_by, dict):
+                    doc_uuid = grouped_by.get('value') or grouped_by.get('doc_uuid')
+                else:
+                    doc_uuid = str(grouped_by)
+                chunk_count = group.get('total_count') or group.get('count', 0)
+            else:
+                # Objeto do SDK
+                doc_uuid = group.grouped_by.value if hasattr(group.grouped_by, 'value') else str(group.grouped_by)
+                chunk_count = group.total_count if hasattr(group, 'total_count') else (group.count if hasattr(group, 'count') else 0)
+            
+            if not doc_uuid:
+                continue
+            
+            # Buscar documento
+            doc = await weaviate_manager.get_document(client, doc_uuid)
+            if doc:
+                documents.append({
+                    "doc_uuid": str(doc_uuid),
+                    "title": doc.get("title", "Sem título"),
+                    "chunk_count": chunk_count,
+                    "metadata": doc.get("metadata", {})
+                })
+        
+        return JSONResponse(content={
+            "filters": {
+                "frameworks": payload.frameworks or [],
+                "companies": payload.companies or [],
+                "sectors": payload.sectors or []
+            },
+            "total_documents": len(groups),
+            "total_chunks": total_chunks,
+            "limit": payload.limit,
+            "offset": payload.offset,
+            "documents": documents
+        })
+        
+    except Exception as e:
+        msg.warn(f"Erro ao buscar documentos: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "total_documents": 0,
+                "total_chunks": 0,
+                "documents": []
+            }
+        )
 
 
 # Retrieve specific document based on UUID

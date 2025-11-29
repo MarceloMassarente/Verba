@@ -82,6 +82,96 @@ async def _map_framework_properties_to_weaviate(
         msg.debug(f"[Framework-Mapping] Erro ao mapear frameworks (não crítico): {str(e)}")
         return chunk_properties
 
+
+async def _map_v019_properties_to_weaviate(
+    client,
+    collection_name: str,
+    chunk_properties: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Mapeia propriedades V019 do chunk.meta para propriedades do Weaviate.
+    
+    Se collection tem propriedades V019, adiciona diretamente.
+    Caso contrário, salva em meta JSON como fallback.
+    
+    Propriedades V019:
+    - semantic_bridge_quality: Qualidade da ponte semântica (0.0-1.0)
+    - slide_position: Posição no deck (opening, diagnostic, etc.)
+    - slide_type: Tipo do slide (complex, simple, metadata)
+    - pattern_genetics: Array de componentes atômicos
+    - reusability_score: Score de reusabilidade (0-100)
+    - visual_archetype: Arquétipo visual (pyramid, matrix, etc.)
+    
+    Args:
+        client: Cliente Weaviate
+        collection_name: Nome da collection
+        chunk_properties: Propriedades do chunk (de chunk.to_json())
+    
+    Returns:
+        Propriedades atualizadas com V019
+    """
+    try:
+        from verba_extensions.integration.schema_validator import collection_has_v019_properties
+        
+        # Verifica se collection tem propriedades V019
+        has_v019_props = await collection_has_v019_properties(client, collection_name)
+        
+        if not has_v019_props:
+            # Collection não tem propriedades V019 - não faz nada (metadata fica em meta JSON)
+            return chunk_properties
+        
+        # Extrai meta do chunk
+        meta_str = chunk_properties.get("meta", "{}")
+        try:
+            meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+        except:
+            meta = {}
+        
+        # Extrai propriedades V019 do meta
+        # Pode vir de slides_metadata ou diretamente do meta
+        semantic_bridge_quality = meta.get("semantic_bridge_quality")
+        slide_position = meta.get("slide_position")
+        slide_type = meta.get("slide_type")
+        pattern_genetics = meta.get("pattern_genetics", [])
+        reusability_score = meta.get("reusability_score")
+        visual_archetype = meta.get("visual_archetype")
+        
+        # Se não encontrou diretamente, tenta extrair de slides_metadata
+        # (para chunks que correspondem a slides específicos)
+        if not any([semantic_bridge_quality, slide_position, slide_type, pattern_genetics, reusability_score, visual_archetype]):
+            slides_metadata = meta.get("slides_metadata", [])
+            if slides_metadata and len(slides_metadata) > 0:
+                # Usa metadata do primeiro slide (para chunks únicos)
+                # Para chunks múltiplos, o metadata já deveria estar no nível do chunk
+                first_slide = slides_metadata[0]
+                semantic_bridge_quality = first_slide.get("semantic_bridge_quality")
+                slide_position = first_slide.get("slide_position")
+                slide_type = first_slide.get("slide_type")
+                pattern_genetics = first_slide.get("pattern_genetics", [])
+                reusability_score = first_slide.get("reusability_score")
+                visual_archetype = first_slide.get("visual_archetype")
+        
+        # Adiciona propriedades V019 diretamente (collection já foi verificada)
+        if semantic_bridge_quality is not None:
+            chunk_properties["semantic_bridge_quality"] = float(semantic_bridge_quality)
+        if slide_position:
+            chunk_properties["slide_position"] = str(slide_position)
+        if slide_type:
+            chunk_properties["slide_type"] = str(slide_type)
+        if pattern_genetics:
+            chunk_properties["pattern_genetics"] = pattern_genetics if isinstance(pattern_genetics, list) else [pattern_genetics]
+        if reusability_score is not None:
+            chunk_properties["reusability_score"] = float(reusability_score)
+        if visual_archetype:
+            chunk_properties["visual_archetype"] = str(visual_archetype)
+        
+        return chunk_properties
+        
+    except Exception as e:
+        # Erro não crítico - retorna propriedades originais
+        msg.debug(f"[V019-Mapping] Erro ao mapear propriedades V019 (não crítico): {str(e)}")
+        return chunk_properties
+
 def cleanup_etl_state(doc_uuid: str):
     """
     Limpa estado global de ETL para garantir que próximos imports não sejam afetados.
@@ -229,15 +319,20 @@ def patch_weaviate_manager():
                     msg.warn(f"[ETL-POST] Erro ao tentar reconectar: {str(e)}")
                     return None
             
-            # Mapeia frameworks para propriedades do Weaviate ANTES de importar
-            # Verifica se collection tem propriedades de framework
+            # Mapeia frameworks e V019 para propriedades do Weaviate ANTES de importar
+            # Verifica se collection tem propriedades de framework e V019
             embedder_collection_name = self.embedding_table.get(embedder)
             has_framework_props = False
+            has_v019_props = False
             has_named_vectors = False
             if embedder_collection_name:
                 try:
-                    from verba_extensions.integration.schema_validator import collection_has_framework_properties
+                    from verba_extensions.integration.schema_validator import (
+                        collection_has_framework_properties,
+                        collection_has_v019_properties
+                    )
                     has_framework_props = await collection_has_framework_properties(client, embedder_collection_name)
+                    has_v019_props = await collection_has_v019_properties(client, embedder_collection_name)
                     
                     # Verifica se collection tem named vectors
                     try:
@@ -247,7 +342,7 @@ def patch_weaviate_manager():
                     except:
                         pass
                 except Exception as e:
-                    msg.debug(f"[Framework-Mapping] Erro ao verificar propriedades (não crítico): {str(e)}")
+                    msg.debug(f"[Mapping] Erro ao verificar propriedades (não crítico): {str(e)}")
             
             # Chama método original (NÃO retorna doc_uuid - método original não retorna)
             # Precisamos buscar doc_uuid após o import
@@ -259,11 +354,12 @@ def patch_weaviate_manager():
                 
                 # Armazena resultado da verificação para usar no patch
                 _has_framework_props = has_framework_props
+                _has_v019_props = has_v019_props
                 _has_named_vectors = has_named_vectors
                 _embedder_collection_name = embedder_collection_name
                 
                 def patched_data_object_init(self, *args, **kwargs):
-                    """Patch DataObject para mapear frameworks e named vectors antes de inserir"""
+                    """Patch DataObject para mapear frameworks, V019 e named vectors antes de inserir"""
                     # Chama init original
                     original_data_object_init(self, *args, **kwargs)
                     
@@ -290,6 +386,52 @@ def patch_weaviate_manager():
                                 self.properties["framework_confidence"] = framework_confidence
                         except Exception as e:
                             msg.debug(f"[Framework-Mapping] Erro ao mapear em DataObject (não crítico): {str(e)}")
+                    
+                    # Se collection tem propriedades V019, mapeia de meta para properties
+                    if _has_v019_props and hasattr(self, 'properties') and self.properties:
+                        try:
+                            # Mapeia propriedades V019 de meta para propriedades diretas
+                            meta_str = self.properties.get("meta", "{}")
+                            try:
+                                meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+                            except:
+                                meta = {}
+                            
+                            # Extrai propriedades V019
+                            semantic_bridge_quality = meta.get("semantic_bridge_quality")
+                            slide_position = meta.get("slide_position")
+                            slide_type = meta.get("slide_type")
+                            pattern_genetics = meta.get("pattern_genetics", [])
+                            reusability_score = meta.get("reusability_score")
+                            visual_archetype = meta.get("visual_archetype")
+                            
+                            # Se não encontrou diretamente, tenta extrair de slides_metadata
+                            if not any([semantic_bridge_quality, slide_position, slide_type, pattern_genetics, reusability_score, visual_archetype]):
+                                slides_metadata = meta.get("slides_metadata", [])
+                                if slides_metadata and len(slides_metadata) > 0:
+                                    first_slide = slides_metadata[0]
+                                    semantic_bridge_quality = first_slide.get("semantic_bridge_quality")
+                                    slide_position = first_slide.get("slide_position")
+                                    slide_type = first_slide.get("slide_type")
+                                    pattern_genetics = first_slide.get("pattern_genetics", [])
+                                    reusability_score = first_slide.get("reusability_score")
+                                    visual_archetype = first_slide.get("visual_archetype")
+                            
+                            # Adiciona diretamente às properties (collection já foi verificada)
+                            if semantic_bridge_quality is not None:
+                                self.properties["semantic_bridge_quality"] = float(semantic_bridge_quality)
+                            if slide_position:
+                                self.properties["slide_position"] = str(slide_position)
+                            if slide_type:
+                                self.properties["slide_type"] = str(slide_type)
+                            if pattern_genetics:
+                                self.properties["pattern_genetics"] = pattern_genetics if isinstance(pattern_genetics, list) else [pattern_genetics]
+                            if reusability_score is not None:
+                                self.properties["reusability_score"] = float(reusability_score)
+                            if visual_archetype:
+                                self.properties["visual_archetype"] = str(visual_archetype)
+                        except Exception as e:
+                            msg.debug(f"[V019-Mapping] Erro ao mapear V019 em DataObject (não crítico): {str(e)}")
                     
                     # Named vectors: adiciona textos especializados às properties
                     # (os vetores serão adicionados antes de criar o DataObject)

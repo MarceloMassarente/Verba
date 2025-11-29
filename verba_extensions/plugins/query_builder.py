@@ -792,6 +792,20 @@ IMPORTANTE:
   - Exemplo: "Steve Jobs e Microsoft" → entities: ["Steve Jobs", "Microsoft"]
 - Se mencionar data/ano, use filtro temporal (chunk_date)
 - Se mencionar idioma, use filtro de idioma (chunk_lang)
+- **PROPRIEDADES V019 (Consulting/Slides):**
+  - slide_position: Filtrar por posição no deck (opening, diagnostic, analysis, closing, etc.)
+    - Exemplo: "slides de diagnóstico" → filters: {"slide_position": "diagnostic"}
+    - Exemplo: "abertura da apresentação" → filters: {"slide_position": "opening"}
+  - slide_type: Filtrar por tipo de slide (complex, simple, metadata)
+    - Exemplo: "slides complexos" → filters: {"slide_type": "complex"}
+  - pattern_genetics: Filtrar por componentes atômicos identificados (array)
+    - Exemplo: "slides com radial hub" → filters: {"pattern_genetics": ["radial_hub"]}
+  - reusability_score: Filtrar por score de reusabilidade (0-100)
+    - Exemplo: "slides reutilizáveis acima de 80" → filters: {"reusability_score": {"min": 80}}
+  - visual_archetype: Filtrar por arquétipo visual (pyramid, matrix, flow, etc.)
+    - Exemplo: "slides tipo pirâmide" → filters: {"visual_archetype": "pyramid"}
+  - semantic_bridge_quality: Filtrar por qualidade da ponte semântica (0.0-1.0)
+    - Exemplo: "slides com alta qualidade semântica acima de 0.9" → filters: {"semantic_bridge_quality": {"min": 0.9}}
 - **SEMPRE expanda a query semântica** - adicione termos relacionados, sinônimos, conceitos
 - Gere query keyword otimizada para BM25 (termos-chave principais)
 
@@ -824,7 +838,13 @@ Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
         "date_range": {{"start": "2024-01-01", "end": "2024-12-31"}},
         "language": "pt",
         "labels": [],
-        "section_title": ""
+        "section_title": "",
+        "slide_position": null,
+        "slide_type": null,
+        "pattern_genetics": null,
+        "reusability_score": null,
+        "visual_archetype": null,
+        "semantic_bridge_quality": null
     }},
     "alpha": 0.6,
     "explanation": "Explicação da query: filtros aplicados, entidades detectadas, etc.",

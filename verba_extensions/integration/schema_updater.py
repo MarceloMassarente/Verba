@@ -185,6 +185,64 @@ def get_framework_properties():
     ]
 
 
+def get_v019_properties():
+    """
+    Retorna lista de propriedades específicas do sistema V019 para adicionar a collections.
+    
+    Propriedades específicas para documentos V019 (slides de consultoria):
+    - semantic_bridge_quality: Qualidade da ponte semântica (0.0-1.0)
+    - slide_position: Posição no deck (opening, diagnostic, analysis, etc.)
+    - slide_type: Tipo do slide (complex, simple, metadata)
+    - pattern_genetics: Componentes atômicos identificados (pattern DNA)
+    - reusability_score: Score de reusabilidade (0-100)
+    - visual_archetype: Arquétipo visual (pyramid, matrix, flow, etc.)
+    
+    NOTA: Essas propriedades são OPCIONAIS - chunks normais podem deixá-las vazias.
+    Schema V019-aware serve para AMBOS os casos (chunks normais e V019-aware).
+    
+    Returns:
+        Lista de Property objects do Weaviate
+    """
+    from weaviate.classes.config import Property, DataType
+    
+    return [
+        Property(
+            name="semantic_bridge_quality",
+            data_type=DataType.NUMBER,
+            description="Qualidade da ponte semântica (0.0-1.0) - opcional",
+        ),
+        Property(
+            name="slide_position",
+            data_type=DataType.TEXT,
+            description="Posição no deck (opening, diagnostic, analysis, etc.) - opcional",
+            index_filterable=True  # ⚡ Otimização: usado em filtering por posição narrativa
+        ),
+        Property(
+            name="slide_type",
+            data_type=DataType.TEXT,
+            description="Tipo do slide (complex, simple, metadata) - opcional",
+            index_filterable=True  # ⚡ Otimização: usado em filtering por tipo de slide
+        ),
+        Property(
+            name="pattern_genetics",
+            data_type=DataType.TEXT_ARRAY,
+            description="Componentes atômicos identificados (pattern DNA) - opcional",
+            index_filterable=True  # ⚡ Otimização: usado em filtering por pattern reusável
+        ),
+        Property(
+            name="reusability_score",
+            data_type=DataType.NUMBER,
+            description="Score de reusabilidade (0-100) - opcional",
+        ),
+        Property(
+            name="visual_archetype",
+            data_type=DataType.TEXT,
+            description="Arquétipo visual (pyramid, matrix, flow, etc.) - opcional",
+            index_filterable=True  # ⚡ Otimização: usado em filtering por arquétipo visual
+        ),
+    ]
+
+
 def get_named_vector_text_properties():
     """
     Retorna propriedades de texto que alimentam named vectors.
@@ -231,9 +289,10 @@ def get_all_embedding_properties(include_named_vectors: bool = True):
     Retorna TODAS as propriedades para collections de embedding.
     
     Schema completo serve para AMBOS:
-    - Chunks normais: deixam propriedades ETL/framework vazias
+    - Chunks normais: deixam propriedades ETL/framework/V019 vazias
     - Chunks ETL-aware: preenchem propriedades ETL
     - Chunks framework-aware: preenchem propriedades de framework
+    - Chunks V019-aware: preenchem propriedades V019 (semantic bridge, slide position, etc.)
     - Chunks com named vectors: preenchem concept_text, sector_text, company_text
     
     Args:
@@ -245,7 +304,8 @@ def get_all_embedding_properties(include_named_vectors: bool = True):
     properties = (
         get_verba_standard_properties() + 
         get_etl_properties() + 
-        get_framework_properties()
+        get_framework_properties() +
+        get_v019_properties()  # Adiciona propriedades V019
     )
     
     if include_named_vectors:

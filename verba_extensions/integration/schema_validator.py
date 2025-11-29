@@ -122,6 +122,28 @@ async def collection_has_framework_properties(client, collection_name: str) -> b
     return await collection_has_properties(client, collection_name, framework_props)
 
 
+async def collection_has_v019_properties(client, collection_name: str) -> bool:
+    """
+    Verifica se collection tem propriedades V019.
+    
+    Args:
+        client: Cliente Weaviate
+        collection_name: Nome da collection
+    
+    Returns:
+        True se collection tem propriedades V019
+    """
+    v019_props = [
+        "semantic_bridge_quality",
+        "slide_position",
+        "slide_type",
+        "pattern_genetics",
+        "reusability_score",
+        "visual_archetype"
+    ]
+    return await collection_has_properties(client, collection_name, v019_props)
+
+
 async def get_collection_properties(client, collection_name: str) -> List[str]:
     """
     Obtém lista de propriedades de uma collection.

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional, List
 from pydantic import BaseModel
 from enum import Enum
 
@@ -261,6 +261,30 @@ class SearchQueryPayload(BaseModel):
 
 class GetDocumentPayload(BaseModel):
     uuid: str
+    credentials: Credentials
+
+
+class DocumentByFrameworkPayload(BaseModel):
+    framework: str
+    credentials: Credentials
+
+
+class DocumentByCompanyPayload(BaseModel):
+    company: str
+    credentials: Credentials
+
+
+class DocumentBySectorPayload(BaseModel):
+    sector: str
+    credentials: Credentials
+
+
+class DocumentSearchFilters(BaseModel):
+    frameworks: Optional[List[str]] = None
+    companies: Optional[List[str]] = None
+    sectors: Optional[List[str]] = None
+    limit: int = 50
+    offset: int = 0
     credentials: Credentials
 
 

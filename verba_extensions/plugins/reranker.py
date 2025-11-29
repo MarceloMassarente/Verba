@@ -123,35 +123,121 @@ class MetadataReranker(BaseReranker):
         return sum(scores) if scores else 0.5
     
     def _score_by_metadata(self, chunk: Chunk, query: str) -> float:
-        """Calcula score baseado em metadata enriquecido."""
-        if not chunk.meta or "enriched" not in chunk.meta:
-            return 0.5
-        
-        enriched = chunk.meta.get("enriched", {})
+        """Calcula score baseado em metadata enriquecido e propriedades V019."""
         query_lower = query.lower()
         score = 0.0
+        has_metadata = False
         
-        # Match com empresas mencionadas
-        companies = enriched.get("companies", [])
-        for company in companies:
-            if company.lower() in query_lower:
-                score += 0.3
+        # 1. Metadata enriquecido tradicional (enriched)
+        if chunk.meta and "enriched" in chunk.meta:
+            has_metadata = True
+            enriched = chunk.meta.get("enriched", {})
+            
+            # Match com empresas mencionadas
+            companies = enriched.get("companies", [])
+            for company in companies:
+                if company.lower() in query_lower:
+                    score += 0.3
+            
+            # Match com tópicos
+            topics = enriched.get("key_topics", [])
+            for topic in topics:
+                if topic.lower() in query_lower:
+                    score += 0.2
+            
+            # Match com keywords
+            keywords = enriched.get("keywords", [])
+            matched_keywords = sum(1 for kw in keywords if kw.lower() in query_lower)
+            if keywords:
+                score += (matched_keywords / len(keywords)) * 0.2
+            
+            # Confidence score do enriched metadata
+            confidence = enriched.get("confidence_score", 0.8)
+            score += confidence * 0.2  # Reduzido de 0.3 para dar espaço para V019
         
-        # Match com tópicos
-        topics = enriched.get("key_topics", [])
-        for topic in topics:
-            if topic.lower() in query_lower:
-                score += 0.2
+        # 2. Propriedades V019 (se disponíveis)
+        # Verifica tanto em chunk.meta (se foram copiadas) quanto diretamente
+        v019_score = 0.0
+        v019_weight = 0.3  # Peso para propriedades V019
         
-        # Match com keywords
-        keywords = enriched.get("keywords", [])
-        matched_keywords = sum(1 for kw in keywords if kw.lower() in query_lower)
-        if keywords:
-            score += (matched_keywords / len(keywords)) * 0.2
+        # Extrai propriedades V019 do chunk.meta (se disponível)
+        slide_position = None
+        slide_type = None
+        pattern_genetics = []
+        reusability_score = None
+        visual_archetype = None
+        semantic_bridge_quality = None
         
-        # Confidence score do enriched metadata
-        confidence = enriched.get("confidence_score", 0.8)
-        score += confidence * 0.3
+        if chunk.meta:
+            slide_position = chunk.meta.get("slide_position")
+            slide_type = chunk.meta.get("slide_type")
+            pattern_genetics = chunk.meta.get("pattern_genetics", [])
+            reusability_score = chunk.meta.get("reusability_score")
+            visual_archetype = chunk.meta.get("visual_archetype")
+            semantic_bridge_quality = chunk.meta.get("semantic_bridge_quality")
+        
+        # Se não encontrou em chunk.meta, tenta extrair de slides_metadata
+        if not any([slide_position, slide_type, pattern_genetics, reusability_score, visual_archetype, semantic_bridge_quality]):
+            if chunk.meta and "slides_metadata" in chunk.meta:
+                slides_metadata = chunk.meta.get("slides_metadata", [])
+                if slides_metadata and len(slides_metadata) > 0:
+                    first_slide = slides_metadata[0]
+                    slide_position = first_slide.get("slide_position")
+                    slide_type = first_slide.get("slide_type")
+                    pattern_genetics = first_slide.get("pattern_genetics", [])
+                    reusability_score = first_slide.get("reusability_score")
+                    visual_archetype = first_slide.get("visual_archetype")
+                    semantic_bridge_quality = first_slide.get("semantic_bridge_quality")
+        
+        # Score V019 baseado em matches com a query
+        if slide_position:
+            # Match com posições do deck
+            position_keywords = ["opening", "diagnostic", "analysis", "closing", "abertura", "diagnóstico", "análise", "conclusão"]
+            if any(kw in query_lower and slide_position.lower() == kw for kw in position_keywords):
+                v019_score += 0.2
+                has_metadata = True
+        
+        if slide_type:
+            # Match com tipos de slide
+            type_keywords = ["complex", "simple", "metadata", "complexo", "simples"]
+            if any(kw in query_lower and slide_type.lower() == kw for kw in type_keywords):
+                v019_score += 0.15
+                has_metadata = True
+        
+        if pattern_genetics:
+            # Match com pattern genetics
+            for pattern in pattern_genetics:
+                if isinstance(pattern, str) and pattern.lower() in query_lower:
+                    v019_score += 0.2
+                    has_metadata = True
+                    break
+        
+        if visual_archetype:
+            # Match com arquétipos visuais
+            archetype_keywords = ["pyramid", "matrix", "flow", "pirâmide", "matriz", "fluxo"]
+            if any(kw in query_lower and visual_archetype.lower() == kw for kw in archetype_keywords):
+                v019_score += 0.15
+                has_metadata = True
+        
+        # Boost por qualidade semântica (se alta qualidade)
+        if semantic_bridge_quality is not None and semantic_bridge_quality > 0.8:
+            v019_score += 0.1
+            has_metadata = True
+        
+        # Boost por alta reusabilidade (se relevante para a query)
+        if reusability_score is not None and reusability_score > 80:
+            # Se query menciona "reusável", "reutilizável", "template", etc.
+            reusability_keywords = ["reus", "reutiliz", "template", "pattern", "padrão"]
+            if any(kw in query_lower for kw in reusability_keywords):
+                v019_score += 0.15
+                has_metadata = True
+        
+        # Adiciona score V019 ao score total
+        score += v019_score * v019_weight
+        
+        # Se não encontrou nenhum metadata, retorna score neutro
+        if not has_metadata:
+            return 0.5
         
         return self._normalize_score(score)
     
@@ -652,6 +738,40 @@ class ContextualAIReranker(BaseReranker):
                             meta_parts.append(f"Empresas: {', '.join(enriched['companies'][:3])}")
                         if "key_topics" in enriched:
                             meta_parts.append(f"Tópicos: {', '.join(enriched['key_topics'][:3])}")
+                    
+                    # Propriedades V019 (se disponíveis)
+                    v019_parts = []
+                    if "slide_position" in chunk.meta:
+                        v019_parts.append(f"Posição: {chunk.meta['slide_position']}")
+                    if "slide_type" in chunk.meta:
+                        v019_parts.append(f"Tipo: {chunk.meta['slide_type']}")
+                    if "visual_archetype" in chunk.meta:
+                        v019_parts.append(f"Arquétipo: {chunk.meta['visual_archetype']}")
+                    if "pattern_genetics" in chunk.meta:
+                        patterns = chunk.meta["pattern_genetics"]
+                        if isinstance(patterns, list) and patterns:
+                            v019_parts.append(f"Patterns: {', '.join(patterns[:2])}")
+                    if "reusability_score" in chunk.meta and chunk.meta["reusability_score"]:
+                        v019_parts.append(f"Reusabilidade: {chunk.meta['reusability_score']}%")
+                    if "semantic_bridge_quality" in chunk.meta and chunk.meta["semantic_bridge_quality"]:
+                        quality = chunk.meta["semantic_bridge_quality"]
+                        if quality > 0.8:
+                            v019_parts.append(f"Qualidade Alta")
+                    
+                    # Se não encontrou diretamente, tenta extrair de slides_metadata
+                    if not v019_parts and "slides_metadata" in chunk.meta:
+                        slides_metadata = chunk.meta.get("slides_metadata", [])
+                        if slides_metadata and len(slides_metadata) > 0:
+                            first_slide = slides_metadata[0]
+                            if first_slide.get("slide_position"):
+                                v019_parts.append(f"Posição: {first_slide['slide_position']}")
+                            if first_slide.get("slide_type"):
+                                v019_parts.append(f"Tipo: {first_slide['slide_type']}")
+                            if first_slide.get("visual_archetype"):
+                                v019_parts.append(f"Arquétipo: {first_slide['visual_archetype']}")
+                    
+                    if v019_parts:
+                        meta_parts.append(f"V019: {', '.join(v019_parts)}")
                     
                     chunk_metadata = " | ".join(meta_parts) if meta_parts else ""
                 

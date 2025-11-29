@@ -176,6 +176,96 @@ class FrameworkDetector:
         
         return result
     
+    def _estimate_token_count(self, text: str) -> int:
+        """
+        Estima número de tokens em um texto.
+        
+        Aproximação: 
+        - Português: ~2.5 caracteres por token
+        - Inglês: ~4 caracteres por token
+        - Usa média conservadora de 3 caracteres por token
+        """
+        # Conta caracteres (espaços também contam como tokens)
+        char_count = len(text)
+        # Aproximação conservadora: 3 chars por token (português tende a ter mais tokens por char)
+        estimated_tokens = char_count // 3
+        return estimated_tokens
+    
+    def _split_text_for_gliner(self, text: str, max_tokens: int = 350) -> List[str]:
+        """
+        Divide texto em chunks menores respeitando limite de tokens do GLiNER (384 tokens).
+        
+        Usa max_tokens=350 para deixar margem de segurança (384 - 10%).
+        Tenta dividir em delimitadores naturais (sentenças, parágrafos).
+        
+        Args:
+            text: Texto a dividir
+            max_tokens: Limite máximo de tokens por chunk (padrão: 350)
+        
+        Returns:
+            Lista de chunks de texto
+        """
+        # Se texto é pequeno, retorna como está
+        if self._estimate_token_count(text) <= max_tokens:
+            return [text]
+        
+        chunks = []
+        # Aproximação: max_chars = max_tokens * 3 (caracteres por token)
+        max_chars_per_chunk = max_tokens * 3
+        
+        # Divide o texto
+        current_pos = 0
+        text_length = len(text)
+        
+        while current_pos < text_length:
+            # Define fim do chunk
+            end_pos = min(current_pos + max_chars_per_chunk, text_length)
+            
+            # Se é o último chunk, pega o restante
+            if end_pos >= text_length:
+                chunk = text[current_pos:]
+                if chunk.strip():
+                    chunks.append(chunk)
+                break
+            
+            # Tenta encontrar delimitador natural antes do limite
+            # Prioridade: parágrafo > sentença > vírgula > espaço
+            
+            # 1. Tenta parágrafo (2 quebras de linha)
+            para_break = text.rfind('\n\n', current_pos, end_pos)
+            if para_break > current_pos + (max_chars_per_chunk * 0.5):  # Pelo menos 50% do chunk
+                end_pos = para_break + 2
+            else:
+                # 2. Tenta sentença (ponto seguido de espaço/quebra)
+                sent_break = max(
+                    text.rfind('. ', current_pos, end_pos),
+                    text.rfind('.\n', current_pos, end_pos),
+                    text.rfind('! ', current_pos, end_pos),
+                    text.rfind('? ', current_pos, end_pos)
+                )
+                if sent_break > current_pos + (max_chars_per_chunk * 0.6):  # Pelo menos 60% do chunk
+                    end_pos = sent_break + 2
+                else:
+                    # 3. Tenta vírgula
+                    comma_break = text.rfind(', ', current_pos, end_pos)
+                    if comma_break > current_pos + (max_chars_per_chunk * 0.7):  # Pelo menos 70% do chunk
+                        end_pos = comma_break + 2
+                    else:
+                        # 4. Fallback: espaço
+                        space_break = text.rfind(' ', current_pos, end_pos)
+                        if space_break > current_pos:
+                            end_pos = space_break + 1
+            
+            # Extrai chunk
+            chunk = text[current_pos:end_pos].strip()
+            if chunk:
+                chunks.append(chunk)
+            
+            # Move para próximo chunk
+            current_pos = end_pos
+        
+        return chunks if chunks else [text]
+    
     def _detect_frameworks_in_text(self, text: str) -> List[str]:
         """Detecta frameworks usando Gliner ou keyword matching com aliases"""
         detected_names = set()  # Nomes canônicos dos frameworks
@@ -186,8 +276,33 @@ class FrameworkDetector:
             try:
                 # Define labels para frameworks
                 labels = ["framework", "business model", "strategic framework"]
-                entities = self.gliner_model.predict_entities(text, labels, threshold=0.5)
+                
+                # Verifica se texto precisa ser dividido (limite GLiNER: 384 tokens)
+                estimated_tokens = self._estimate_token_count(text)
+                
+                if estimated_tokens > 350:  # Margem de segurança (350 < 384)
+                    # Divide texto em chunks menores
+                    text_chunks = self._split_text_for_gliner(text, max_tokens=350)
+                    # Log apenas se muito verbose (comentado para não poluir logs)
+                    # msg.info(f"[GLiNER] Texto longo ({estimated_tokens} tokens estimados) dividido em {len(text_chunks)} chunks")
+                    
+                    # Processa cada chunk separadamente
+                    all_entities = []
+                    for i, chunk in enumerate(text_chunks):
+                        try:
+                            chunk_entities = self.gliner_model.predict_entities(chunk, labels, threshold=0.5)
+                            all_entities.extend(chunk_entities)
+                            # Log apenas se muito verbose (comentado para não poluir logs)
+                            # msg.info(f"[GLiNER] Chunk {i+1}/{len(text_chunks)}: {len(chunk_entities)} entidades encontradas")
+                        except Exception as e:
+                            msg.warn(f"[GLiNER] Erro ao processar chunk {i+1}: {str(e)}")
+                    
+                    entities = all_entities
+                else:
+                    # Texto cabe no limite, processa normalmente
+                    entities = self.gliner_model.predict_entities(text, labels, threshold=0.5)
 
+                # Processa entidades encontradas (de todos os chunks ou único)
                 for entity in entities:
                     entity_text = entity.get("text", "").strip()
                     if entity_text:
@@ -199,7 +314,7 @@ class FrameworkDetector:
                                 detected_names.add(framework_name)
                                 break
             except Exception as e:
-                msg.debug(f"Erro ao usar Gliner para frameworks: {str(e)}")
+                msg.warn(f"Erro ao usar Gliner para frameworks: {str(e)}")
 
         # Keyword matching como fallback ou complemento
         # Prioriza aliases curtos sobre longos para evitar que palavras curtas sejam "mascaradas"
@@ -255,7 +370,7 @@ class FrameworkDetector:
                         if len(entity_text) > 2 and entity_text[0].isupper():
                             detected.add(entity_text)
             except Exception as e:
-                msg.debug(f"Erro ao usar spaCy para empresas: {str(e)}")
+                msg.warn(f"Erro ao usar spaCy para empresas: {str(e)}")
         
         # Fallback: detecta palavras capitalizadas que podem ser empresas
         # Padrão: palavras com inicial maiúscula seguidas de outras palavras capitalizadas
