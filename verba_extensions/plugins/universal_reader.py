@@ -3,12 +3,14 @@ Reader Universal A2 - Aplica ETL automaticamente em qualquer conteúdo
 Usa qualquer formato (PDF, DOCX, TXT, etc.) e garante ETL por chunk
 
 INTEGRAÇÃO TIKA: Usa Tika quando disponível para melhor extração e metadados
+INTEGRAÇÃO DOCLING: Usa Docling quando disponível para parsing estruturado com mapeamento por página
 """
 
 import os
 import requests
 import re
-from typing import List, Optional
+import base64
+from typing import List, Optional, Dict, Any
 from html import unescape
 from goldenverba.components.document import Document
 from goldenverba.components.interfaces import Reader
@@ -36,7 +38,7 @@ class UniversalA2Reader(Reader):
             ".txt", ".md", ".csv", ".json", ".pdf", 
             ".docx", ".xlsx", ".xls", ".html", ".htm"
         ]
-        self.description = "Processa qualquer arquivo e aplica ETL A2 automaticamente (NER + Section Scope por chunk). Usa Tika quando disponível para melhor extração e metadados."
+        self.description = "Processa qualquer arquivo e aplica ETL A2 automaticamente (NER + Section Scope por chunk). Usa Docling (parsing estruturado) ou Tika quando disponível para melhor extração e metadados."
         
         self.config["Enable ETL"] = InputConfig(
             type="bool",
@@ -58,8 +60,31 @@ class UniversalA2Reader(Reader):
             values=[],
         )
         
+        self.config["Use Docling When Available"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Usar Docling quando disponível para parsing estruturado com mapeamento por página (requer DOCLING_API_URL)",
+            values=[],
+        )
+        
+        self.config["Docling API URL"] = InputConfig(
+            type="text",
+            value=os.getenv("DOCLING_API_URL", ""),
+            description="URL da API Docling (ex: https://api.docling.ai/v1) ou configure DOCLING_API_URL env var",
+            values=[],
+        )
+        
+        self.config["Docling API Key"] = InputConfig(
+            type="password",
+            value=os.getenv("DOCLING_API_KEY", ""),
+            description="API Key do Docling (ou configure DOCLING_API_KEY env var)",
+            values=[],
+        )
+        
         self._tika_available = None
         self._tika_server = None
+        self._docling_available = None
+        self._docling_api_url = None
     
     def _check_tika_available(self) -> bool:
         """Verifica se Tika está disponível"""
@@ -165,6 +190,183 @@ class UniversalA2Reader(Reader):
             msg.warn(f"[UNIVERSAL-READER] Erro ao usar Tika: {str(e)}")
             return None, None
     
+    def _check_docling_available(self, api_url: str, api_key: str) -> bool:
+        """Verifica se Docling está disponível"""
+        if not api_url or not api_key:
+            return False
+        
+        if self._docling_available is not None:
+            return self._docling_available
+        
+        try:
+            # Verifica se API está acessível (endpoint de health ou similar)
+            # Por enquanto, apenas valida que URL e key estão configurados
+            self._docling_available = bool(api_url and api_key)
+            return self._docling_available
+        except:
+            self._docling_available = False
+            return False
+    
+    def _should_use_docling(self, extension: str, use_docling: bool, api_url: str, api_key: str) -> bool:
+        """Determina se deve usar Docling para este formato"""
+        if not use_docling or not self._check_docling_available(api_url, api_key):
+            return False
+        
+        # Formatos que se beneficiam muito do Docling (parsing estruturado)
+        docling_beneficial = ['.pdf', '.pptx', '.ppt', '.docx', '.doc']
+        if extension.lower() in docling_beneficial:
+            return True
+        
+        return False
+    
+    async def _extract_with_docling(self, content: bytes, api_url: str, api_key: str):
+        """
+        Extrai conteúdo usando Docling API seguindo práticas recomendadas.
+        Retorna (md_content, json_content, metadata) ou (None, None, None) em caso de erro.
+        """
+        import asyncio
+        import aiohttp
+        import base64
+        import json
+        
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._extract_with_docling_sync, content, api_url, api_key)
+    
+    def _extract_with_docling_sync(self, content: bytes, api_url: str, api_key: str):
+        """Implementação síncrona da extração com Docling"""
+        import requests
+        import json
+        import base64
+        
+        try:
+            # Endpoint da API Docling
+            # NOTA: Endpoint pode variar conforme versão da API Docling
+            # Ajustar conforme documentação oficial se necessário
+            parse_url = f"{api_url.rstrip('/')}/parse" if api_url else None
+            if not parse_url:
+                return None, None, None
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+            }
+            
+            # Prepara FormData com arquivo
+            files = {
+                "document": ("document", content, "application/octet-stream")
+            }
+            
+            # Payload seguindo práticas recomendadas
+            # Para multipart form-data, arrays podem precisar ser enviados como JSON string
+            # ou como campos repetidos - ajustar conforme documentação da API Docling
+            data = {
+                "target_type": "inbody",
+                "to_formats": json.dumps(["md", "json"]),  # JSON string para multipart
+                "do_ocr": "true",
+                "do_table_structure": "true",
+                "table_mode": "accurate",
+                "include_images": "false"
+            }
+            
+            # NOTA: Se a API Docling aceita array direto, pode tentar:
+            # data["to_formats"] = ["md", "json"]  # Array direto
+            # Mas requests pode não serializar corretamente em multipart
+            
+            msg.info(f"[UNIVERSAL-READER] Chamando Docling API: {parse_url}")
+            response = requests.post(parse_url, headers=headers, files=files, data=data, timeout=300)
+            
+            if response.status_code != 200:
+                msg.warn(f"[UNIVERSAL-READER] Docling API retornou status {response.status_code}")
+                return None, None, None
+            
+            result = response.json()
+            
+            # Extrai md_content e json_content
+            document = result.get("document", {})
+            md_content = document.get("md_content", "")
+            json_content = document.get("json_content", {})
+            
+            if not md_content:
+                msg.warn("[UNIVERSAL-READER] Docling não retornou md_content")
+                return None, None, None
+            
+            # Prepara metadados
+            metadata = {
+                "source_api": "docling",
+                "json_content": json_content,  # Preserva estrutura completa
+            }
+            
+            # Extrai informações de páginas se disponível
+            if json_content and isinstance(json_content, dict):
+                pages = json_content.get("pages", {})
+                texts = json_content.get("texts", [])
+                groups = json_content.get("groups", [])
+                tables = json_content.get("tables", [])
+                
+                metadata["docling_pages_count"] = len(pages)
+                metadata["docling_texts_count"] = len(texts)
+                metadata["docling_groups_count"] = len(groups)
+                metadata["docling_tables_count"] = len(tables)
+            
+            msg.info(f"[UNIVERSAL-READER] Docling extraiu: {len(md_content)} caracteres (md), JSON com {len(json_content) if json_content else 0} chaves")
+            
+            return md_content, json_content, metadata
+            
+        except Exception as e:
+            msg.warn(f"[UNIVERSAL-READER] Erro ao usar Docling: {str(e)}")
+            import traceback
+            msg.debug(f"Traceback Docling: {traceback.format_exc()}")
+            return None, None, None
+    
+    def _map_content_by_page(self, json_content: dict, md_content: str) -> dict:
+        """
+        Mapeia conteúdo por página usando texts[].prov[].page_no.
+        Retorna dict com {page_no: content_string}
+        """
+        if not json_content or not isinstance(json_content, dict):
+            return {}
+        
+        texts = json_content.get("texts", [])
+        pages = json_content.get("pages", {})
+        
+        if not texts:
+            return {}
+        
+        # Agrupa textos por página
+        texts_by_page = {}
+        for text_item in texts:
+            if not isinstance(text_item, dict):
+                continue
+            
+            prov = text_item.get("prov", [])
+            if not prov or not isinstance(prov, list):
+                continue
+            
+            # Pega primeiro prov (pode ter múltiplos para o mesmo texto)
+            first_prov = prov[0] if prov else {}
+            if not isinstance(first_prov, dict):
+                continue
+            
+            page_no = first_prov.get("page_no")
+            if page_no is None:
+                continue
+            
+            text_content = text_item.get("text") or text_item.get("orig", "")
+            if not text_content:
+                continue
+            
+            if page_no not in texts_by_page:
+                texts_by_page[page_no] = []
+            
+            texts_by_page[page_no].append(text_content)
+        
+        # Cria conteúdo por página
+        pages_content = {}
+        for page_no in sorted(texts_by_page.keys()):
+            page_texts = texts_by_page[page_no]
+            pages_content[page_no] = "\n\n".join(page_texts)
+        
+        return pages_content
+    
     async def load(self, config: dict, fileConfig: FileConfig) -> List[Document]:
         """
         Carrega arquivo usando Default Reader ou Tika (quando disponível e benéfico)
@@ -184,10 +386,73 @@ class UniversalA2Reader(Reader):
         enable_etl = get_config_value("Enable ETL", True)
         language_hint = get_config_value("Language Hint", "pt")
         use_tika = get_config_value("Use Tika When Available", True)
+        use_docling = get_config_value("Use Docling When Available", False)
+        
+        # Obtém configurações Docling
+        docling_api_url = get_config_value("Docling API URL", os.getenv("DOCLING_API_URL", ""))
+        docling_api_key = get_config_value("Docling API Key", os.getenv("DOCLING_API_KEY", ""))
         
         extension = fileConfig.extension.lower() if fileConfig.extension else ""
         
-        # Tenta usar Tika primeiro se configurado e benéfico
+        # Prioridade: Docling > Tika > BasicReader
+        # Docling primeiro (parsing estruturado mais poderoso)
+        if use_docling and self._should_use_docling(extension, use_docling, docling_api_url, docling_api_key):
+            try:
+                msg.info(f"[UNIVERSAL-READER] Usando Docling para '{fileConfig.filename}' (formato: {extension})")
+                
+                # Decodifica conteúdo (fileConfig.content geralmente vem como base64 string)
+                try:
+                    if isinstance(fileConfig.content, str):
+                        decoded_bytes = base64.b64decode(fileConfig.content)
+                    elif isinstance(fileConfig.content, bytes):
+                        decoded_bytes = fileConfig.content
+                    else:
+                        decoded_bytes = base64.b64decode(str(fileConfig.content))
+                except Exception as e:
+                    msg.warn(f"[UNIVERSAL-READER] Erro ao decodificar conteúdo: {str(e)}")
+                    decoded_bytes = None
+                
+                if not decoded_bytes:
+                    msg.warn("[UNIVERSAL-READER] Não foi possível decodificar conteúdo do arquivo, pulando Docling")
+                else:
+                    # Extrai com Docling
+                    md_content, json_content, metadata = await self._extract_with_docling(
+                        decoded_bytes, docling_api_url, docling_api_key
+                    )
+                    
+                    if md_content:
+                        # Cria documento
+                        from goldenverba.components.document import create_document
+                        document = create_document(md_content, fileConfig)
+                        
+                        # Adiciona metadados
+                        if document.meta is None:
+                            document.meta = {}
+                        
+                        # Adiciona metadados do Docling
+                        if metadata:
+                            document.meta.update(metadata)
+                            if json_content:
+                                # Mapeia conteúdo por página para uso futuro
+                                pages_content = self._map_content_by_page(json_content, md_content)
+                                if pages_content:
+                                    document.meta["docling_pages_content"] = pages_content
+                                    document.meta["docling_pages_mapped"] = len(pages_content)
+                            msg.info(f"[UNIVERSAL-READER] Metadados Docling extraídos: {len(metadata)} campos")
+                        
+                        # Configura ETL
+                        document.meta["enable_etl"] = enable_etl
+                        document.meta["language"] = document.meta.get("language", language_hint)
+                        
+                        msg.good(f"[UNIVERSAL-READER] Documento extraído via Docling: {len(md_content)} caracteres (md)")
+                        return [document]
+                    else:
+                        msg.warn(f"[UNIVERSAL-READER] Docling não extraiu conteúdo, tentando Tika/BasicReader...")
+                
+            except Exception as e:
+                msg.warn(f"[UNIVERSAL-READER] Erro ao usar Docling, tentando Tika/BasicReader: {str(e)}")
+        
+        # Tenta usar Tika se Docling não foi usado e está configurado
         if use_tika and self._should_use_tika(extension, use_tika):
             try:
                 msg.info(f"[UNIVERSAL-READER] Usando Tika para '{fileConfig.filename}' (formato: {extension})")
