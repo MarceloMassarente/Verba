@@ -27,9 +27,10 @@ def get_verba_standard_properties():
         Property(name="end_i", data_type=DataType.NUMBER, description="Índice final no documento"),
         Property(
             name="chunk_date", 
-            data_type=DataType.TEXT, 
-            description="Data do chunk (ISO format)",
-            index_filterable=True  # ⚡ Otimização: usado em temporal filtering
+            data_type=DataType.DATE, 
+            description="Data do chunk (ISO format: YYYY-MM-DD ou RFC3339)",
+            index_filterable=True,  # ⚡ Otimização: usado em temporal filtering
+            index_range_filterable=True  # ⚡ Otimização: permite range queries (>=, <=, between)
         ),
         Property(name="meta", data_type=DataType.TEXT, description="Metadados serializados em JSON"),
         Property(
@@ -550,11 +551,26 @@ def patch_weaviate_manager_verify_collection():
                         # Converte Property objects para dict format
                         properties_dict = []
                         for prop in all_properties:
+                            # Verifica se Property é válido
+                            if prop is None:
+                                msg.warn(f"   ⚠️  Property é None - pulando")
+                                continue
+                            
                             # Verifica se Property tem data_type antes de acessar
                             if not hasattr(prop, 'data_type'):
-                                msg.warn(f"   ⚠️  Property {getattr(prop, 'name', 'unknown')} não tem atributo 'data_type' - pulando")
-                                import traceback
-                                msg.debug(f"   🔍 Traceback:\n{traceback.format_exc()}")
+                                prop_name = getattr(prop, 'name', 'unknown')
+                                msg.warn(f"   ⚠️  Property {prop_name} não tem atributo 'data_type' - pulando")
+                                msg.debug(f"   🔍 Tipo do objeto: {type(prop)}")
+                                msg.debug(f"   🔍 Atributos disponíveis: {dir(prop)}")
+                                continue
+                            
+                            # Verifica se nome e data_type são válidos
+                            if not hasattr(prop, 'name') or not prop.name:
+                                msg.warn(f"   ⚠️  Property não tem atributo 'name' - pulando")
+                                continue
+                            
+                            if not prop.data_type:
+                                msg.warn(f"   ⚠️  Property {getattr(prop, 'name', 'unknown')} tem data_type None - pulando")
                                 continue
                             
                             # Converte dataType para formato esperado pelo Weaviate
@@ -571,6 +587,7 @@ def patch_weaviate_manager_verify_collection():
                                         "number": "number",
                                         "text": "text",
                                         "uuid": "uuid",
+                                        "date": "date",
                                         "number_array": "number[]",
                                         "text_array": "text[]",
                                     }

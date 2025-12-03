@@ -884,7 +884,7 @@ class WeaviateManager:
                         self.embedding_table[embedder]
                     )
                     await embedder_collection.data.delete_many(
-                        filters=Filter.by_property("doc_uuid").equal(uuid)
+                        where=Filter.by_property("doc_uuid").equal(uuid)
                     )
 
     async def delete_all_documents(self, client: WeaviateAsyncClient):

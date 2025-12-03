@@ -251,3 +251,7 @@ Os logs mostram:
 **Status**: Implementado e funcional  
 **Compatibilidade**: Verba 2.1.x + UniversalA2Reader
 
+
+
+
+

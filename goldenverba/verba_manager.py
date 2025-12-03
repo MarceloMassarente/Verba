@@ -1265,6 +1265,114 @@ class VerbaManager:
         ):
             full_text += result["message"]
             yield result
+    
+    async def generate_stream_answer_iterative(
+        self,
+        client,
+        rag_config: dict,
+        query: str,
+        context: str,
+        conversation: list[dict],
+        labels: list[str] = [],
+        document_uuids: list[str] = [],
+        max_iterations: int = 3,
+    ):
+        """
+        RAG 2.0: Generate stream with iterative search capability.
+        
+        Monitors generated tokens for [SEARCH: query] patterns and performs
+        additional searches when detected, injecting new context.
+        
+        Args:
+            client: Weaviate client
+            rag_config: RAG configuration
+            query: User query
+            context: Initial context
+            conversation: Conversation history
+            labels: Document labels filter
+            document_uuids: Document UUIDs filter
+            max_iterations: Maximum number of iterative searches
+            
+        Yields:
+            Dict with generated tokens (same format as generate_stream_answer)
+        """
+        try:
+            from verba_extensions.plugins.iterative_search import (
+                IterativeSearchPlugin,
+                IterativeSearchConfig
+            )
+            from wasabi import msg
+            
+            # Configurar plugin
+            config = IterativeSearchConfig(
+                enabled=True,
+                max_iterations=max_iterations
+            )
+            plugin = IterativeSearchPlugin(config)
+            
+            # Função de busca para o plugin
+            async def search_func(search_query: str):
+                try:
+                    result = await self.retrieve_chunks(
+                        client, search_query, rag_config, labels, document_uuids
+                    )
+                    if len(result) == 3:
+                        documents, _, _ = result
+                    else:
+                        documents, _ = result
+                    
+                    # Extrair chunks dos documentos
+                    chunks = []
+                    for doc in documents:
+                        if "chunks" in doc:
+                            chunks.extend(doc["chunks"])
+                    return chunks
+                except Exception as e:
+                    msg.warn(f"  Iterative search failed: {str(e)[:50]}")
+                    return []
+            
+            # Função para construir contexto adicional
+            def context_builder_func(chunks):
+                if not chunks:
+                    return ""
+                
+                context_parts = []
+                for i, chunk in enumerate(chunks[:3]):  # Máximo 3 chunks
+                    content = chunk.get("content", chunk.get("text", ""))
+                    if content:
+                        context_parts.append(f"[Additional Result {i+1}]: {content[:500]}")
+                
+                return "\n\n".join(context_parts)
+            
+            # Stream original do generator
+            original_stream = self.generator_manager.generate_stream(
+                rag_config, query, context, conversation
+            )
+            
+            # Processar com busca iterativa
+            full_text = ""
+            async for result in plugin.process_stream_with_search(
+                original_stream,
+                search_func,
+                context_builder_func
+            ):
+                full_text += result.get("message", "")
+                yield result
+                
+        except ImportError:
+            # Fallback: usar geração normal se plugin não disponível
+            msg.warn("  Iterative search plugin not available, using standard generation")
+            async for result in self.generate_stream_answer(
+                rag_config, query, context, conversation
+            ):
+                yield result
+        except Exception as e:
+            # Fallback em caso de erro
+            msg.warn(f"  Iterative search error: {str(e)[:50]}, using standard generation")
+            async for result in self.generate_stream_answer(
+                rag_config, query, context, conversation
+            ):
+                yield result
 
 
 class ClientManager:

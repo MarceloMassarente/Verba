@@ -116,7 +116,19 @@ def _adjust_boundary_with_entities(
 class EntitySemanticChunker(Chunker):
     """
     Chunker híbrido: seções + guard-rails de entidades + quebras semânticas intra-seção.
+    
+    REQUISITOS:
+    - numpy: Para cálculo de percentis em breakpoints
+    - scikit-learn: Para cálculo de similaridade de cosseno
+    
+    Se não disponíveis, usa fallback por tamanho máximo de sentenças.
+    Para melhor qualidade de chunking, instale: pip install numpy scikit-learn
     """
+
+    # Flag de classe para verificação de dependências (verificado uma vez)
+    _dependencies_checked = False
+    _has_numpy = False
+    _has_sklearn = False
 
     def __init__(self) -> None:
         super().__init__()
@@ -125,6 +137,10 @@ class EntitySemanticChunker(Chunker):
         self.description = (
             "Section-aware + entity guardrails + semantic breakpoints (intra-section)"
         )
+        
+        # Verificar dependências uma vez na inicialização
+        self._check_dependencies()
+        
         # Reaproveita configs do SemanticChunker
         self.config = {
             "Breakpoint Percentile Threshold": InputConfig(
@@ -148,6 +164,38 @@ class EntitySemanticChunker(Chunker):
                 values=[],
             ),
         }
+    
+    @classmethod
+    def _check_dependencies(cls):
+        """
+        Verifica se numpy e sklearn estão disponíveis.
+        Emite warning se não estiverem (apenas uma vez).
+        """
+        if cls._dependencies_checked:
+            return
+        
+        cls._dependencies_checked = True
+        cls._has_numpy = _has_library("numpy")
+        cls._has_sklearn = _has_library("sklearn")
+        
+        if not cls._has_numpy or not cls._has_sklearn:
+            missing = []
+            if not cls._has_numpy:
+                missing.append("numpy")
+            if not cls._has_sklearn:
+                missing.append("scikit-learn")
+            
+            msg.warn(
+                f"⚠️  EntitySemanticChunker: Dependências opcionais não encontradas: {', '.join(missing)}"
+            )
+            msg.warn(
+                f"   💡 Para chunking semântico de alta qualidade, instale: pip install {' '.join(missing)}"
+            )
+            msg.warn(
+                f"   📝 Usando fallback por tamanho máximo de sentenças (funciona, mas menos preciso)"
+            )
+        else:
+            msg.info("✅ EntitySemanticChunker: numpy e sklearn disponíveis - chunking semântico habilitado")
 
     async def chunk(
         self,

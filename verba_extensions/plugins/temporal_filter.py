@@ -133,6 +133,9 @@ class TemporalFilterPlugin:
         """
         Constrói filtro temporal para Weaviate.
         
+        Weaviate DATE type suporta comparações nativas (>=, <=, between).
+        O campo chunk_date agora é do tipo DATE com index_range_filterable=True.
+        
         Args:
             start_date: Data início em formato ISO (YYYY-MM-DD) ou None
             end_date: Data fim em formato ISO (YYYY-MM-DD) ou None
@@ -148,15 +151,20 @@ class TemporalFilterPlugin:
         
         try:
             if start_date:
-                # Parse date
+                # Parse date e converter para datetime com timezone
+                # Weaviate DATE type aceita datetime objects ou RFC3339 strings
                 start_dt = datetime.fromisoformat(start_date)
+                # Adicionar hora 00:00:00 para início do dia
+                start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
                 filters.append(
                     Filter.by_property(date_field).greater_or_equal(start_dt)
                 )
             
             if end_date:
-                # Parse date
+                # Parse date e converter para datetime com timezone
                 end_dt = datetime.fromisoformat(end_date)
+                # Adicionar hora 23:59:59 para fim do dia
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
                 filters.append(
                     Filter.by_property(date_field).less_or_equal(end_dt)
                 )

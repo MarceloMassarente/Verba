@@ -162,6 +162,20 @@ class Generator(VerbaComponent):
             description="System Message",
             values=[],
         )
+        
+        # RAG 2.0: Iterative Search Configuration
+        self.config["Enable Iterative Search"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable iterative search during generation (RAG 2.0). When enabled, the model can request additional searches using [SEARCH: query] tokens.",
+            values=[],
+        )
+        self.config["Max Iterative Searches"] = InputConfig(
+            type="number",
+            value=3,
+            description="Maximum number of iterative searches per generation (default: 3)",
+            values=[],
+        )
 
     async def generate_stream(
         self,

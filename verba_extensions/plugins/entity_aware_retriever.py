@@ -29,6 +29,14 @@ ENTIDADE (spaCy NER) vs SEMÂNTICA (Vector Search):
      3. Aplica WHERE: chunks.entity_id = "Q123" (FILTRA)
      4. Dentro desses chunks, busca: "inovação" (SEMANTICAMENTE)
      5. Retorna: chunks sobre Apple que mencionam inovação
+
+=== FALLBACK GRACIOSO ===
+
+Se o schema não tiver propriedades ETL (entities_local_ids, etc.),
+o retriever automaticamente desabilita entity filtering e usa
+apenas busca semântica. Isso garante compatibilidade com:
+- Collections criadas antes do ETL-aware schema
+- Chunks importados sem ETL pré-chunking
 """
 
 from goldenverba.components.interfaces import Retriever
@@ -37,6 +45,63 @@ from goldenverba.components.chunk import Chunk
 from verba_extensions.compatibility.weaviate_imports import Filter, WEAVIATE_V4
 from typing import Optional, Dict, Any, List, Tuple
 from wasabi import msg
+
+
+# Cache de verificação de schema ETL (evita verificar repetidamente)
+_etl_schema_cache: Dict[str, bool] = {}
+
+
+async def check_etl_schema_available(client, collection_name: str) -> bool:
+    """
+    Verifica se a collection tem propriedades ETL disponíveis.
+    
+    Args:
+        client: Cliente Weaviate
+        collection_name: Nome da collection
+        
+    Returns:
+        True se ETL properties estão disponíveis, False caso contrário
+    """
+    global _etl_schema_cache
+    
+    # Verificar cache primeiro
+    if collection_name in _etl_schema_cache:
+        return _etl_schema_cache[collection_name]
+    
+    try:
+        # Verificar se collection existe
+        if not await client.collections.exists(collection_name):
+            _etl_schema_cache[collection_name] = False
+            return False
+        
+        # Obter schema da collection
+        collection = client.collections.get(collection_name)
+        config = await collection.config.get()
+        
+        # Verificar se tem propriedades ETL
+        etl_properties = ["entities_local_ids", "section_entity_ids", "primary_entity_id"]
+        existing_props = [p.name for p in config.properties]
+        
+        has_etl = any(prop in existing_props for prop in etl_properties)
+        _etl_schema_cache[collection_name] = has_etl
+        
+        if not has_etl:
+            msg.warn(f"  ⚠️ Collection {collection_name} não tem propriedades ETL")
+            msg.warn(f"     Entity filtering será desabilitado automaticamente")
+            msg.warn(f"     💡 Para habilitar: delete e recrie a collection")
+        
+        return has_etl
+        
+    except Exception as e:
+        msg.debug(f"  Erro ao verificar schema ETL: {str(e)}")
+        _etl_schema_cache[collection_name] = False
+        return False
+
+
+def clear_etl_schema_cache():
+    """Limpa o cache de verificação de schema ETL."""
+    global _etl_schema_cache
+    _etl_schema_cache = {}
 
 
 class EntityAwareRetriever(Retriever):
@@ -252,6 +317,45 @@ class EntityAwareRetriever(Retriever):
             type="number",
             value=1,
             description="Number of surrounding chunks",
+            values=[],
+            block="optimizations",
+        )
+        
+        # RAG 2.0: Intelligent Cache
+        self.config["Enable Intelligent Cache"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable intelligent cache with similarity search (reuses similar queries)",
+            values=[],
+            block="optimizations",
+        )
+        self.config["Cache Similarity Threshold"] = InputConfig(
+            type="text",
+            value="0.85",
+            description="Similarity threshold for cache hit (0.0-1.0, higher = more strict)",
+            values=[],
+            block="optimizations",
+        )
+        
+        # RAG 2.0: Dynamic Reranking
+        self.config["Enable Dynamic Reranking"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable multi-dimensional reranking (similarity + recency + entity frequency)",
+            values=[],
+            block="optimizations",
+        )
+        self.config["Reranking Recency Weight"] = InputConfig(
+            type="text",
+            value="0.15",
+            description="Weight for recency score in dynamic reranking (0.0-1.0)",
+            values=[],
+            block="optimizations",
+        )
+        self.config["Reranking Entity Weight"] = InputConfig(
+            type="text",
+            value="0.15",
+            description="Weight for entity frequency score in dynamic reranking (0.0-1.0)",
             values=[],
             block="optimizations",
         )
@@ -1298,7 +1402,64 @@ class EntityAwareRetriever(Retriever):
         date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
         enable_aggregation = config.get("Enable Aggregation", {}).value if isinstance(config.get("Enable Aggregation"), InputConfig) else False
         
+        # FALLBACK GRACIOSO: Verificar se schema tem propriedades ETL
+        # Se não tiver, desabilita entity filtering automaticamente
+        if enable_entity_filter:
+            try:
+                # Normalizar nome da collection
+                normalized = weaviate_manager._normalize_embedder_name(embedder)
+                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                
+                # Verificar disponibilidade de ETL no schema
+                etl_available = await check_etl_schema_available(client, collection_name)
+                
+                if not etl_available:
+                    enable_entity_filter = False
+                    debug_info["etl_fallback"] = True
+                    debug_info["etl_fallback_reason"] = "Schema não tem propriedades ETL (entities_local_ids, etc.)"
+                    msg.info(f"  📝 Fallback: Entity filtering desabilitado (schema sem ETL)")
+            except Exception as e:
+                msg.debug(f"  Erro ao verificar ETL schema (não crítico): {str(e)}")
+        
+        # RAG 2.0: Intelligent Cache
+        enable_intelligent_cache = config.get("Enable Intelligent Cache", {}).value if isinstance(config.get("Enable Intelligent Cache"), InputConfig) else False
+        cache_similarity_threshold_str = config.get("Cache Similarity Threshold", {}).value if isinstance(config.get("Cache Similarity Threshold"), InputConfig) else "0.85"
+        cache_similarity_threshold = float(cache_similarity_threshold_str) if isinstance(cache_similarity_threshold_str, str) else float(cache_similarity_threshold_str)
+        
+        # RAG 2.0: Dynamic Reranking
+        enable_dynamic_reranking = config.get("Enable Dynamic Reranking", {}).value if isinstance(config.get("Enable Dynamic Reranking"), InputConfig) else False
+        reranking_recency_weight_str = config.get("Reranking Recency Weight", {}).value if isinstance(config.get("Reranking Recency Weight"), InputConfig) else "0.15"
+        reranking_recency_weight = float(reranking_recency_weight_str) if isinstance(reranking_recency_weight_str, str) else float(reranking_recency_weight_str)
+        reranking_entity_weight_str = config.get("Reranking Entity Weight", {}).value if isinstance(config.get("Reranking Entity Weight"), InputConfig) else "0.15"
+        reranking_entity_weight = float(reranking_entity_weight_str) if isinstance(reranking_entity_weight_str, str) else float(reranking_entity_weight_str)
+        
         msg.info(f"🎯 Entity Filter Mode: {entity_filter_mode}")
+        
+        # RAG 2.0: INTELLIGENT CACHE - Verificar cache antes de processar
+        if enable_intelligent_cache:
+            try:
+                from verba_extensions.plugins.intelligent_cache import get_cache
+                intelligent_cache = get_cache(similarity_threshold=cache_similarity_threshold)
+                
+                # Tentar obter do cache (com embedding para similaridade)
+                cached_response, cache_debug = await intelligent_cache.get(
+                    query=query,
+                    query_embedding=vector  # Usar o vetor já calculado
+                )
+                
+                if cached_response is not None:
+                    # Cache hit!
+                    debug_info["intelligent_cache_hit"] = True
+                    debug_info["cache_hit_type"] = cache_debug.get("hit_type")
+                    debug_info["cache_similarity"] = cache_debug.get("similarity")
+                    msg.good(f"  🚀 Intelligent Cache HIT ({cache_debug.get('hit_type')})")
+                    
+                    # Retornar resposta cacheada
+                    return cached_response
+                else:
+                    debug_info["intelligent_cache_hit"] = False
+            except Exception as e:
+                msg.debug(f"  Intelligent Cache erro (não crítico): {str(e)}")
         
         # 0.5. VERIFICAR SE É QUERY DE AGREGAÇÃO
         is_aggregation_query = False
@@ -3177,12 +3338,73 @@ class EntityAwareRetriever(Retriever):
         if debug_info.get('explanation'):
             debug_summary += f"Explicação: {debug_info['explanation']}\n"
         
+        # RAG 2.0: DYNAMIC SCORE ENRICHMENT - Enriquecer scores com dimensões adicionais
+        # NOTA: Este é um PRÉ-PROCESSADOR que enriquece scores ANTES do RerankerPlugin
+        # O RerankerPlugin existente (Cohere, Jina, etc.) continua funcionando normalmente
+        if enable_dynamic_reranking and updated_documents:
+            try:
+                from verba_extensions.plugins.dynamic_reranker import DynamicReranker
+                dynamic_reranker = DynamicReranker(
+                    similarity_weight=1.0 - reranking_recency_weight - reranking_entity_weight,
+                    recency_weight=reranking_recency_weight,
+                    entity_weight=reranking_entity_weight
+                )
+                
+                # Enriquecer scores nos chunks de cada documento
+                # Isso adiciona 'combined_score' que pode ser usado pelo RerankerPlugin
+                for doc in updated_documents:
+                    if "chunks" in doc and doc["chunks"]:
+                        doc["chunks"] = dynamic_reranker.rerank_chunks(doc["chunks"], return_scores=True)
+                
+                debug_info["dynamic_score_enrichment_applied"] = True
+                debug_info["dynamic_reranking_weights"] = {
+                    "similarity": round(1.0 - reranking_recency_weight - reranking_entity_weight, 2),
+                    "recency": reranking_recency_weight,
+                    "entity_frequency": reranking_entity_weight
+                }
+                msg.info(f"  📊 Dynamic Score Enrichment aplicado (recency={reranking_recency_weight}, entity={reranking_entity_weight})")
+            except Exception as e:
+                msg.debug(f"  Dynamic Score Enrichment erro (não crítico): {str(e)}")
+        
         # Retornar com informações de debug como terceiro elemento (para API)
         # Mas também incluir no contexto para compatibilidade
         context_with_debug = context + debug_summary
         
+        # Preparar resposta final
+        final_response = (updated_documents, context_with_debug, debug_info)
+        
+        # RAG 2.0: INTELLIGENT CACHE - Armazenar no cache
+        if enable_intelligent_cache:
+            try:
+                from verba_extensions.plugins.intelligent_cache import get_cache
+                intelligent_cache = get_cache(similarity_threshold=cache_similarity_threshold)
+                
+                # Detectar tipo de documento para TTL apropriado
+                doc_type = "general"
+                if updated_documents:
+                    # Tentar detectar tipo do primeiro documento
+                    first_doc = updated_documents[0]
+                    doc_title = first_doc.get("title", "").lower()
+                    if "whitepaper" in doc_title or "white paper" in doc_title:
+                        doc_type = "whitepaper"
+                    elif "report" in doc_title or "relatório" in doc_title:
+                        doc_type = "report"
+                    elif "news" in doc_title or "notícia" in doc_title:
+                        doc_type = "news"
+                
+                # Armazenar no cache
+                await intelligent_cache.set(
+                    query=query,
+                    response=final_response,
+                    doc_type=doc_type,
+                    query_embedding=vector
+                )
+                debug_info["intelligent_cache_stored"] = True
+            except Exception as e:
+                msg.debug(f"  Intelligent Cache set erro (não crítico): {str(e)}")
+        
         # Retornar documents atualizados (com chunks filtrados)
-        return (updated_documents, context_with_debug, debug_info)
+        return final_response
     
     async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
         """Processa chunks aplicando window technique"""

@@ -28,6 +28,7 @@ class Chunk:
     def to_json(self) -> dict:
         """Convert the Chunk object to a dictionary."""
         import json
+        from datetime import datetime
         
         # Convert chunk_id to float if it's a string (e.g., '6_154' -> 6.154 or hash)
         # Weaviate requires chunk_id to be a number, not a string
@@ -70,6 +71,32 @@ class Chunk:
             except (ValueError, TypeError):
                 chunk_id_value = 0.0
         
+        # Convert chunk_date to RFC3339 format for Weaviate DATE type
+        # Weaviate expects: "2024-01-15T00:00:00Z" or similar RFC3339 format
+        chunk_date_value = None
+        if self.chunk_date:
+            try:
+                if isinstance(self.chunk_date, datetime):
+                    # Already a datetime object
+                    chunk_date_value = self.chunk_date.strftime("%Y-%m-%dT00:00:00Z")
+                elif isinstance(self.chunk_date, str):
+                    # Try to parse string date
+                    date_str = self.chunk_date.strip()
+                    if date_str:
+                        # Try common formats
+                        for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y"]:
+                            try:
+                                parsed = datetime.strptime(date_str.split("T")[0], fmt)
+                                chunk_date_value = parsed.strftime("%Y-%m-%dT00:00:00Z")
+                                break
+                            except ValueError:
+                                continue
+                        # If already in RFC3339 format, use as-is
+                        if chunk_date_value is None and "T" in date_str:
+                            chunk_date_value = date_str
+            except Exception:
+                chunk_date_value = None
+        
         return {
             "content": self.content,
             "chunk_id": chunk_id_value,  # Now guaranteed to be float
@@ -83,7 +110,7 @@ class Chunk:
             "meta": json.dumps(self.meta) if self.meta else "{}",  # Serialize meta dict
             "uuid": self.uuid,
             "chunk_lang": self.chunk_lang or "",  # Language code for bilingual filtering
-            "chunk_date": self.chunk_date or "",  # Date in ISO format for temporal filtering
+            "chunk_date": chunk_date_value,  # Date in RFC3339 format for Weaviate DATE type
         }
 
     @classmethod

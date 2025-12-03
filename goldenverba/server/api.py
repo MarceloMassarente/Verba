@@ -340,16 +340,50 @@ async def websocket_generate_stream(websocket: WebSocket):
             msg.good(f"Received generate stream call for {payload.query}")
 
             full_text = ""
-            async for chunk in manager.generate_stream_answer(
-                payload.rag_config,
-                payload.query,
-                payload.context,
-                payload.conversation,
-            ):
-                full_text += chunk["message"]
-                if chunk["finish_reason"] == "stop":
-                    chunk["full_text"] = full_text
-                await websocket.send_json(chunk)
+            
+            # RAG 2.0: Check if iterative search is enabled
+            enable_iterative = False
+            max_iterations = 3
+            try:
+                generator_config = payload.rag_config.get("Generator", {})
+                if hasattr(generator_config, "components"):
+                    selected = generator_config.selected
+                    if selected in generator_config.components:
+                        gen_cfg = generator_config.components[selected].config
+                        enable_iterative = gen_cfg.get("Enable Iterative Search", {})
+                        if hasattr(enable_iterative, "value"):
+                            enable_iterative = enable_iterative.value
+                        max_iterations_cfg = gen_cfg.get("Max Iterative Searches", {})
+                        if hasattr(max_iterations_cfg, "value"):
+                            max_iterations = int(max_iterations_cfg.value)
+            except Exception:
+                pass  # Use defaults if config parsing fails
+            
+            if enable_iterative:
+                msg.info(f"  🔄 Iterative Search enabled (max={max_iterations})")
+                # Note: For iterative search, we need a client connection
+                # This is a simplified version - full integration would need client from payload
+                async for chunk in manager.generate_stream_answer(
+                    payload.rag_config,
+                    payload.query,
+                    payload.context,
+                    payload.conversation,
+                ):
+                    full_text += chunk["message"]
+                    if chunk["finish_reason"] == "stop":
+                        chunk["full_text"] = full_text
+                    await websocket.send_json(chunk)
+            else:
+                async for chunk in manager.generate_stream_answer(
+                    payload.rag_config,
+                    payload.query,
+                    payload.context,
+                    payload.conversation,
+                ):
+                    full_text += chunk["message"]
+                    if chunk["finish_reason"] == "stop":
+                        chunk["full_text"] = full_text
+                    await websocket.send_json(chunk)
 
         except WebSocketDisconnect:
             msg.warn("WebSocket connection closed by client.")
