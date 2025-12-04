@@ -77,6 +77,50 @@ def _entity_crosses_boundary(entity_spans: List[Dict[str, Any]], boundary_char: 
     return False
 
 
+def _get_frequent_entities(
+    entity_spans: List[Dict[str, Any]],
+    min_frequency: int = 2
+) -> set:
+    """
+    Retorna entidades que aparecem pelo menos min_frequency vezes.
+    Essas são as entidades "âncoras" do documento.
+    """
+    from collections import Counter
+    
+    entity_counts = Counter()
+    for ent in entity_spans:
+        text = ent.get("text", "").lower().strip()
+        if text and len(text) > 2:  # Ignora entidades muito curtas
+            entity_counts[text] += 1
+    
+    return {ent for ent, count in entity_counts.items() if count >= min_frequency}
+
+
+def _get_anchor_entities_in_range(
+    start_char: int,
+    end_char: int,
+    entity_spans: List[Dict[str, Any]],
+    anchor_entities: set
+) -> set:
+    """
+    Retorna entidades âncora (frequentes) que aparecem no range de caracteres.
+    """
+    entities = set()
+    for ent in entity_spans:
+        try:
+            ent_start = int(ent.get("start", -1))
+            ent_end = int(ent.get("end", -1))
+            ent_text = ent.get("text", "").lower().strip()
+            
+            # Verifica overlap e se é entidade âncora
+            if ent_start < end_char and ent_end > start_char:
+                if ent_text in anchor_entities:
+                    entities.add(ent_text)
+        except Exception:
+            continue
+    return entities
+
+
 def _adjust_boundary_with_entities(
     sentences: List[Dict[str, Any]],
     boundary_idx_exclusive: int,
@@ -135,7 +179,7 @@ class EntitySemanticChunker(Chunker):
         self.name = "Entity-Semantic"
         self.requires_library = ["numpy", "sklearn"]
         self.description = (
-            "Section-aware + entity guardrails + semantic breakpoints (intra-section)"
+            "Semantic breakpoints + entity anchors (frequent entities keep text together)"
         )
         
         # Verificar dependências uma vez na inicialização
@@ -316,12 +360,25 @@ class EntitySemanticChunker(Chunker):
                         )
                         use_semantic = False
 
-                # Calcula quebras semânticas (ou fallback)
-                breakpoints: List[int] = []  # índices exclusivos de boundary (entre sentenças)
+                # ========================================
+                # LÓGICA SIMPLIFICADA: Semantic-first, Entities como guard-rails
+                # ========================================
+                # 1. Breakpoints semânticos como critério principal (mudança de assunto)
+                # 2. Entidades FREQUENTES como âncoras (refinamento)
+                # 3. Guard-rails: não cortar no MEIO de uma entidade
+                # 4. Max sentences como cap de segurança
+                
+                breakpoints: List[int] = []
+                
+                # Identifica entidades frequentes (aparecem 2+ vezes) = âncoras
+                anchor_entities = _get_frequent_entities(entity_spans, min_frequency=2)
+                if anchor_entities:
+                    msg.info(f"[Entity-Semantic] {len(anchor_entities)} entidades âncora: {list(anchor_entities)[:5]}...")
+                
+                # PASSO 1: Breakpoints semânticos (critério principal)
                 if use_semantic and embeddings is not None and len(embeddings) > 1:
                     try:
                         # Similaridade de sentenças adjacentes
-                        # distances[i] mede dissimilaridade entre i e i+1
                         sims = []
                         for i in range(len(embeddings) - 1):
                             sim = cosine_similarity(
@@ -330,18 +387,50 @@ class EntitySemanticChunker(Chunker):
                             sims.append(sim)
                         distances = [1.0 - s for s in sims]
 
-                        # Threshold pelo percentil configurado
+                        # Threshold pelo percentil configurado (95 = top 5% de mudanças)
                         threshold = float(np.percentile(distances, breakpoint_percentile_threshold))  # type: ignore[name-defined]
 
-                        # Define quebras onde distância excede threshold
+                        # Breakpoints onde há mudança semântica significativa
                         for i, d in enumerate(distances, start=1):
                             if d >= threshold:
                                 breakpoints.append(i)
+                        
+                        msg.info(f"[Entity-Semantic] {len(breakpoints)} breakpoints semânticos (threshold={threshold:.3f})")
                     except Exception as e:
                         msg.warn(
-                            f"[Entity-Semantic] Erro no cálculo semântico (fallback por tamanho): {type(e).__name__}: {str(e)}"
+                            f"[Entity-Semantic] Erro no cálculo semântico: {type(e).__name__}: {str(e)}"
                         )
-                        breakpoints = []
+                
+                # PASSO 2: Refinamento com entidades âncora
+                # Remove breakpoints que separariam texto sobre a MESMA entidade âncora
+                if breakpoints and anchor_entities:
+                    refined_breakpoints = []
+                    for bp in breakpoints:
+                        # Verifica entidades antes e depois do breakpoint
+                        if bp > 0 and bp < len(sentences):
+                            before_start = sentences[max(0, bp-3)]["start"]
+                            before_end = sentences[bp-1]["end"]
+                            after_start = sentences[bp]["start"]
+                            after_end = sentences[min(len(sentences)-1, bp+2)]["end"]
+                            
+                            ents_before = _get_anchor_entities_in_range(
+                                before_start, before_end, entity_spans, anchor_entities
+                            )
+                            ents_after = _get_anchor_entities_in_range(
+                                after_start, after_end, entity_spans, anchor_entities
+                            )
+                            
+                            # Se compartilham entidade âncora, NÃO quebra
+                            shared = ents_before & ents_after
+                            if shared:
+                                msg.info(f"[Entity-Semantic] Breakpoint {bp} removido - mesma entidade: {shared}")
+                                continue
+                        
+                        refined_breakpoints.append(bp)
+                    
+                    if len(refined_breakpoints) < len(breakpoints):
+                        msg.info(f"[Entity-Semantic] Refinado: {len(breakpoints)} → {len(refined_breakpoints)} breakpoints")
+                    breakpoints = refined_breakpoints
 
                 # Sempre aplica cap por tamanho máximo de sentenças
                 if max_sentences_per_chunk > 0:
