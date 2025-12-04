@@ -478,5 +478,11 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
 
 def register():
     """Registra o chunker como plugin Verba"""
-    return SlidesSemanticaVisualChunker()
+    return {
+        'name': 'slides_semantica_visual_chunker',
+        'version': '1.0.0',
+        'description': 'Chunker otimizado para slides com análise semântica visual (frameworks, stakeholders, bridge quality)',
+        'chunkers': [SlidesSemanticaVisualChunker()],
+        'compatible_verba_version': '>=2.1.0',
+    }
 

@@ -317,7 +317,13 @@ class SlidesSemanticaVisualReader(Reader):
 
 def register():
     """Registra o reader como plugin Verba"""
-    return SlidesSemanticaVisualReader()
+    return {
+        'name': 'slides_semantica_visual_reader',
+        'version': '1.0.0',
+        'description': 'Reader para arquivos .md com estrutura de slides e análise semântica visual (frameworks, stakeholders, bridge quality)',
+        'readers': [SlidesSemanticaVisualReader()],
+        'compatible_verba_version': '>=2.1.0',
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════════════

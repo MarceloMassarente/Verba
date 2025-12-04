@@ -479,32 +479,9 @@ class EntitySemanticChunker(Chunker):
                         content_without_overlap=chunk_text,
                     )
                     
-                    # Detecta frameworks, empresas, pessoas, conceitos, métricas e tipo de conteúdo (opcional, não bloqueia se falhar)
-                    try:
-                        from verba_extensions.utils.framework_detector import get_framework_detector
-                        framework_detector = get_framework_detector()
-                        framework_data = await framework_detector.detect_frameworks(
-                            chunk_text,
-                            extract_concepts=True,
-                            extract_metrics=True,
-                            classify_content=True
-                        )
-                        
-                        # Enriquece metadata do chunk
-                        if not hasattr(chunk, "meta") or chunk.meta is None:
-                            chunk.meta = {}
-                        
-                        chunk.meta["frameworks"] = framework_data.get("frameworks", [])
-                        chunk.meta["companies"] = framework_data.get("companies", [])
-                        chunk.meta["persons"] = framework_data.get("persons", [])
-                        chunk.meta["conceitos_negocio"] = framework_data.get("conceitos_negocio", [])
-                        chunk.meta["metricas"] = framework_data.get("metricas", {})
-                        chunk.meta["tipo_conteudo"] = framework_data.get("tipo_conteudo", "contexto")
-                        chunk.meta["sectors"] = framework_data.get("sectors", [])
-                        chunk.meta["framework_confidence"] = framework_data.get("confidence", 0.0)
-                    except Exception as e:
-                        # Falha na detecção não bloqueia chunking
-                        msg.debug(f"[Entity-Semantic] Erro ao detectar frameworks (não crítico): {str(e)}")
+                    # NOTA: Detecção de frameworks removida deste chunker genérico
+                    # Para slides de consultoria, usar SlidesSemanticaVisualReader + SlidesSemanticaVisualChunker
+                    # que já fazem detecção de frameworks no reader e preservam no chunker
                     
                     document.chunks.append(chunk)
                     chunk_id_counter += 1
@@ -525,34 +502,6 @@ class EntitySemanticChunker(Chunker):
                     end_i=len(text),
                     content_without_overlap=text,
                 )
-                
-                # Detecta frameworks, empresas, pessoas, conceitos, métricas e tipo de conteúdo (opcional, não bloqueia se falhar)
-                try:
-                    from verba_extensions.utils.framework_detector import get_framework_detector
-                    framework_detector = get_framework_detector()
-                    framework_data = await framework_detector.detect_frameworks(
-                        text,
-                        extract_concepts=True,
-                        extract_metrics=True,
-                        classify_content=True
-                    )
-                    
-                    # Enriquece metadata do chunk
-                    if not hasattr(chunk, "meta") or chunk.meta is None:
-                        chunk.meta = {}
-                    
-                    chunk.meta["frameworks"] = framework_data.get("frameworks", [])
-                    chunk.meta["companies"] = framework_data.get("companies", [])
-                    chunk.meta["persons"] = framework_data.get("persons", [])
-                    chunk.meta["conceitos_negocio"] = framework_data.get("conceitos_negocio", [])
-                    chunk.meta["metricas"] = framework_data.get("metricas", {})
-                    chunk.meta["tipo_conteudo"] = framework_data.get("tipo_conteudo", "contexto")
-                    chunk.meta["sectors"] = framework_data.get("sectors", [])
-                    chunk.meta["framework_confidence"] = framework_data.get("confidence", 0.0)
-                except Exception as e:
-                    # Falha na detecção não bloqueia chunking
-                    msg.debug(f"[Entity-Semantic] Erro ao detectar frameworks (não crítico): {str(e)}")
-                
                 document.chunks.append(chunk)
 
         return documents
