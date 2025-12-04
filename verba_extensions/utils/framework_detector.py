@@ -10,6 +10,43 @@ from typing import List, Dict, Optional, Set
 from wasabi import msg
 
 
+class ConsultoriaLabels:
+    """Labels específicas para documentos de consultoria"""
+    
+    # Labels genéricas (fallback)
+    GENERIC = [
+        "framework",
+        "business model",
+        "strategic framework"
+    ]
+    
+    # Labels específicas e contextualizadas
+    ESPECIFICAS = [
+        "framework de estratégia mencionado",
+        "framework operacional citado",
+        "metodologia de negócio referenciada",
+        "modelo de análise estratégica mencionado",
+        "ferramenta de consultoria citada"
+    ]
+    
+    @classmethod
+    def get_labels_for_context(cls, tipo_doc: Optional[str] = None) -> List[str]:
+        """
+        Retorna labels apropriadas baseadas no contexto.
+        
+        Args:
+            tipo_doc: Tipo de documento ("estrategia", "operacoes", "organizacao", "financeiro")
+        
+        Returns:
+            Lista de labels para usar no GLiNER
+        """
+        # Se tipo_doc especificado, usa labels específicas
+        if tipo_doc:
+            return cls.ESPECIFICAS
+        # Caso contrário, usa labels específicas por padrão (melhor recall)
+        return cls.ESPECIFICAS
+
+
 class FrameworkDetector:
     """
     Detecta frameworks, empresas e setores em texto.
@@ -134,23 +171,44 @@ class FrameworkDetector:
         except Exception as e:
             msg.warn(f"Erro ao carregar spaCy: {str(e)}")
     
-    async def detect_frameworks(self, text: str) -> Dict[str, any]:
+    async def detect_frameworks(
+        self, 
+        text: str, 
+        tipo_doc: Optional[str] = None,
+        threshold: float = 0.55,
+        extract_concepts: bool = True,
+        extract_metrics: bool = True,
+        classify_content: bool = True
+    ) -> Dict[str, any]:
         """
-        Detecta frameworks, empresas e setores em texto.
+        Detecta frameworks, empresas, pessoas, conceitos de negócio, métricas, tipo de conteúdo e setores em texto.
         
         Args:
             text: Texto a analisar
+            tipo_doc: Tipo de documento para selecionar labels apropriadas
+            threshold: Threshold de confiança para GLiNER frameworks (default: 0.55)
+            extract_concepts: Se True, extrai conceitos de negócio (default: True)
+            extract_metrics: Se True, extrai métricas e KPIs (default: True)
+            classify_content: Se True, classifica tipo de conteúdo (default: True)
         
         Returns:
             Dict com:
             - frameworks: List[str] - Frameworks detectados
             - companies: List[str] - Empresas detectadas
+            - persons: List[str] - Pessoas detectadas (executivos, consultores, autores)
+            - conceitos_negocio: List[str] - Conceitos de negócio detectados
+            - metricas: Dict - Métricas qualitativas e quantitativas
+            - tipo_conteudo: str - Tipo de conteúdo ("analise", "recomendacao", "acao", "contexto")
             - sectors: List[str] - Setores detectados
             - confidence: float - Confiança geral (0.0-1.0)
         """
         result = {
             "frameworks": [],
             "companies": [],
+            "persons": [],
+            "conceitos_negocio": [],
+            "metricas": {},
+            "tipo_conteudo": "contexto",
             "sectors": [],
             "confidence": 0.0
         }
@@ -159,19 +217,38 @@ class FrameworkDetector:
             return result
         
         # Detecta frameworks
-        frameworks = self._detect_frameworks_in_text(text)
+        frameworks = self._detect_frameworks_in_text(text, tipo_doc=tipo_doc, threshold=threshold)
         result["frameworks"] = frameworks
         
         # Detecta empresas
         companies = await self._detect_companies_in_text(text)
         result["companies"] = companies
         
+        # Detecta pessoas (executivos, consultores, autores)
+        persons = self._extract_persons(text)
+        result["persons"] = persons
+        
+        # Detecta conceitos de negócio (se habilitado)
+        if extract_concepts:
+            conceitos = self._extract_business_concepts(text, threshold=0.5)
+            result["conceitos_negocio"] = conceitos
+        
+        # Detecta métricas (se habilitado)
+        if extract_metrics:
+            metricas = self._extract_metrics(text, threshold=0.6)
+            result["metricas"] = metricas
+        
+        # Classifica tipo de conteúdo (se habilitado)
+        if classify_content:
+            tipo_conteudo = self._classify_content_type(text)
+            result["tipo_conteudo"] = tipo_conteudo
+        
         # Detecta setores
         sectors = self._detect_sectors_in_text(text)
         result["sectors"] = sectors
         
         # Calcula confiança
-        confidence = self._calculate_confidence(frameworks, companies, sectors, text)
+        confidence = self._calculate_confidence(frameworks, companies, sectors, text, persons)
         result["confidence"] = confidence
         
         return result
@@ -266,16 +343,28 @@ class FrameworkDetector:
         
         return chunks if chunks else [text]
     
-    def _detect_frameworks_in_text(self, text: str) -> List[str]:
-        """Detecta frameworks usando Gliner ou keyword matching com aliases"""
+    def _detect_frameworks_in_text(
+        self, 
+        text: str, 
+        tipo_doc: Optional[str] = None,
+        threshold: float = 0.55
+    ) -> List[str]:
+        """
+        Detecta frameworks usando Gliner ou keyword matching com aliases
+        
+        Args:
+            text: Texto a analisar
+            tipo_doc: Tipo de documento para selecionar labels apropriadas
+            threshold: Threshold de confiança para GLiNER (default: 0.55)
+        """
         detected_names = set()  # Nomes canônicos dos frameworks
         text_lower = text.lower()
 
         # Tenta usar Gliner primeiro (mais preciso)
         if self.gliner_model:
             try:
-                # Define labels para frameworks
-                labels = ["framework", "business model", "strategic framework"]
+                # Define labels para frameworks usando ConsultoriaLabels
+                labels = ConsultoriaLabels.get_labels_for_context(tipo_doc)
                 
                 # Verifica se texto precisa ser dividido (limite GLiNER: 384 tokens)
                 estimated_tokens = self._estimate_token_count(text)
@@ -290,7 +379,7 @@ class FrameworkDetector:
                     all_entities = []
                     for i, chunk in enumerate(text_chunks):
                         try:
-                            chunk_entities = self.gliner_model.predict_entities(chunk, labels, threshold=0.5)
+                            chunk_entities = self.gliner_model.predict_entities(chunk, labels, threshold=threshold)
                             all_entities.extend(chunk_entities)
                             # Log apenas se muito verbose (comentado para não poluir logs)
                             # msg.info(f"[GLiNER] Chunk {i+1}/{len(text_chunks)}: {len(chunk_entities)} entidades encontradas")
@@ -300,7 +389,7 @@ class FrameworkDetector:
                     entities = all_entities
                 else:
                     # Texto cabe no limite, processa normalmente
-                    entities = self.gliner_model.predict_entities(text, labels, threshold=0.5)
+                    entities = self.gliner_model.predict_entities(text, labels, threshold=threshold)
 
                 # Processa entidades encontradas (de todos os chunks ou único)
                 for entity in entities:
@@ -365,7 +454,7 @@ class FrameworkDetector:
                 doc = self.spacy_nlp(text)
                 # Extrai entidades do tipo ORG (organizações)
                 for ent in doc.ents:
-                    if ent.label_ in ["ORG", "PERSON"]:  # Pessoas podem ser empresas também
+                    if ent.label_ == "ORG":
                         entity_text = ent.text.strip()
                         if len(entity_text) > 2 and entity_text[0].isupper():
                             detected.add(entity_text)
@@ -404,6 +493,303 @@ class FrameworkDetector:
         
         return sorted(list(detected))[:20]  # Limita a 20 empresas
     
+    def _extract_persons(self, text: str) -> List[str]:
+        """
+        Extrai pessoas mencionadas em contexto de negócio (executivos, consultores, autores).
+        Filtra rigorosamente para evitar explosão de entidades.
+        
+        Args:
+            text: Texto a analisar
+        
+        Returns:
+            Lista de pessoas detectadas (máximo 10)
+        """
+        persons = []
+        
+        if not self.spacy_nlp:
+            return persons
+        
+        try:
+            doc = self.spacy_nlp(text)
+            text_lower = text.lower()
+            
+            # Palavras-chave que indicam contexto de negócio
+            business_context_keywords = [
+                "ceo", "presidente", "diretor", "executivo", "consultor", "autor",
+                "fundador", "cofundador", "lider", "gestor", "gerente",
+                "mckinsey", "bain", "bcg", "deloitte", "pwc", "kpmg"
+            ]
+            
+            # Nomes muito comuns que devem ser filtrados
+            common_names = [
+                "joão", "maria", "josé", "ana", "carlos", "paulo", "pedro",
+                "john", "mary", "james", "robert", "michael", "david"
+            ]
+            
+            for ent in doc.ents:
+                if ent.label_ in ["PERSON", "PER"]:
+                    person_text = ent.text.strip()
+                    
+                    # Filtros básicos
+                    if len(person_text) < 3:
+                        continue
+                    if not person_text[0].isupper():
+                        continue
+                    
+                    # Filtra nomes muito comuns (provavelmente não são relevantes)
+                    person_lower = person_text.lower()
+                    if any(common in person_lower for common in common_names):
+                        # Só aceita se estiver em contexto de negócio
+                        sent = ent.sent.text.lower() if ent.sent else ""
+                        if not any(keyword in sent for keyword in business_context_keywords):
+                            continue
+                    
+                    # Verifica contexto: pessoa deve estar em sentença com palavras-chave de negócio
+                    sent = ent.sent.text.lower() if ent.sent else text_lower
+                    if any(keyword in sent for keyword in business_context_keywords):
+                        if person_text not in persons:
+                            persons.append(person_text)
+                    
+                    # Limite de segurança: máximo 10 pessoas por chunk
+                    if len(persons) >= 10:
+                        break
+        
+        except Exception as e:
+            msg.warn(f"Erro ao extrair pessoas: {str(e)}")
+        
+        return sorted(list(set(persons)))[:10]  # Remove duplicatas e limita a 10
+    
+    def _extract_business_concepts(self, text: str, threshold: float = 0.5) -> List[str]:
+        """
+        Extrai conceitos de negócio usando GLiNER.
+        
+        Args:
+            text: Texto a analisar
+            threshold: Threshold de confiança para GLiNER (default: 0.5)
+        
+        Returns:
+            Lista de conceitos de negócio detectados (máximo 15)
+        """
+        concepts = []
+        
+        if not self.gliner_model:
+            return concepts
+        
+        try:
+            labels_conceitos = [
+                "vantagem competitiva mencionada",
+                "proposta de valor citada",
+                "modelo de negócio descrito",
+                "cadeia de valor mencionada",
+                "diferenciação competitiva citada",
+                "core competence citada",
+                "cadeia de suprimentos mencionada",
+                "canais de distribuição citados",
+                "segmento de clientes mencionado",
+                "estrutura de custos citada",
+                "fonte de receita mencionada"
+            ]
+            
+            # Verifica se texto precisa ser dividido
+            estimated_tokens = self._estimate_token_count(text)
+            
+            if estimated_tokens > 350:
+                text_chunks = self._split_text_for_gliner(text, max_tokens=350)
+                all_entities = []
+                for chunk in text_chunks:
+                    try:
+                        chunk_entities = self.gliner_model.predict_entities(
+                            chunk, 
+                            labels_conceitos, 
+                            threshold=threshold
+                        )
+                        all_entities.extend(chunk_entities)
+                    except Exception as e:
+                        msg.warn(f"[GLiNER] Erro ao processar chunk para conceitos: {str(e)}")
+                entities = all_entities
+            else:
+                entities = self.gliner_model.predict_entities(
+                    text, 
+                    labels_conceitos, 
+                    threshold=threshold
+                )
+            
+            # Extrai textos dos conceitos detectados
+            for entity in entities:
+                concept_text = entity.get("text", "").strip()
+                if concept_text and concept_text not in concepts:
+                    concepts.append(concept_text)
+                    # Limite de segurança: máximo 15 conceitos por chunk
+                    if len(concepts) >= 15:
+                        break
+        
+        except Exception as e:
+            msg.warn(f"Erro ao extrair conceitos de negócio: {str(e)}")
+        
+        return sorted(list(set(concepts)))[:15]  # Remove duplicatas e limita a 15
+    
+    def _classify_content_type(self, text: str) -> str:
+        """
+        Classifica tipo de conteúdo usando análise sintática do Spacy.
+        
+        Args:
+            text: Texto a classificar
+        
+        Returns:
+            Tipo de conteúdo: "analise", "recomendacao", "acao", "contexto"
+        """
+        if not self.spacy_nlp:
+            return "contexto"
+        
+        try:
+            doc = self.spacy_nlp(text)
+            
+            # Verbos por categoria
+            verbos_analise = ['analisar', 'avaliar', 'examinar', 'investigar', 'estudar', 
+                            'review', 'analyze', 'evaluate', 'examine', 'investigate']
+            verbos_recomendacao = ['recomendar', 'sugerir', 'propor', 'indicar', 'aconselhar',
+                                  'recommend', 'suggest', 'propose', 'advise']
+            verbos_acao = ['implementar', 'executar', 'realizar', 'desenvolver', 'aplicar',
+                          'implement', 'execute', 'develop', 'apply']
+            
+            contagem = {
+                'verbos_analise': 0,
+                'verbos_recomendacao': 0,
+                'verbos_acao': 0
+            }
+            
+            for token in doc:
+                if token.pos_ == 'VERB':
+                    lemma = token.lemma_.lower()
+                    if lemma in verbos_analise:
+                        contagem['verbos_analise'] += 1
+                    elif lemma in verbos_recomendacao:
+                        contagem['verbos_recomendacao'] += 1
+                    elif lemma in verbos_acao:
+                        contagem['verbos_acao'] += 1
+            
+            # Classifica baseado na contagem
+            max_verbos = max(contagem.values())
+            if max_verbos == 0:
+                return "contexto"
+            
+            if contagem['verbos_recomendacao'] == max_verbos:
+                return "recomendacao"
+            elif contagem['verbos_acao'] == max_verbos:
+                return "acao"
+            elif contagem['verbos_analise'] == max_verbos:
+                return "analise"
+            else:
+                return "contexto"
+        
+        except Exception as e:
+            msg.warn(f"Erro ao classificar tipo de conteúdo: {str(e)}")
+            return "contexto"
+    
+    def _extract_metrics(self, text: str, threshold: float = 0.6) -> Dict[str, any]:
+        """
+        Extrai métricas e KPIs mencionados no texto.
+        
+        Args:
+            text: Texto a analisar
+            threshold: Threshold de confiança para GLiNER (default: 0.6)
+        
+        Returns:
+            Dict com:
+            - metricas_qualitativas: List[Dict] - Menções qualitativas de métricas
+            - metricas_quantitativas: List[Dict] - Valores numéricos com contexto
+        """
+        result = {
+            "metricas_qualitativas": [],
+            "metricas_quantitativas": []
+        }
+        
+        # GLiNER para menções qualitativas
+        if self.gliner_model:
+            try:
+                labels_metricas = [
+                    "indicador de desempenho mencionado",
+                    "métrica financeira citada",
+                    "KPI operacional mencionado",
+                    "métrica de mercado citada",
+                    "indicador de qualidade mencionado"
+                ]
+                
+                estimated_tokens = self._estimate_token_count(text)
+                
+                if estimated_tokens > 350:
+                    text_chunks = self._split_text_for_gliner(text, max_tokens=350)
+                    all_entities = []
+                    for chunk in text_chunks:
+                        try:
+                            chunk_entities = self.gliner_model.predict_entities(
+                                chunk, 
+                                labels_metricas, 
+                                threshold=threshold
+                            )
+                            all_entities.extend(chunk_entities)
+                        except Exception as e:
+                            msg.warn(f"[GLiNER] Erro ao processar chunk para métricas: {str(e)}")
+                    entities = all_entities
+                else:
+                    entities = self.gliner_model.predict_entities(
+                        text, 
+                        labels_metricas, 
+                        threshold=threshold
+                    )
+                
+                for entity in entities:
+                    if len(result["metricas_qualitativas"]) >= 20:  # Limite de 20
+                        break
+                    result["metricas_qualitativas"].append({
+                        "texto": entity.get("text", "").strip(),
+                        "label": entity.get("label", ""),
+                        "score": entity.get("score", 0.0)
+                    })
+            except Exception as e:
+                msg.warn(f"Erro ao extrair métricas qualitativas: {str(e)}")
+        
+        # Regex + Spacy para valores numéricos com contexto
+        if self.spacy_nlp:
+            try:
+                doc = self.spacy_nlp(text)
+                
+                # Padrões para detectar métricas numéricas
+                metric_patterns = [
+                    (r'ROI\s+(?:de|of)?\s*([\d.,]+%)', 'ROI'),
+                    (r'crescimento\s+(?:de|of)?\s*([\d.,]+%)', 'crescimento'),
+                    (r'market\s+share\s+(?:de|of)?\s*([\d.,]+%)', 'market_share'),
+                    (r'margem\s+(?:de|of)?\s*([\d.,]+%)', 'margem'),
+                    (r'EBITDA\s+(?:de|of)?\s*([\d.,]+)', 'EBITDA'),
+                    (r'receita\s+(?:de|of)?\s*([\d.,]+)', 'receita'),
+                ]
+                
+                for pattern, metric_name in metric_patterns:
+                    matches = re.finditer(pattern, text, re.IGNORECASE)
+                    for match in matches:
+                        if len(result["metricas_quantitativas"]) >= 20:  # Limite de 20
+                            break
+                        valor = match.group(1)
+                        start_pos = match.start()
+                        end_pos = match.end()
+                        
+                        # Encontra sentença que contém a métrica
+                        sentenca = ""
+                        for sent in doc.sents:
+                            if start_pos >= sent.start_char and end_pos <= sent.end_char:
+                                sentenca = sent.text
+                                break
+                        
+                        result["metricas_quantitativas"].append({
+                            "valor": valor,
+                            "metrica": metric_name,
+                            "sentenca": sentenca.strip()
+                        })
+            except Exception as e:
+                msg.warn(f"Erro ao extrair métricas quantitativas: {str(e)}")
+        
+        return result
+    
     def _detect_sectors_in_text(self, text: str) -> List[str]:
         """Detecta setores usando keyword matching"""
         detected = set()
@@ -420,7 +806,8 @@ class FrameworkDetector:
         frameworks: List[str],
         companies: List[str],
         sectors: List[str],
-        text: str
+        text: str,
+        persons: Optional[List[str]] = None
     ) -> float:
         """
         Calcula confiança na detecção baseado em:
@@ -441,7 +828,8 @@ class FrameworkDetector:
             confidence += 0.1
         
         # Bonus por múltiplas detecções
-        total_detections = len(frameworks) + len(companies) + len(sectors)
+        persons_count = len(persons) if persons else 0
+        total_detections = len(frameworks) + len(companies) + len(sectors) + persons_count
         if total_detections >= 3:
             confidence += 0.2
         elif total_detections >= 2:

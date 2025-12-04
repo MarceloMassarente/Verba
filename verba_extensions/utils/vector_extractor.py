@@ -44,6 +44,13 @@ class VectorExtractor:
             if not isinstance(frameworks, list):
                 frameworks = []
         
+        # Extrai conceitos de negócio (se disponível)
+        conceitos_negocio = []
+        if hasattr(chunk, 'meta') and chunk.meta:
+            conceitos_negocio = chunk.meta.get("conceitos_negocio", [])
+            if not isinstance(conceitos_negocio, list):
+                conceitos_negocio = []
+        
         # Extrai termos semânticos (se disponível)
         semantic_terms = []
         if hasattr(chunk, 'meta') and chunk.meta:
@@ -58,6 +65,8 @@ class VectorExtractor:
         concept_parts = []
         if frameworks:
             concept_parts.extend(frameworks)
+        if conceitos_negocio:
+            concept_parts.extend(conceitos_negocio)
         if semantic_terms:
             concept_parts.extend(semantic_terms)
         if base_text:

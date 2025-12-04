@@ -293,3 +293,4 @@ A falha era causada por recarregamento múltiplo de SentenceTransformer model, c
 
 
 
+

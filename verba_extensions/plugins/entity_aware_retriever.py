@@ -1487,7 +1487,12 @@ class EntityAwareRetriever(Retriever):
                     if is_document_listing_query:
                         try:
                             framework_detector = get_framework_detector()
-                            framework_data = await framework_detector.detect_frameworks(query)
+                            framework_data = await framework_detector.detect_frameworks(
+                                query,
+                                extract_concepts=False,  # Conceitos não usados em filtros de agregação
+                                extract_metrics=False,   # Métricas não usadas em filtros de agregação
+                                classify_content=False   # Tipo de conteúdo não usado em filtros de agregação
+                            )
                             detected_frameworks = framework_data.get("frameworks", [])
                             detected_companies = framework_data.get("companies", [])
                             detected_sectors = framework_data.get("sectors", [])
@@ -1962,10 +1967,17 @@ class EntityAwareRetriever(Retriever):
         try:
             from verba_extensions.utils.framework_detector import get_framework_detector
             framework_detector = get_framework_detector()
-            framework_data = await framework_detector.detect_frameworks(query)
+            framework_data = await framework_detector.detect_frameworks(
+                query,
+                extract_concepts=True,
+                extract_metrics=False,  # Métricas não usadas no reranking por enquanto
+                classify_content=True
+            )
             detected_frameworks = framework_data.get("frameworks", [])
             detected_companies = framework_data.get("companies", [])
             detected_sectors = framework_data.get("sectors", [])
+            detected_concepts = framework_data.get("conceitos_negocio", [])
+            detected_content_type = framework_data.get("tipo_conteudo")
             
             if detected_frameworks:
                 msg.info(f"  🔍 Frameworks detectados na query: {detected_frameworks}")
@@ -2144,7 +2156,20 @@ class EntityAwareRetriever(Retriever):
         framework_filter = None
         enable_framework_filter = config.get("Enable Framework Filter", {}).value if isinstance(config.get("Enable Framework Filter"), InputConfig) else True
         
-        if enable_framework_filter and (detected_frameworks or detected_companies or detected_sectors):
+        # Prioridade: filtros do QueryBuilder > detecção automática na query
+        builder_frameworks = query_filters_from_builder.get("frameworks")
+        builder_companies = query_filters_from_builder.get("companies")
+        builder_persons = query_filters_from_builder.get("persons")
+        builder_conceitos = query_filters_from_builder.get("conceitos_negocio")
+        builder_tipo_conteudo = query_filters_from_builder.get("tipo_conteudo")
+        builder_sectors = query_filters_from_builder.get("sectors")
+        
+        # Usa filtros do QueryBuilder se disponíveis, senão usa detecção automática
+        frameworks_to_filter = builder_frameworks if builder_frameworks else detected_frameworks
+        companies_to_filter = builder_companies if builder_companies else detected_companies
+        sectors_to_filter = builder_sectors if builder_sectors else detected_sectors
+        
+        if enable_framework_filter and (frameworks_to_filter or companies_to_filter or sectors_to_filter or builder_persons or builder_conceitos or builder_tipo_conteudo):
             try:
                 from verba_extensions.integration.schema_validator import collection_has_framework_properties
                 
@@ -2159,21 +2184,39 @@ class EntityAwareRetriever(Retriever):
                     framework_filters = []
                     
                     # Filtro por frameworks
-                    if detected_frameworks:
+                    if frameworks_to_filter:
                         framework_filters.append(
-                            Filter.by_property("frameworks").contains_any(detected_frameworks)
+                            Filter.by_property("frameworks").contains_any(frameworks_to_filter)
                         )
                     
                     # Filtro por empresas
-                    if detected_companies:
+                    if companies_to_filter:
                         framework_filters.append(
-                            Filter.by_property("companies").contains_any(detected_companies)
+                            Filter.by_property("companies").contains_any(companies_to_filter)
+                        )
+                    
+                    # Filtro por pessoas (se QueryBuilder forneceu)
+                    if builder_persons:
+                        framework_filters.append(
+                            Filter.by_property("persons").contains_any(builder_persons)
+                        )
+                    
+                    # Filtro por conceitos de negócio (se QueryBuilder forneceu)
+                    if builder_conceitos:
+                        framework_filters.append(
+                            Filter.by_property("conceitos_negocio").contains_any(builder_conceitos)
+                        )
+                    
+                    # Filtro por tipo de conteúdo (se QueryBuilder forneceu)
+                    if builder_tipo_conteudo:
+                        framework_filters.append(
+                            Filter.by_property("tipo_conteudo").equal(builder_tipo_conteudo)
                         )
                     
                     # Filtro por setores
-                    if detected_sectors:
+                    if sectors_to_filter:
                         framework_filters.append(
-                            Filter.by_property("sectors").contains_any(detected_sectors)
+                            Filter.by_property("sectors").contains_any(sectors_to_filter)
                         )
                     
                     # Combina filtros de framework (AND - todos devem estar presentes)
@@ -2183,7 +2226,20 @@ class EntityAwareRetriever(Retriever):
                         framework_filter = Filter.all_of(framework_filters)
                     
                     if framework_filter:
-                        msg.good(f"  ✅ Filtro de framework aplicado: frameworks={detected_frameworks}, companies={detected_companies}, sectors={detected_sectors}")
+                        filter_info = []
+                        if frameworks_to_filter:
+                            filter_info.append(f"frameworks={frameworks_to_filter}")
+                        if companies_to_filter:
+                            filter_info.append(f"companies={companies_to_filter}")
+                        if builder_persons:
+                            filter_info.append(f"persons={builder_persons}")
+                        if builder_conceitos:
+                            filter_info.append(f"conceitos={builder_conceitos}")
+                        if builder_tipo_conteudo:
+                            filter_info.append(f"tipo={builder_tipo_conteudo}")
+                        if sectors_to_filter:
+                            filter_info.append(f"sectors={sectors_to_filter}")
+                        msg.good(f"  ✅ Filtro de framework aplicado: {', '.join(filter_info)}")
                 else:
                     msg.info(f"  ℹ️ Collection não tem propriedades de framework - filtro não será aplicado")
             except Exception as e:
@@ -2705,15 +2761,23 @@ class EntityAwareRetriever(Retriever):
                                         chunk_id=result.get("chunk_id", 0)
                                     )
                                     # Adicionar metadados se disponíveis
+                                    chunk.meta = chunk.meta or {}
                                     if "frameworks" in result:
-                                        chunk.meta = chunk.meta or {}
                                         chunk.meta["frameworks"] = result["frameworks"]
                                     if "companies" in result:
-                                        chunk.meta = chunk.meta or {}
                                         chunk.meta["companies"] = result["companies"]
+                                    if "persons" in result:
+                                        chunk.meta["persons"] = result["persons"]
+                                    if "conceitos_negocio" in result:
+                                        chunk.meta["conceitos_negocio"] = result["conceitos_negocio"]
+                                    if "metricas" in result:
+                                        chunk.meta["metricas"] = result["metricas"]
+                                    if "tipo_conteudo" in result:
+                                        chunk.meta["tipo_conteudo"] = result["tipo_conteudo"]
                                     if "sectors" in result:
-                                        chunk.meta = chunk.meta or {}
                                         chunk.meta["sectors"] = result["sectors"]
+                                    if "framework_confidence" in result:
+                                        chunk.meta["framework_confidence"] = result["framework_confidence"]
                                     chunks.append(chunk)
                                 except Exception as e:
                                     msg.debug(f"  Erro ao converter resultado multi-vector: {str(e)}")
@@ -3466,6 +3530,53 @@ class EntityAwareRetriever(Retriever):
                 windowed_chunks.append(chunk)
             chunks = windowed_chunks
         
+        # Aplicar reranking inteligente se temos dados enriquecidos da query
+        if detected_frameworks or detected_concepts or detected_companies or detected_content_type:
+            try:
+                query_enriched = {
+                    "frameworks": detected_frameworks,
+                    "conceitos_negocio": detected_concepts,
+                    "companies": detected_companies,
+                    "tipo_conteudo": detected_content_type
+                }
+                
+                # Converter chunks para formato de dict para reranking
+                chunks_dict = []
+                for chunk in chunks:
+                    # Acessa propriedades do chunk (Weaviate retorna objetos com .properties)
+                    if hasattr(chunk, 'properties'):
+                        props = chunk.properties
+                    elif isinstance(chunk, dict):
+                        props = chunk
+                    else:
+                        props = {}
+                    
+                    chunk_dict = {
+                        "frameworks": props.get("frameworks", []),
+                        "companies": props.get("companies", []),
+                        "conceitos_negocio": props.get("conceitos_negocio", []),
+                        "tipo_conteudo": props.get("tipo_conteudo", "contexto"),
+                        "_additional": getattr(chunk, '_additional', {}) if hasattr(chunk, '_additional') else {}
+                    }
+                    chunks_dict.append(chunk_dict)
+                
+                # Aplicar reranking
+                reranked_dicts = self._rerank_with_semantic_filters(chunks_dict, query_enriched)
+                
+                # Reordenar chunks originais baseado no reranking
+                # Criar mapa de score final
+                score_map = {i: r['final_score'] for i, r in enumerate(reranked_dicts)}
+                
+                # Ordenar índices por score
+                sorted_indices = sorted(range(len(chunks)), key=lambda i: score_map.get(i, 0.0), reverse=True)
+                
+                # Reordenar chunks
+                chunks = [chunks[i] for i in sorted_indices]
+                
+                msg.info(f"  🎯 Reranking aplicado: {len(chunks)} chunks reordenados por score semântico")
+            except Exception as e:
+                msg.debug(f"  Erro ao aplicar reranking (não crítico): {str(e)}")
+        
         return (chunks, "Chunks retrieved with entity-aware filtering")
     
     def _is_chunk_quality_good(self, chunk_content: str, chunk_window: int = 0) -> bool:
@@ -3827,6 +3938,206 @@ class EntityAwareRetriever(Retriever):
         }
         
         return (context, filtered_documents, filter_info)
+    
+    def _calculate_framework_boost(
+        self,
+        result: Dict[str, Any],
+        query_frameworks: List[str]
+    ) -> float:
+        """
+        Calcula boost baseado em match de frameworks.
+        
+        Args:
+            result: Resultado do Weaviate
+            query_frameworks: Frameworks detectados na query
+        
+        Returns:
+            Boost score (0.0-1.0)
+        """
+        if not query_frameworks:
+            return 0.0
+        
+        result_frameworks = result.get("frameworks", [])
+        if not result_frameworks:
+            return 0.0
+        
+        # Conta quantos frameworks da query estão no resultado
+        matches = len(set(query_frameworks) & set(result_frameworks))
+        if matches == 0:
+            return 0.0
+        
+        # Boost proporcional ao número de matches
+        return min(matches / len(query_frameworks), 1.0)
+    
+    def _calculate_concept_boost(
+        self,
+        result: Dict[str, Any],
+        query_concepts: List[str]
+    ) -> float:
+        """
+        Calcula boost baseado em match de conceitos de negócio.
+        
+        Args:
+            result: Resultado do Weaviate
+            query_concepts: Conceitos detectados na query
+        
+        Returns:
+            Boost score (0.0-1.0)
+        """
+        if not query_concepts:
+            return 0.0
+        
+        result_concepts = result.get("conceitos_negocio", [])
+        if not result_concepts:
+            return 0.0
+        
+        # Match parcial (conceitos podem ter variações)
+        matches = 0
+        for qc in query_concepts:
+            qc_lower = qc.lower()
+            for rc in result_concepts:
+                if qc_lower in rc.lower() or rc.lower() in qc_lower:
+                    matches += 1
+                    break
+        
+        if matches == 0:
+            return 0.0
+        
+        return min(matches / len(query_concepts), 1.0)
+    
+    def _calculate_company_boost(
+        self,
+        result: Dict[str, Any],
+        query_companies: List[str]
+    ) -> float:
+        """
+        Calcula boost baseado em match de empresas.
+        
+        Args:
+            result: Resultado do Weaviate
+            query_companies: Empresas detectadas na query
+        
+        Returns:
+            Boost score (0.0-1.0)
+        """
+        if not query_companies:
+            return 0.0
+        
+        result_companies = result.get("companies", [])
+        if not result_companies:
+            return 0.0
+        
+        # Match exato ou parcial
+        matches = 0
+        for qc in query_companies:
+            qc_lower = qc.lower()
+            for rc in result_companies:
+                if qc_lower == rc.lower() or qc_lower in rc.lower() or rc.lower() in qc_lower:
+                    matches += 1
+                    break
+        
+        if matches == 0:
+            return 0.0
+        
+        return min(matches / len(query_companies), 1.0)
+    
+    def _calculate_content_type_boost(
+        self,
+        result: Dict[str, Any],
+        query_content_type: Optional[str]
+    ) -> float:
+        """
+        Calcula boost baseado em match de tipo de conteúdo.
+        
+        Args:
+            result: Resultado do Weaviate
+            query_content_type: Tipo de conteúdo da query (se detectado)
+        
+        Returns:
+            Boost score (0.0-1.0)
+        """
+        if not query_content_type:
+            return 0.0
+        
+        result_content_type = result.get("tipo_conteudo", "contexto")
+        if not result_content_type:
+            return 0.0
+        
+        # Match exato
+        if query_content_type.lower() == result_content_type.lower():
+            return 1.0
+        
+        return 0.0
+    
+    def _rerank_with_semantic_filters(
+        self,
+        results: List[Dict[str, Any]],
+        query_enriched: Dict[str, Any],
+        base_similarity_key: str = "_additional"
+    ) -> List[Dict[str, Any]]:
+        """
+        Rerank resultados baseado em match com filtros semânticos.
+        Combina similaridade vetorial + match semântico.
+        
+        Args:
+            results: Lista de resultados do Weaviate
+            query_enriched: Dados enriquecidos da query (frameworks, conceitos, etc.)
+            base_similarity_key: Chave para acessar similaridade vetorial (default: "_additional")
+        
+        Returns:
+            Lista de resultados rerankeados com score final
+        """
+        scored_results = []
+        
+        query_frameworks = query_enriched.get("frameworks", [])
+        query_concepts = query_enriched.get("conceitos_negocio", [])
+        query_companies = query_enriched.get("companies", [])
+        query_content_type = query_enriched.get("tipo_conteudo")
+        
+        for result in results:
+            # Score base: similaridade vetorial (distance do Weaviate)
+            # Weaviate retorna distance (menor = mais similar), converter para score (maior = melhor)
+            base_distance = 0.0
+            if base_similarity_key in result:
+                additional = result[base_similarity_key]
+                if isinstance(additional, dict) and "distance" in additional:
+                    base_distance = additional["distance"]
+            
+            # Converter distance para score (distance 0 = score 1.0, distance maior = score menor)
+            # Normalizar para 0-1 (assumindo distance máximo ~2.0 para cosine)
+            base_score = max(0.0, 1.0 - (base_distance / 2.0))
+            
+            # Boosts por match semântico
+            framework_boost = self._calculate_framework_boost(result, query_frameworks)
+            concept_boost = self._calculate_concept_boost(result, query_concepts)
+            company_boost = self._calculate_company_boost(result, query_companies)
+            content_type_boost = self._calculate_content_type_boost(result, query_content_type)
+            
+            # Score final = weighted sum
+            final_score = (
+                base_score * 0.4 +           # Similaridade semântica (40%)
+                framework_boost * 0.25 +     # Match de frameworks (25%)
+                concept_boost * 0.20 +      # Match de conceitos (20%)
+                company_boost * 0.10 +       # Match de empresas (10%)
+                content_type_boost * 0.05    # Match de tipo (5%)
+            )
+            
+            scored_results.append({
+                **result,
+                'final_score': final_score,
+                'score_breakdown': {
+                    'base': base_score,
+                    'framework': framework_boost,
+                    'concept': concept_boost,
+                    'company': company_boost,
+                    'content_type': content_type_boost
+                }
+            })
+        
+        # Ordena por score final (maior primeiro)
+        scored_results.sort(key=lambda x: x['final_score'], reverse=True)
+        
+        return scored_results
 
 
 def register():

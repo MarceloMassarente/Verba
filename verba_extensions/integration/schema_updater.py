@@ -173,6 +173,30 @@ def get_framework_properties():
             index_filterable=True
         ),
         Property(
+            name="persons",
+            data_type=DataType.TEXT_ARRAY,
+            description="Pessoas mencionadas (executivos, consultores, autores) - limitado a 10 por chunk",
+            index_filterable=True
+        ),
+        Property(
+            name="conceitos_negocio",
+            data_type=DataType.TEXT_ARRAY,
+            description="Conceitos de negócio detectados (vantagem competitiva, proposta de valor, etc.)",
+            index_filterable=True
+        ),
+        Property(
+            name="metricas_mencionadas",
+            data_type=DataType.TEXT_ARRAY,
+            description="Métricas e KPIs mencionados no chunk",
+            index_filterable=True
+        ),
+        Property(
+            name="tipo_conteudo",
+            data_type=DataType.TEXT,
+            description="Tipo de conteúdo: analise, recomendacao, acao, contexto",
+            index_filterable=True
+        ),
+        Property(
             name="sectors",
             data_type=DataType.TEXT_ARRAY,
             description="Setores/indústrias mencionados",

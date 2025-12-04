@@ -424,9 +424,21 @@ class QueryBuilderPlugin:
                 {"name": "chunk_lang", "type": "text", "description": "Idioma do chunk (pt/en)"},
                 {"name": "chunk_date", "type": "text", "description": "Data do chunk"},
                 {"name": "labels", "type": "text[]", "description": "Labels do chunk"},
+                # Propriedades de framework (consultoria)
+                {"name": "frameworks", "type": "text[]", "description": "Frameworks detectados (SWOT, Porter, BCG, etc.)"},
+                {"name": "companies", "type": "text[]", "description": "Empresas mencionadas no chunk"},
+                {"name": "persons", "type": "text[]", "description": "Pessoas mencionadas (executivos, consultores, autores)"},
+                {"name": "conceitos_negocio", "type": "text[]", "description": "Conceitos de negócio detectados"},
+                {"name": "metricas_mencionadas", "type": "text[]", "description": "Métricas e KPIs mencionados"},
+                {"name": "tipo_conteudo", "type": "text", "description": "Tipo de conteúdo: analise, recomendacao, acao, contexto"},
+                {"name": "sectors", "type": "text[]", "description": "Setores/indústrias mencionados"},
+                {"name": "framework_confidence", "type": "number", "description": "Confiança na detecção de frameworks (0.0-1.0)"},
             ],
             "etl_aware": True,
-            "available_filters": ["entities_local_ids", "section_title", "section_entity_ids", "chunk_lang", "chunk_date", "labels"],
+            "available_filters": [
+                "entities_local_ids", "section_title", "section_entity_ids", "chunk_lang", "chunk_date", "labels",
+                "frameworks", "companies", "persons", "conceitos_negocio", "metricas_mencionadas", "tipo_conteudo", "sectors"
+            ],
             "timestamp": time.time()
         }
     
@@ -792,6 +804,19 @@ IMPORTANTE:
   - Exemplo: "Steve Jobs e Microsoft" → entities: ["Steve Jobs", "Microsoft"]
 - Se mencionar data/ano, use filtro temporal (chunk_date)
 - Se mencionar idioma, use filtro de idioma (chunk_lang)
+- **PROPRIEDADES DE FRAMEWORK (Consultoria):**
+  - frameworks: Filtrar por frameworks detectados (SWOT, Porter, BCG, etc.)
+    - Exemplo: "documentos sobre SWOT" → filters: {"frameworks": ["SWOT Analysis"]}
+  - companies: Filtrar por empresas mencionadas
+    - Exemplo: "sobre Apple" → filters: {"companies": ["Apple"]}
+  - persons: Filtrar por pessoas mencionadas (executivos, consultores, autores)
+    - Exemplo: "mencionando Steve Jobs" → filters: {"persons": ["Steve Jobs"]}
+  - conceitos_negocio: Filtrar por conceitos de negócio (vantagem competitiva, proposta de valor, etc.)
+    - Exemplo: "sobre vantagem competitiva" → filters: {"conceitos_negocio": ["vantagem competitiva"]}
+  - tipo_conteudo: Filtrar por tipo de conteúdo (analise, recomendacao, acao, contexto)
+    - Exemplo: "recomendações sobre estratégia" → filters: {"tipo_conteudo": "recomendacao"}
+  - sectors: Filtrar por setores/indústrias
+    - Exemplo: "setor de tecnologia" → filters: {"sectors": ["technology", "tecnologia"]}
 - **PROPRIEDADES V019 (Consulting/Slides):**
   - slide_position: Filtrar por posição no deck (opening, diagnostic, analysis, closing, etc.)
     - Exemplo: "slides de diagnóstico" → filters: {"slide_position": "diagnostic"}
@@ -839,6 +864,12 @@ Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
         "language": "pt",
         "labels": [],
         "section_title": "",
+        "frameworks": null,
+        "companies": null,
+        "persons": null,
+        "conceitos_negocio": null,
+        "tipo_conteudo": null,
+        "sectors": null,
         "slide_position": null,
         "slide_type": null,
         "pattern_genetics": null,

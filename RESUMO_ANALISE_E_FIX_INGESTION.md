@@ -258,3 +258,4 @@ Data: 2025-12-02 | Prioridade: 🔴 CRÍTICA | Impacto: Ingestion funciona novam
 
 
 
+

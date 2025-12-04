@@ -116,10 +116,26 @@ async def collection_has_framework_properties(client, collection_name: str) -> b
         collection_name: Nome da collection
     
     Returns:
-        True se collection tem propriedades de framework
+        True se collection tem propriedades de framework (básicas ou expandidas)
     """
-    framework_props = ["frameworks", "companies", "sectors", "framework_confidence"]
-    return await collection_has_properties(client, collection_name, framework_props)
+    # Propriedades básicas (obrigatórias para considerar que tem framework properties)
+    framework_props_basic = ["frameworks", "companies", "sectors", "framework_confidence"]
+    
+    # Propriedades expandidas (opcionais, mas indicam schema completo)
+    framework_props_expanded = [
+        "persons", "conceitos_negocio", "metricas_mencionadas", "tipo_conteudo"
+    ]
+    
+    # Verifica se tem pelo menos as propriedades básicas
+    has_basic = await collection_has_properties(client, collection_name, framework_props_basic)
+    
+    # Se tem básicas, verifica se também tem expandidas (para relatórios)
+    if has_basic:
+        has_expanded = await collection_has_properties(client, collection_name, framework_props_expanded)
+        if has_expanded:
+            msg.debug(f"Collection {collection_name} tem schema de framework completo (básico + expandido)")
+    
+    return has_basic
 
 
 async def collection_has_v019_properties(client, collection_name: str) -> bool:
@@ -182,8 +198,31 @@ async def validate_collection_for_framework_features(
     Returns:
         Dict com resultado da validação
     """
-    framework_props = ["frameworks", "companies", "sectors", "framework_confidence"]
-    return await validate_collection_schema(client, collection_name, framework_props)
+    # Propriedades básicas (obrigatórias)
+    framework_props_basic = ["frameworks", "companies", "sectors", "framework_confidence"]
+    
+    # Propriedades expandidas (opcionais, mas recomendadas)
+    framework_props_expanded = [
+        "persons", "conceitos_negocio", "metricas_mencionadas", "tipo_conteudo"
+    ]
+    
+    # Valida propriedades básicas
+    result_basic = await validate_collection_schema(client, collection_name, framework_props_basic)
+    
+    # Verifica propriedades expandidas (não obrigatórias)
+    result_expanded = await validate_collection_schema(client, collection_name, framework_props_expanded)
+    
+    # Combina resultados
+    result = {
+        "valid": result_basic["valid"],
+        "missing_basic": result_basic["missing"],
+        "missing_expanded": result_expanded["missing"],
+        "warnings": result_basic["warnings"] + result_expanded["warnings"],
+        "existing": result_basic["existing"],
+        "has_expanded_features": len(result_expanded["missing"]) == 0
+    }
+    
+    return result
 
 
 async def get_schema_compatibility_report(
@@ -237,8 +276,16 @@ async def get_schema_compatibility_report(
         report["missing_etl"] = [p for p in etl_props if p not in existing_props]
         
         # Verifica propriedades de framework
-        framework_props = ["frameworks", "companies", "sectors", "framework_confidence"]
-        report["has_framework_props"] = all(prop in existing_props for prop in framework_props)
+        framework_props_basic = ["frameworks", "companies", "sectors", "framework_confidence"]
+        framework_props_expanded = ["persons", "conceitos_negocio", "metricas_mencionadas", "tipo_conteudo"]
+        
+        report["has_framework_props"] = all(prop in existing_props for prop in framework_props_basic)
+        report["has_framework_expanded"] = all(prop in existing_props for prop in framework_props_expanded)
+        
+        missing_framework_basic = [prop for prop in framework_props_basic if prop not in existing_props]
+        missing_framework_expanded = [prop for prop in framework_props_expanded if prop not in existing_props]
+        
+        report["missing_framework"] = missing_framework_basic + missing_framework_expanded
         report["missing_framework"] = [p for p in framework_props if p not in existing_props]
         
         # Gera recomendações
@@ -246,6 +293,12 @@ async def get_schema_compatibility_report(
             report["recommendations"].append(
                 "Collection não tem propriedades de framework. "
                 "Para usar detecção de frameworks, migre a collection usando o script de migração."
+            )
+        elif not report.get("has_framework_expanded", False):
+            report["recommendations"].append(
+                "Collection tem propriedades básicas de framework, mas não tem propriedades expandidas "
+                "(persons, conceitos_negocio, metricas_mencionadas, tipo_conteudo). "
+                "Para usar todas as funcionalidades de enriquecimento, recrie a collection com schema completo."
             )
         
         if not report["has_etl_props"]:

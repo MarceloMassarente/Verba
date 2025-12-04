@@ -57,20 +57,47 @@ async def _map_framework_properties_to_weaviate(
         # Extrai frameworks do meta
         frameworks = meta.get("frameworks", [])
         companies = meta.get("companies", [])
+        persons = meta.get("persons", [])
+        conceitos_negocio = meta.get("conceitos_negocio", [])
+        metricas = meta.get("metricas", {})
+        tipo_conteudo = meta.get("tipo_conteudo", "contexto")
         sectors = meta.get("sectors", [])
         framework_confidence = meta.get("framework_confidence", 0.0)
+        
+        # Extrai métricas mencionadas (qualitativas e quantitativas)
+        metricas_mencionadas = []
+        if isinstance(metricas, dict):
+            metricas_qualitativas = metricas.get("metricas_qualitativas", [])
+            metricas_quantitativas = metricas.get("metricas_quantitativas", [])
+            # Adiciona textos das métricas qualitativas
+            for mq in metricas_qualitativas:
+                if isinstance(mq, dict) and "texto" in mq:
+                    metricas_mencionadas.append(mq["texto"])
+            # Adiciona métricas quantitativas formatadas
+            for mq in metricas_quantitativas:
+                if isinstance(mq, dict) and "metrica" in mq and "valor" in mq:
+                    metricas_mencionadas.append(f"{mq['metrica']}: {mq['valor']}")
         
         if has_framework_props:
             # Collection tem propriedades de framework - adiciona diretamente
             chunk_properties["frameworks"] = frameworks
             chunk_properties["companies"] = companies
+            chunk_properties["persons"] = persons
+            chunk_properties["conceitos_negocio"] = conceitos_negocio
+            chunk_properties["metricas_mencionadas"] = metricas_mencionadas
+            chunk_properties["tipo_conteudo"] = tipo_conteudo
             chunk_properties["sectors"] = sectors
             chunk_properties["framework_confidence"] = framework_confidence
         else:
             # Fallback: salva em meta JSON (já está lá, mas garante que está)
-            if frameworks or companies or sectors:
+            if frameworks or companies or persons or conceitos_negocio or metricas_mencionadas or sectors:
                 meta["frameworks"] = frameworks
                 meta["companies"] = companies
+                meta["persons"] = persons
+                meta["conceitos_negocio"] = conceitos_negocio
+                meta["metricas"] = metricas
+                meta["metricas_mencionadas"] = metricas_mencionadas
+                meta["tipo_conteudo"] = tipo_conteudo
                 meta["sectors"] = sectors
                 meta["framework_confidence"] = framework_confidence
                 chunk_properties["meta"] = json.dumps(meta)
