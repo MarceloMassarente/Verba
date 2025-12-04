@@ -5,11 +5,13 @@ Extrai entidades da query e fornece para o EntityAwareRetriever
 
 import os
 import re
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from wasabi import msg
 
-# Lazy load - cache de modelos por idioma
-_nlp_models = {}  # {"pt": nlp_pt, "en": nlp_en}
+# Importar funções do módulo utilitário comum
+from verba_extensions.utils.language_utils import detect_query_language, get_nlp
+
+# Lazy load
 _gazetteer = None
 
 def load_gazetteer(path: str = None) -> Dict:
@@ -40,89 +42,6 @@ def load_gazetteer(path: str = None) -> Dict:
             pass
     
     return {}
-
-def detect_query_language(query: str) -> str:
-    """Detecta idioma da query (pt, en, etc.)"""
-    try:
-        from langdetect import detect
-        lang = detect(query)
-        # Normalizar códigos de idioma
-        if lang in ["pt", "pt-BR", "pt-PT"]:
-            return "pt"
-        elif lang in ["en", "en-US", "en-GB"]:
-            return "en"
-        return lang
-    except:
-        # Fallback: heurística simples
-        # Contar palavras comuns em português vs inglês
-        query_lower = query.lower()
-        pt_words = ["de", "da", "do", "em", "para", "com", "que", "não", "é", "são"]
-        en_words = ["the", "of", "to", "in", "for", "with", "that", "not", "is", "are"]
-        pt_count = sum(1 for word in pt_words if word in query_lower)
-        en_count = sum(1 for word in en_words if word in query_lower)
-        if pt_count > en_count:
-            return "pt"
-        elif en_count > pt_count:
-            return "en"
-        return "pt"  # Default para português
-
-def get_nlp(language: str = None):
-    """Lazy load spaCy com suporte multi-idioma
-    
-    Args:
-        language: Código do idioma ("pt", "en"). Se None, usa default ou detecta.
-    
-    Returns:
-        Modelo spaCy apropriado ou None se não disponível
-    """
-    global _nlp_models
-    
-    # Se language não fornecido, tentar usar default da env var
-    if language is None:
-        model_name = os.getenv("SPACY_MODEL", "pt_core_news_sm")
-        # Inferir idioma do nome do modelo
-        if "pt_core" in model_name or "pt" in model_name:
-            language = "pt"
-        elif "en_core" in model_name or "en" in model_name:
-            language = "en"
-        else:
-            language = "pt"  # Default
-    
-    # Retornar modelo já carregado
-    if language in _nlp_models:
-        return _nlp_models[language]
-    
-    # Mapear idioma para modelo spaCy
-    model_map = {
-        "pt": "pt_core_news_sm",
-        "en": "en_core_web_sm",
-    }
-    
-    model_name = model_map.get(language, "pt_core_news_sm")
-    
-    try:
-        import spacy
-        msg.info(f"  Carregando modelo spaCy: {model_name} (idioma: {language})")
-        nlp = spacy.load(model_name)
-        _nlp_models[language] = nlp
-        return nlp
-    except OSError as e:
-        msg.warn(f"  ⚠️ Modelo spaCy '{model_name}' não encontrado para idioma '{language}'")
-        msg.warn(f"  💡 Instale: python -m spacy download {model_name}")
-        # Tentar fallback para português se não for pt
-        if language != "pt" and "pt" in model_map:
-            try:
-                fallback_model = model_map["pt"]
-                msg.info(f"  Tentando fallback: {fallback_model}")
-                nlp = spacy.load(fallback_model)
-                _nlp_models["pt"] = nlp
-                return nlp
-            except:
-                pass
-        return None
-    except Exception as e:
-        msg.warn(f"  ⚠️ Erro ao carregar spaCy: {str(e)}")
-        return None
 
 def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List[str]:
     """Extrai entidades da QUERY usando SpaCy (inteligente, sem gazetteer obrigatório)
@@ -293,6 +212,173 @@ def extract_entities_from_query(query: str, use_gazetteer: bool = False) -> List
         import traceback
         msg.info(f"Traceback: {traceback.format_exc()}")
         return []
+
+
+# ============================================================================
+# FUNÇÕES DE PARSING DE QUERY (consolidadas de query_parser.py)
+# ============================================================================
+
+def classify_token(token) -> str:
+    """Classifica um token em: ENTITY, SEMANTIC, CONNECTOR, OTHER
+    
+    IMPORTANTE: Filtra apenas PERSON e ORG (alto valor, específicas)
+    Evita GPE/LOC/MISC que são genéricas e causam filtros muito restritivos
+    """
+    
+    # 1. NER labels - apenas PERSON e ORG
+    if token.ent_type_ in ["ORG", "PERSON", "PER"]:
+        return "ENTITY"
+    
+    # 2. Proper nouns (mesmo sem NER)
+    if token.pos_ == "PROPN":
+        return "ENTITY"
+    
+    # 3. Conceitos semânticos (substantivos e adjetivos)
+    if token.pos_ in ["NOUN", "ADJ"]:
+        return "SEMANTIC"
+    
+    # 4. Conectores
+    if token.pos_ in ["CCONJ", "ADP", "DET", "AUX"]:
+        return "CONNECTOR"
+    
+    return "OTHER"
+
+
+def classify_query_intent(query: str) -> str:
+    """Classifica a intenção da query"""
+    
+    query_lower = query.lower()
+    
+    # Comparação
+    if any(word in query_lower for word in ["vs", "versus", "diferença", "comparação", "contra"]):
+        return "COMPARISON"
+    
+    # Combinação (AND)
+    if any(word in query_lower for word in [" e ", " com ", " ambos", " juntos"]):
+        return "COMBINATION"
+    
+    # Pergunta
+    if any(word in query_lower for word in ["qual", "o que", "como", "por que", "quem", "onde"]):
+        return "QUESTION"
+    
+    # Busca geral
+    return "GENERAL_SEARCH"
+
+
+def _lookup_entity_in_gazetteer(text: str) -> Optional[str]:
+    """Procura um texto no gazetteer"""
+    
+    gaz = load_gazetteer()
+    text_lower = text.lower()
+    
+    for entity_id, aliases in gaz.items():
+        for alias in aliases:
+            if alias.lower() == text_lower:
+                return entity_id
+    
+    return None
+
+
+def parse_query(query: str) -> Dict[str, Any]:
+    """
+    Faz parsing completo da query separando entidades de conceitos semânticos
+    
+    Retorna:
+    {
+        "original_query": str,
+        "entities": [{"text": str, "entity_id": Optional[str], "confidence": float}],
+        "semantic_concepts": [str],
+        "intent": str,  # ENTITY, SEMANTIC, COMPARISON, COMBINATION, QUESTION, GENERAL
+        "tokens": [{"text": str, "pos": str, "ent_type": str, "classification": str}]
+    }
+    """
+    # Detectar idioma da query e usar modelo apropriado
+    query_language = detect_query_language(query)
+    nlp = get_nlp(language=query_language)
+    if not nlp:
+        # Fallback: sem NLP, trata tudo como semântico
+        return {
+            "original_query": query,
+            "entities": [],
+            "semantic_concepts": [query],
+            "intent": "GENERAL_SEARCH",
+            "tokens": [],
+            "error": "NLP not available"
+        }
+    
+    try:
+        doc = nlp(query)
+        
+        result = {
+            "original_query": query,
+            "entities": [],
+            "semantic_concepts": [],
+            "intent": classify_query_intent(query),
+            "tokens": [],
+            "error": None
+        }
+        
+        # Processa cada token
+        for token in doc:
+            classification = classify_token(token)
+            
+            token_info = {
+                "text": token.text,
+                "pos": token.pos_,
+                "ent_type": token.ent_type_,
+                "dep": token.dep_,
+                "classification": classification
+            }
+            
+            result["tokens"].append(token_info)
+            
+            # Classifica e agrupa
+            if classification == "ENTITY":
+                entity_id = _lookup_entity_in_gazetteer(token.text)
+                result["entities"].append({
+                    "text": token.text,
+                    "entity_id": entity_id,
+                    "confidence": 0.95 if entity_id else 0.80,
+                    "source": "NER"
+                })
+            
+            elif classification == "SEMANTIC" and token.text.lower() not in ["que", "como", "qual"]:
+                # Evita palavras muito genéricas
+                result["semantic_concepts"].append(token.text.lower())
+        
+        # Remove duplicatas em semantic_concepts
+        result["semantic_concepts"] = list(set(result["semantic_concepts"]))
+        
+        return result
+    
+    except Exception as e:
+        msg.warn(f"Erro ao fazer parsing da query: {str(e)}")
+        return {
+            "original_query": query,
+            "entities": [],
+            "semantic_concepts": [query],
+            "intent": "GENERAL_SEARCH",
+            "tokens": [],
+            "error": str(e)
+        }
+
+
+def format_query_for_display(parsed_query: Dict[str, Any]) -> str:
+    """Formata resultado do parsing para exibição"""
+    
+    lines = [
+        f"Query Original: {parsed_query['original_query']}",
+        f"Intent: {parsed_query['intent']}",
+    ]
+    
+    if parsed_query["entities"]:
+        lines.append(f"Entidades: {', '.join([e['text'] for e in parsed_query['entities']])}")
+    
+    if parsed_query["semantic_concepts"]:
+        lines.append(f"Conceitos: {', '.join(parsed_query['semantic_concepts'])}")
+    
+    return "\n".join(lines)
+
 
 def register_hooks():
     """Registra hooks para fornecer entity_context ao retriever"""

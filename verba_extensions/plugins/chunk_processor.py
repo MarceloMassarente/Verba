@@ -50,20 +50,12 @@ class ChunkProcessor:
             return
         
         # Plugins conhecidos para carregar
-        # NOTA: recursive_document_splitter removido pois fazia re-chunking redundante
-        # O chunker inicial (RecursiveChunker, SentenceChunker) já divide bem
-        # O plugin gerava 25x mais chunks (93 → 2379), desperdiçando recursos
         known_plugins = [
             "llm_metadata_extractor",
-            # "recursive_document_splitter",  # Desabilitado - re-chunking redundante
             "reranker",
         ]
         
         for plugin_name in known_plugins:
-            # Pular plugin removido
-            if plugin_name == "recursive_document_splitter":
-                logger.info(f"Plugin {plugin_name} desabilitado - pulando")
-                continue
                 
             try:
                 module_path = f"verba_extensions.plugins.{plugin_name}"

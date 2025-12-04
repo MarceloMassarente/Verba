@@ -41,27 +41,11 @@ class AdaptiveEntropyAnalyzer:
         self.threshold_light = threshold_light
         self.threshold_strong = threshold_strong
         
-        # Stopwords PT/EN
-        self._stopwords_pt = {
-            "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "da", "do", "das", "dos",
-            "em", "na", "no", "nas", "nos", "por", "para", "com", "sem", "sob", "sobre",
-            "e", "ou", "que", "qual", "quais", "como", "quando", "onde", "quem", "porque",
-            "é", "são", "está", "estão", "foi", "foram", "ser", "ter", "haver",
-            "este", "esta", "estes", "estas", "esse", "essa", "esses", "essas",
-            "aquele", "aquela", "aqueles", "aquelas", "isso", "isto", "aquilo",
-            "meu", "minha", "seu", "sua", "nosso", "nossa", "dele", "dela",
-            "me", "te", "se", "nos", "vos", "lhe", "lhes"
-        }
-        self._stopwords_en = {
-            "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "from", "by",
-            "about", "as", "is", "are", "was", "were", "been", "be", "have", "has", "had",
-            "do", "does", "did", "will", "would", "could", "should", "may", "might",
-            "this", "that", "these", "those", "it", "its", "they", "them", "their",
-            "what", "which", "who", "whom", "where", "when", "why", "how",
-            "and", "or", "but", "if", "then", "else", "so", "because",
-            "i", "you", "he", "she", "we", "my", "your", "his", "her", "our"
-        }
-        self._stopwords = self._stopwords_pt | self._stopwords_en
+        # Stopwords PT/EN - importadas do módulo utilitário comum
+        from verba_extensions.utils.language_utils import STOPWORDS_PT, STOPWORDS_EN, get_all_stopwords
+        self._stopwords_pt = STOPWORDS_PT
+        self._stopwords_en = STOPWORDS_EN
+        self._stopwords = get_all_stopwords()
     
     def calculate_entropy(self, query: str) -> Tuple[float, Dict[str, Any]]:
         """

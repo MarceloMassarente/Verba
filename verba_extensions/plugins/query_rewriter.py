@@ -49,26 +49,10 @@ class QueryRewriterPlugin:
         self.entropy_threshold_light = 0.5  # Moderado, rewrite leve
         self.entropy_threshold_strong = 0.7  # Genérico, rewrite forte
         
-        # Stopwords para cálculo de entropia
-        self._stopwords_pt = {
-            "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "da", "do", "das", "dos",
-            "em", "na", "no", "nas", "nos", "por", "para", "com", "sem", "sob", "sobre",
-            "e", "ou", "que", "qual", "quais", "como", "quando", "onde", "quem", "porque",
-            "é", "são", "está", "estão", "foi", "foram", "ser", "ter", "haver",
-            "este", "esta", "estes", "estas", "esse", "essa", "esses", "essas",
-            "aquele", "aquela", "aqueles", "aquelas", "isso", "isto", "aquilo",
-            "meu", "minha", "seu", "sua", "nosso", "nossa", "dele", "dela",
-            "me", "te", "se", "nos", "vos", "lhe", "lhes"
-        }
-        self._stopwords_en = {
-            "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "from", "by",
-            "about", "as", "is", "are", "was", "were", "been", "be", "have", "has", "had",
-            "do", "does", "did", "will", "would", "could", "should", "may", "might",
-            "this", "that", "these", "those", "it", "its", "they", "them", "their",
-            "what", "which", "who", "whom", "where", "when", "why", "how",
-            "and", "or", "but", "if", "then", "else", "so", "because",
-            "i", "you", "he", "she", "we", "my", "your", "his", "her", "our"
-        }
+        # Stopwords para cálculo de entropia - importadas do módulo utilitário comum
+        from verba_extensions.utils.language_utils import STOPWORDS_PT, STOPWORDS_EN
+        self._stopwords_pt = STOPWORDS_PT
+        self._stopwords_en = STOPWORDS_EN
     
     def _get_generator(self):
         """Lazy load do generator (Anthropic)"""

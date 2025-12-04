@@ -4,30 +4,35 @@
 
 A integração do Apache Tika foi implementada em **duas camadas**:
 
-1. **Plugin Reader** (`tika_reader.py`) - Reader dedicado usando Tika
+1. **Universal Reader** (`universal_reader.py` v2.0.0) - Reader universal com integração Tika
 2. **Patch de Fallback** (`tika_fallback_patch.py`) - Integração transparente no BasicReader
+
+> **Nota:** O plugin `tika_reader.py` foi **consolidado** no Universal Reader (v2.0.0) para evitar redundância.
 
 Esta arquitetura permite:
 - ✅ **Atualizações seguras** - patches não quebram com atualizações do Verba
 - ✅ **Flexibilidade** - pode usar Tika como reader principal ou apenas fallback
 - ✅ **Transparência** - métodos nativos têm prioridade, Tika só quando necessário
+- ✅ **Consolidação** - um único reader universal para arquivos, URLs e JSON
 
 ---
 
 ## 🏗️ Arquitetura
 
-### **1. Plugin Tika Reader**
+### **1. Universal Reader com Tika**
 
-**Localização:** `verba_extensions/plugins/tika_reader.py`
+**Localização:** `verba_extensions/plugins/universal_reader.py`
 
 **Características:**
-- Reader completo usando Apache Tika
-- Suporta 1000+ formatos
+- Reader verdadeiramente universal: Arquivos + URLs + JSON Results
+- Integração Tika para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
+- Suporta 1000+ formatos via Tika quando disponível
 - Extrai metadados automaticamente
-- Configurável via UI ou variável de ambiente
+- Configurável via UI ("Use Tika When Available") ou variável de ambiente
 
 **Uso:**
-- Escolher "Tika Reader (Multi-Formato)" na UI ao importar
+- Escolher "Universal A2 (Arquivos + URLs)" na UI ao importar
+- Habilitar "Use Tika When Available" para melhor extração
 - Útil para formatos exóticos ou quando precisa de metadados
 
 ### **2. Patch de Fallback**
@@ -244,9 +249,11 @@ document.meta['tika_metadata']  # Todos os metadados (dict)
 
 ## 🔗 Arquivos Relacionados
 
-- `verba_extensions/plugins/tika_reader.py` - Reader Tika
+- `verba_extensions/plugins/universal_reader.py` - Reader Universal com integração Tika (v2.0.0)
 - `verba_extensions/integration/tika_fallback_patch.py` - Patch de fallback
 - `verba_extensions/startup.py` - Inicialização (aplica patches)
+
+> **Nota:** `tika_reader.py` foi consolidado no Universal Reader (v2.0.0)
 - `verba_extensions/patches/README_PATCHES.md` - Documentação de patches
 - `scripts/test_tika_local_file.py` - Script de teste
 

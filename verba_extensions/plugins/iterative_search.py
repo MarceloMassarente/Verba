@@ -1,5 +1,8 @@
 """
-RAG 2.0 Enhancement: Iterative Search During Generation
+EXPERIMENTAL - RAG 2.0 Enhancement: Iterative Search During Generation
+
+⚠️ STATUS: Este plugin é EXPERIMENTAL e não está totalmente integrado no fluxo principal.
+Use com cautela em produção. Veja docs/guides/RAG2_EXPERIMENTAL_PLUGINS.md para mais detalhes.
 
 Este plugin implementa busca iterativa durante a geração de resposta,
 simulando o comportamento do RAG 2.0 onde o modelo pode pausar a geração

@@ -43,7 +43,7 @@ class BilingualFilterPlugin:
     
     def detect_query_language_simple(self, query: str) -> Optional[str]:
         """
-        Detecta idioma da query usando heurística de palavras-chave.
+        Detecta idioma da query usando módulo utilitário comum.
         
         Args:
             query: Query do usuário
@@ -54,37 +54,8 @@ class BilingualFilterPlugin:
         if not query or not query.strip():
             return None
         
-        query_lower = query.lower()
-        
-        # Contar ocorrências de palavras-chave
-        pt_count = sum(1 for word in self.pt_words if f" {word} " in f" {query_lower} ")
-        en_count = sum(1 for word in self.en_words if f" {word} " in f" {query_lower} ")
-        
-        # Se ambos zero, tentar detectar por padrões específicos
-        if pt_count == 0 and en_count == 0:
-            # Padrões PT
-            pt_patterns = ["não", "não", "não", "não", "não", "não"]
-            en_patterns = ["not", "don't", "doesn't", "didn't", "won't", "can't"]
-            
-            pt_pattern_count = sum(1 for pattern in pt_patterns if pattern in query_lower)
-            en_pattern_count = sum(1 for pattern in en_patterns if pattern in query_lower)
-            
-            if pt_pattern_count > en_pattern_count:
-                return "pt"
-            elif en_pattern_count > pt_pattern_count:
-                return "en"
-            else:
-                # Não detectou, retornar None
-                return None
-        
-        # Retornar idioma com mais ocorrências
-        if pt_count > en_count:
-            return "pt"
-        elif en_count > pt_count:
-            return "en"
-        else:
-            # Empate, retornar None
-            return None
+        from verba_extensions.utils.language_utils import detect_query_language
+        return detect_query_language(query)
     
     def detect_query_language(self, query: str) -> Optional[str]:
         """

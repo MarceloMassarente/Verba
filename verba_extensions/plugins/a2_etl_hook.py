@@ -66,19 +66,9 @@ def load_gazetteer(path: str = None) -> Dict:
     return {}
 
 def get_nlp():
-    """Lazy load spaCy"""
-    global _nlp
-    if _nlp is not None:
-        return _nlp
-    
-    model = os.getenv("SPACY_MODEL", "pt_core_news_sm")
-    try:
-        import spacy
-        _nlp = spacy.load(model)
-        return _nlp
-    except Exception as e:
-        msg.warn(f"spaCy não disponível para ETL: {str(e)}")
-        return None
+    """Lazy load spaCy - usa módulo utilitário comum"""
+    from verba_extensions.utils.language_utils import get_nlp as get_nlp_common
+    return get_nlp_common()
 
 def match_aliases(text: str, gaz: Dict) -> List[str]:
     """Encontra entity_ids no texto"""

@@ -1009,17 +1009,18 @@ embedding, was_cached = get_cached_embedding(
 ### 6. **Tika Integration (Fallback + Reader + Universal Reader)** ⭐ NOVO
 
 **Arquivos:**
-- `verba_extensions/plugins/tika_reader.py` - Reader usando Tika
+- ~~`verba_extensions/plugins/tika_reader.py`~~ - **CONSOLIDADO** no Universal Reader (v2.0.0)
 - `verba_extensions/integration/tika_fallback_patch.py` - Patch de fallback no BasicReader
-- `verba_extensions/plugins/universal_reader.py` - Integração Tika no Universal Reader
+- `verba_extensions/plugins/universal_reader.py` - **Reader Universal** com integração Tika + Docling + URLs
 
 **O que faz:**
 
 **1. Tika Reader Plugin:**
-- Adiciona um Reader que usa Apache Tika para extração
-- Suporta 1000+ formatos (PDF, DOCX, PPTX, ODT, RTF, etc.)
+- ~~Plugin separado~~ → **CONSOLIDADO no Universal Reader**
+- Universal Reader usa Tika diretamente para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
+- Suporta 1000+ formatos via Tika quando disponível
 - Extrai metadados automaticamente (autor, título, data, etc.)
-- Configurável via variável de ambiente `TIKA_SERVER_URL`
+- Configurável via "Use Tika When Available" na UI ou variável de ambiente `TIKA_SERVER_URL`
 
 **2. Tika Fallback Patch:**
 - Modifica `BasicReader.load_pdf_file()` para usar Tika quando método nativo falha
@@ -1027,11 +1028,13 @@ embedding, was_cached = get_cached_embedding(
 - Modifica `BasicReader.load()` para usar Tika quando formato não é suportado
 - Totalmente transparente - tenta método nativo primeiro, depois Tika
 
-**3. Universal Reader Integration:**
-- Universal Reader usa Tika diretamente para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
+**3. Universal Reader Integration (v2.0.0):**
+- **Verdadeiramente Universal**: Arquivos + URLs + JSON Results
+- Usa Tika diretamente para formatos benéficos (PPTX, DOC, RTF, ODT, etc.)
 - Extrai metadados automaticamente e passa para o ETL
 - Fallback para BasicReader se Tika não disponível ou formato não benéfico
 - Configurável via "Use Tika When Available" na UI
+- **NOVO**: Suporta URLs web (via Trafilatura) e JSON Results (pipelines externas)
 
 **Impacto:**
 - ✅ **PPTX funciona** (estava listado mas não implementado)

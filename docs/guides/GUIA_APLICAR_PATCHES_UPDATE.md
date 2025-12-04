@@ -445,12 +445,12 @@ Após aplicar todos os patches:
 - [ ] Mudança 2 aplicada (CORS)
 - [ ] Mudança 3 aplicada (SentenceTransformers)
 - [ ] Mudança 4 aplicada (connect_to_custom)
-- [ ] ⭐ PASSO 7: Tika Integration verificada ⭐ NOVO
+  - [ ] ⭐ PASSO 7: Tika Integration verificada ⭐ NOVO
   - [ ] `tika_fallback_patch.py` presente e funcionando
-  - [ ] `tika_reader.py` plugin carregado
-  - [ ] `universal_reader.py` tem integração Tika
+  - [ ] `universal_reader.py` (v2.0.0) tem integração Tika consolidada
   - [ ] `TIKA_SERVER_URL` configurado (se usar Tika)
   - [ ] Teste com PPTX funciona
+  - [ ] **Nota:** `tika_reader.py` foi consolidado no Universal Reader
 - [ ] Arquivos novos copiados
 - [ ] Patches de ETL verificados (PASSO 4.5) ⭐ NOVO
 - [ ] Dependências atualizadas

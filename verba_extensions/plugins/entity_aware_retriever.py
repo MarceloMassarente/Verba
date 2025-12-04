@@ -1339,7 +1339,7 @@ class EntityAwareRetriever(Retriever):
         4. Retorna chunks ordenados por relevância
         """
         from goldenverba.components.retriever.WindowRetriever import WindowRetriever
-        from verba_extensions.plugins.query_parser import parse_query
+        from verba_extensions.plugins.entity_aware_query_orchestrator import parse_query
         
         msg.info(f"EntityAwareRetriever processando: '{query}'")
         
@@ -1841,7 +1841,7 @@ class EntityAwareRetriever(Retriever):
         except Exception as e:
             msg.warn(f"  ⚠️ Erro ao extrair entidades (modo inteligente): {str(e)}")
         
-        # Fallback: usar query_parser se modo inteligente não funcionou
+        # Fallback: usar parse_query do orchestrator se modo inteligente não funcionou
         if not entity_texts and not entity_ids:
             parse_query_text = rewritten_query if enable_query_rewriting or rewritten_query != query else query
             parsed = parse_query(parse_query_text)

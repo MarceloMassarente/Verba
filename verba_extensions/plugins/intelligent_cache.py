@@ -1,5 +1,8 @@
 """
-RAG 2.0 Enhancement: Intelligent Cache with Similarity Search
+EXPERIMENTAL - RAG 2.0 Enhancement: Intelligent Cache with Similarity Search
+
+⚠️ STATUS: Este plugin é EXPERIMENTAL e não está totalmente integrado no fluxo principal.
+Use com cautela em produção. Veja docs/guides/RAG2_EXPERIMENTAL_PLUGINS.md para mais detalhes.
 
 Este plugin implementa cache inteligente que:
 1. Reutiliza respostas de queries SIMILARES (não apenas idênticas)

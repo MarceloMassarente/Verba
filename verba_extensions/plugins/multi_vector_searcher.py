@@ -1,5 +1,9 @@
 """
-Multi-Vector Searcher
+EXPERIMENTAL - Multi-Vector Searcher
+
+⚠️ STATUS: Este plugin é EXPERIMENTAL e não está totalmente integrado no fluxo principal.
+Use com cautela em produção. Veja docs/guides/RAG2_EXPERIMENTAL_PLUGINS.md para mais detalhes.
+
 Busca inteligente em múltiplos named vectors com combinação RRF (Reciprocal Rank Fusion)
 
 Aprende do RAG2: busca paralela em múltiplos vetores especializados e combinação inteligente

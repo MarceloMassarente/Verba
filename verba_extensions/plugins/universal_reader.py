@@ -1,6 +1,11 @@
 """
-Reader Universal A2 - Aplica ETL automaticamente em qualquer conteúdo
-Usa qualquer formato (PDF, DOCX, TXT, etc.) e garante ETL por chunk
+Reader Universal A2 - Verdadeiramente Universal
+Aceita ARQUIVOS e URLs, aplica ETL automaticamente em qualquer conteúdo
+
+FONTES SUPORTADAS:
+- Arquivos: PDF, DOCX, TXT, JSON, CSV, Excel, HTML, Markdown
+- URLs: Qualquer página web (extração via Trafilatura)
+- JSON Results: Formato {"results": [...]} para pipelines externas
 
 INTEGRAÇÃO TIKA: Usa Tika quando disponível para melhor extração e metadados
 INTEGRAÇÃO DOCLING: Usa Docling quando disponível para parsing estruturado com mapeamento por página
@@ -10,39 +15,100 @@ import os
 import requests
 import re
 import base64
+import json
+import hashlib
 from typing import List, Optional, Dict, Any
 from html import unescape
+from urllib.parse import urlparse
 from goldenverba.components.document import Document
 from goldenverba.components.interfaces import Reader
 from goldenverba.server.types import FileConfig
 from goldenverba.components.types import InputConfig
 from wasabi import msg
 
+# Web scraping
+try:
+    import httpx
+    import trafilatura
+    WEBSCRAPING_AVAILABLE = True
+except ImportError:
+    WEBSCRAPING_AVAILABLE = False
+    msg.warn("⚠️ Web scraping não disponível. Instale: pip install httpx trafilatura")
+
+
+def _url_host(url: str) -> str:
+    """Extrai hostname de uma URL"""
+    try:
+        return urlparse(url).netloc.lower()
+    except:
+        return ""
+
+
+async def _fetch_url_to_text(url: str) -> tuple:
+    """Baixa URL e extrai texto usando Trafilatura"""
+    meta = {"title": "", "language": "und", "published_at": ""}
+    
+    if not WEBSCRAPING_AVAILABLE:
+        return f"Erro: httpx/trafilatura não instalados", meta
+    
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            r = await client.get(url, headers={"User-Agent": "Verba-Universal/1.0"})
+            html = r.text
+        
+        # Extrai título
+        title_match = re.search(r"<title>(.*?)</title>", html, re.I | re.S)
+        if title_match:
+            meta["title"] = re.sub(r"\s+", " ", title_match.group(1)).strip()
+        
+        # Extrai texto limpo com Trafilatura
+        text = trafilatura.extract(html, include_comments=False, favor_recall=True) or ""
+        
+        # Detecta idioma
+        lang_match = re.search(r'lang=["\']([a-zA-Z-]+)["\']', html)
+        if lang_match:
+            meta["language"] = lang_match.group(1).lower()
+        
+        return text, meta
+    except Exception as e:
+        return f"Erro ao buscar {url}: {str(e)}", meta
+
 
 class UniversalA2Reader(Reader):
     """
-    Reader Universal que aplica ETL A2 automaticamente
+    Reader Verdadeiramente Universal com ETL A2 automático
     
-    Funciona como wrapper do Default Reader, mas:
-    - Aceita qualquer formato (PDF, DOCX, TXT, JSON, CSV, Excel)
-    - Garante que enable_etl=True em todos os documentos
-    - ETL executa automaticamente após chunking (via hook)
+    Suporta:
+    - Arquivos: PDF, DOCX, TXT, JSON, CSV, Excel, HTML, Markdown
+    - URLs: Páginas web (via Trafilatura)
+    - JSON Results: Formato {"results": [...]} de pipelines externas
+    
+    Prioridade de extração:
+    1. Docling (parsing estruturado) - se configurado
+    2. Tika (multi-formato) - se disponível
+    3. BasicReader (fallback padrão)
+    4. Trafilatura (para URLs web)
     """
     
     def __init__(self):
         super().__init__()
-        self.name = "Universal A2 (ETL Automático)"
-        self.type = "FILE"
-        # Aceita todos os formatos do Default Reader
+        self.name = "Universal A2 (Arquivos + URLs)"
+        self.type = "BOTH"  # Aceita FILE e URL
+        # Aceita todos os formatos
         self.extension = [
             ".txt", ".md", ".csv", ".json", ".pdf", 
             ".docx", ".xlsx", ".xls", ".html", ".htm"
         ]
-        self.description = "Processa qualquer arquivo e aplica ETL A2 automaticamente (NER + Section Scope por chunk). Usa Docling (parsing estruturado) ou Tika quando disponível para melhor extração e metadados."
+        self.description = (
+            "Reader verdadeiramente universal: processa ARQUIVOS (PDF, DOCX, etc.) e URLs (páginas web). "
+            "Aplica ETL A2 automaticamente (NER + Section Scope). "
+            "Usa Docling/Tika quando disponível para melhor extração."
+        )
         
+        # === Configurações Gerais ===
         self.config["Enable ETL"] = InputConfig(
             type="bool",
-            value=True,  # Sempre True por padrão
+            value=True,
             description="Aplicar ETL A2 automaticamente (NER + Section Scope)",
             values=[],
         )
@@ -53,6 +119,15 @@ class UniversalA2Reader(Reader):
             values=[],
         )
         
+        # === Configurações para URLs ===
+        self.config["URLs"] = InputConfig(
+            type="multi",
+            value="",
+            description="Lista de URLs para ingerir (uma por linha). Deixe vazio se usar upload de arquivo.",
+            values=[],
+        )
+        
+        # === Configurações para Tika ===
         self.config["Use Tika When Available"] = InputConfig(
             type="bool",
             value=True,
@@ -60,6 +135,7 @@ class UniversalA2Reader(Reader):
             values=[],
         )
         
+        # === Configurações para Docling ===
         self.config["Use Docling When Available"] = InputConfig(
             type="bool",
             value=False,
@@ -367,10 +443,147 @@ class UniversalA2Reader(Reader):
         
         return pages_content
     
+    # ════════════════════════════════════════════════════════════════════════════════
+    # MÉTODOS PARA PROCESSAMENTO DE URLs (Web Scraping)
+    # ════════════════════════════════════════════════════════════════════════════════
+    
+    async def _load_from_urls(self, urls_str: str, enable_etl: bool, language_hint: str) -> List[Document]:
+        """
+        Processa lista de URLs e retorna Documents.
+        Usa Trafilatura para extração de texto limpo de páginas web.
+        """
+        if not WEBSCRAPING_AVAILABLE:
+            msg.fail("[UNIVERSAL-READER] httpx/trafilatura não instalados. Instale: pip install httpx trafilatura")
+            return []
+        
+        urls = [u.strip() for u in urls_str.split("\n") if u.strip() and u.strip().startswith(("http://", "https://"))]
+        
+        if not urls:
+            msg.warn("[UNIVERSAL-READER] Nenhuma URL válida encontrada")
+            return []
+        
+        msg.info(f"[UNIVERSAL-READER] Processando {len(urls)} URL(s)...")
+        documents = []
+        
+        for url in urls:
+            try:
+                text, meta = await _fetch_url_to_text(url)
+                
+                if not text or text.startswith("Erro"):
+                    msg.warn(f"[UNIVERSAL-READER] Falha ao extrair conteúdo de: {url}")
+                    continue
+                
+                # Cria Document
+                doc = Document(
+                    title=meta.get("title") or url,
+                    content=text,
+                    source=url,
+                    meta={
+                        "url": url,
+                        "title": meta.get("title", ""),
+                        "language": meta.get("language") or language_hint,
+                        "source_domain": _url_host(url),
+                        "source_type": "url",
+                        "enable_etl": enable_etl,
+                    }
+                )
+                
+                documents.append(doc)
+                msg.good(f"[UNIVERSAL-READER] URL carregada: {url} ({len(text)} chars)")
+                
+            except Exception as e:
+                msg.fail(f"[UNIVERSAL-READER] Erro ao processar URL {url}: {str(e)}")
+                continue
+        
+        msg.good(f"[UNIVERSAL-READER] {len(documents)} documento(s) carregado(s) de URLs")
+        return documents
+    
+    async def _try_load_json_results(self, fileConfig: FileConfig, enable_etl: bool, language_hint: str) -> Optional[List[Document]]:
+        """
+        Tenta carregar JSON no formato de Results (pipeline externa).
+        Formato esperado: {"results": [{"url": "...", "content": "...", "title": "...", "metadata": {...}}]}
+        
+        Returns:
+            Lista de Documents se for formato de results, None se não for.
+        """
+        try:
+            # Decodifica conteúdo
+            if isinstance(fileConfig.content, str):
+                try:
+                    content_str = base64.b64decode(fileConfig.content).decode('utf-8')
+                except:
+                    content_str = fileConfig.content
+            elif isinstance(fileConfig.content, bytes):
+                content_str = fileConfig.content.decode('utf-8')
+            else:
+                return None
+            
+            data = json.loads(content_str)
+            
+            # Verifica se é formato de results
+            if not isinstance(data, dict) or "results" not in data:
+                return None  # Não é formato de results, processa como JSON normal
+            
+            results = data.get("results", [])
+            if not isinstance(results, list) or len(results) == 0:
+                return None
+            
+            msg.info(f"[UNIVERSAL-READER] Detectado JSON de Results ({len(results)} itens)")
+            documents = []
+            
+            for item in results:
+                try:
+                    url = item.get("url", "")
+                    content = item.get("content", "").strip()
+                    title = item.get("title", "")
+                    meta_dict = item.get("metadata", {})
+                    
+                    if not content:
+                        content = f"(Conteúdo vazio) URL: {url}"
+                    
+                    doc = Document(
+                        title=title or url or f"Result {len(documents) + 1}",
+                        content=content,
+                        source=url,
+                        meta={
+                            "url": url,
+                            "title": title,
+                            "language": meta_dict.get("language", language_hint),
+                            "source_domain": _url_host(url) if url else "",
+                            "source_type": "json_results",
+                            "published_at": item.get("published_at", ""),
+                            "enable_etl": enable_etl,
+                        }
+                    )
+                    
+                    documents.append(doc)
+                    msg.good(f"[UNIVERSAL-READER] Result carregado: {title or url}")
+                    
+                except Exception as e:
+                    msg.warn(f"[UNIVERSAL-READER] Erro ao processar result: {str(e)}")
+                    continue
+            
+            msg.good(f"[UNIVERSAL-READER] {len(documents)} documento(s) carregado(s) de JSON Results")
+            return documents
+            
+        except json.JSONDecodeError:
+            return None  # Não é JSON válido, processa como arquivo normal
+        except Exception as e:
+            msg.debug(f"[UNIVERSAL-READER] Erro ao tentar parsear como JSON Results: {str(e)}")
+            return None
+    
+    # ════════════════════════════════════════════════════════════════════════════════
+    # MÉTODO PRINCIPAL DE CARREGAMENTO
+    # ════════════════════════════════════════════════════════════════════════════════
+    
     async def load(self, config: dict, fileConfig: FileConfig) -> List[Document]:
         """
-        Carrega arquivo usando Default Reader ou Tika (quando disponível e benéfico)
-        e garante ETL
+        Carrega conteúdo de ARQUIVOS ou URLs e aplica ETL automaticamente.
+        
+        Prioridade:
+        1. Se URLs configuradas → processa URLs via Trafilatura
+        2. Se JSON de results → processa como pipeline externa
+        3. Se arquivo → Docling > Tika > BasicReader
         """
         # Extrai valores do config de forma robusta
         def get_config_value(config_key: str, default_value):
@@ -392,7 +605,26 @@ class UniversalA2Reader(Reader):
         docling_api_url = get_config_value("Docling API URL", os.getenv("DOCLING_API_URL", ""))
         docling_api_key = get_config_value("Docling API Key", os.getenv("DOCLING_API_KEY", ""))
         
+        # ══════════════════════════════════════════════════════════════════════
+        # MODO 1: Processa URLs (se configuradas)
+        # ══════════════════════════════════════════════════════════════════════
+        urls_str = get_config_value("URLs", "")
+        if urls_str and urls_str.strip():
+            return await self._load_from_urls(urls_str, enable_etl, language_hint)
+        
+        # ══════════════════════════════════════════════════════════════════════
+        # MODO 2: Processa JSON de Results (formato pipeline externa)
+        # ══════════════════════════════════════════════════════════════════════
         extension = fileConfig.extension.lower() if fileConfig.extension else ""
+        if extension == ".json" or extension == "json":
+            json_docs = await self._try_load_json_results(fileConfig, enable_etl, language_hint)
+            if json_docs:
+                return json_docs
+            # Se não era formato de results, continua para processamento normal
+        
+        # ══════════════════════════════════════════════════════════════════════
+        # MODO 3: Processa Arquivo (Docling > Tika > BasicReader)
+        # ══════════════════════════════════════════════════════════════════════
         
         # Prioridade: Docling > Tika > BasicReader
         # Docling primeiro (parsing estruturado mais poderoso)
@@ -538,12 +770,16 @@ class UniversalA2Reader(Reader):
 
 def register():
     """
-    Registra plugin
+    Registra plugin Universal A2 Reader
+    
+    Substitui:
+    - a2_reader.py (A2URLReader, A2ResultsReader) - funcionalidades integradas
+    - tika_reader.py - funcionalidade integrada como opção
     """
     return {
         'name': 'universal_a2_reader',
-        'version': '1.0.0',
-        'description': 'Reader Universal com ETL A2 automático para qualquer formato',
+        'version': '2.0.0',
+        'description': 'Reader Verdadeiramente Universal: Arquivos (PDF, DOCX, etc.) + URLs (web scraping) + JSON Results. ETL A2 automático.',
         'readers': [UniversalA2Reader()],
         'compatible_verba_version': '>=2.1.0',
     }
