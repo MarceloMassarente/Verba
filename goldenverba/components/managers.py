@@ -600,13 +600,33 @@ class WeaviateManager:
     async def verify_collection(
         self, client: WeaviateAsyncClient, collection_name: str
     ):
+        """
+        Verifica se collection existe e cria com schema ETL-aware se necessário.
+        
+        Collections que devem ter schema ETL-aware:
+        - VERBA_Embedding_* : chunks com vetores e metadados ETL
+        - VERBA_DOCUMENTS : documentos com metadados ETL agregados
+        
+        Collections que NÃO precisam de schema ETL:
+        - VERBA_CONFIGURATION : apenas configurações
+        - VERBA_SUGGESTIONS : apenas sugestões de busca
+        """
+        # Collections que devem ter schema ETL-aware
+        etl_collections = ["VERBA_DOCUMENTS"]
+        
+        # Collections que NÃO precisam de schema ETL (apenas configurações)
+        config_only_collections = ["VERBA_CONFIGURATION", "VERBA_SUGGESTIONS"]
+        
+        # Determina se deve criar com schema ETL-aware
+        should_have_etl = ("VERBA_Embedding" in collection_name) or (collection_name in etl_collections)
+        
         if not await client.collections.exists(collection_name):
             msg.info(
                 f"Collection: {collection_name} does not exist, creating new collection."
             )
             
-            # Se é uma collection de embedding, cria com schema ETL-aware completo
-            if "VERBA_Embedding" in collection_name:
+            # Se deve ter schema ETL-aware (embedding ou documentos)
+            if should_have_etl:
                 try:
                     # Tenta importar schema updater para criar com propriedades ETL
                     from verba_extensions.integration.schema_updater import get_all_embedding_properties
@@ -618,6 +638,8 @@ class WeaviateManager:
                     )
                     if returned_collection:
                         msg.good(f"✅ Collection {collection_name} criada com schema ETL-aware completo!")
+                        msg.info(f"   ✅ Chunks normais podem usar (propriedades ETL opcionais)")
+                        msg.info(f"   ✅ Chunks ETL-aware podem usar (propriedades ETL preenchidas)")
                         return True
                     else:
                         return False
@@ -639,13 +661,27 @@ class WeaviateManager:
                     else:
                         return False
             else:
-                # Para collections não-embedding, cria normalmente
+                # Para collections de configuração, cria normalmente (sem ETL)
                 returned_collection = await client.collections.create(name=collection_name)
                 if returned_collection:
                     return True
                 else:
                     return False
         else:
+            # Collection já existe - verifica se tem schema ETL-aware se deveria ter
+            if should_have_etl:
+                try:
+                    from verba_extensions.integration.schema_updater import check_collection_has_etl_properties
+                    has_etl = await check_collection_has_etl_properties(client, collection_name)
+                    if has_etl:
+                        msg.info(f"✅ Collection {collection_name} já tem schema ETL-aware")
+                    else:
+                        msg.warn(f"⚠️  Collection {collection_name} existe mas NÃO tem schema ETL-aware")
+                        msg.warn(f"   ⚠️  Weaviate v4 não permite adicionar propriedades depois")
+                        msg.warn(f"   💡 Delete e recrie a collection para ter schema ETL-aware")
+                        msg.warn(f"   📝 Chunks normais funcionarão, mas ETL pós-chunking não salvará metadados")
+                except ImportError:
+                    pass  # Schema updater não disponível, ignora verificação
             return True
 
     def _normalize_embedder_name(self, embedder: str) -> str:
