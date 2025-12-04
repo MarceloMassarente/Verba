@@ -145,16 +145,22 @@ class EntitySemanticChunker(Chunker):
         self.config = {
             "Breakpoint Percentile Threshold": InputConfig(
                 type="number",
-                value=80,
+                value=95,  # Aumentado de 80 para 95 - menos fragmentação
                 description=(
-                    "Percentil do drop de similaridade para split; menor → mais splits"
+                    "Percentil do drop de similaridade para split; maior → menos splits (95 recomendado)"
                 ),
                 values=[],
             ),
             "Max Sentences Per Chunk": InputConfig(
                 type="number",
-                value=20,
+                value=30,  # Aumentado de 20 para 30
                 description="Máximo de sentenças por chunk (fallback/capping)",
+                values=[],
+            ),
+            "Min Chunk Chars": InputConfig(
+                type="number",
+                value=200,  # Novo: tamanho mínimo de chunk
+                description="Tamanho mínimo de chunk em caracteres (chunks menores são mesclados)",
                 values=[],
             ),
             "Overlap": InputConfig(
@@ -209,7 +215,11 @@ class EntitySemanticChunker(Chunker):
             config["Breakpoint Percentile Threshold"].value
         )
         max_sentences_per_chunk = int(config["Max Sentences Per Chunk"].value)
+        min_chunk_chars = int(config.get("Min Chunk Chars", {}).value if hasattr(config.get("Min Chunk Chars", {}), "value") else 200)
         overlap_sentences = int(config.get("Overlap", {}).value if hasattr(config.get("Overlap", {}), "value") else 0)
+        
+        # Constante: tamanho mínimo de sentença para não ser descartada
+        MIN_SENTENCE_CHARS = 10
 
         # Importa detecção de seções do chunker existente
         with contextlib.suppress(Exception):
@@ -234,7 +244,20 @@ class EntitySemanticChunker(Chunker):
                     pass
 
             # Sentenças com offsets (para mapear seções e spans)
-            all_sentences = _sentences_with_offsets(document)
+            all_sentences_raw = _sentences_with_offsets(document)
+            
+            # Filtra sentenças muito curtas (números, bullets, linhas vazias)
+            # Essas "sentenças" fragmentam o documento desnecessariamente
+            all_sentences = [
+                s for s in all_sentences_raw 
+                if len(s["text"].strip()) >= MIN_SENTENCE_CHARS
+            ]
+            
+            # Log se filtrou muitas sentenças
+            filtered_count = len(all_sentences_raw) - len(all_sentences)
+            if filtered_count > 0:
+                msg.info(f"[Entity-Semantic] Filtradas {filtered_count} sentenças curtas (<{MIN_SENTENCE_CHARS} chars)")
+            
             if not all_sentences:
                 # Fallback: cria um único chunk
                 document.chunks.append(

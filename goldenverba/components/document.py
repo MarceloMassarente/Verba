@@ -4,12 +4,92 @@ from spacy.tokens import Doc
 from spacy.language import Language
 import spacy
 import json
+import re
 
 from langdetect import detect
 
 
+# Padrões que NÃO devem ser quebrados em sentenças
+# Números com ponto (1., 2., 3., etc.) - comum em listas
+_BULLET_PATTERN = re.compile(r'^\s*\d+\.\s*$')
+# Abreviações comuns que terminam com ponto
+_ABBREVIATIONS = {
+    'dr', 'sr', 'sra', 'mr', 'mrs', 'ms', 'prof', 'eng', 'arq',
+    'fig', 'tab', 'cap', 'vol', 'pag', 'pg', 'sec', 'art',
+    'ex', 'etc', 'vs', 'ie', 'eg', 'cf', 'ibid', 'op', 'cit',
+    'inc', 'ltd', 'co', 'corp', 'llc', 'sa', 'ltda',
+    'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+    'no', 'nos', 'ref', 'tel', 'fax', 'email', 'www', 'http', 'https',
+    'min', 'max', 'avg', 'aprox', 'approx', 'est', 'ca',
+}
+
+
+@Language.component("smart_sentencizer")
+def smart_sentencizer(doc):
+    """
+    Sentenciador inteligente que evita quebras falsas em:
+    - Números com ponto (bullets: 1., 2., 3.)
+    - Abreviações comuns (Dr., Fig., etc.)
+    - Linhas muito curtas (< 10 chars)
+    
+    Usa quebras de linha dupla como forte indicador de nova sentença.
+    """
+    if len(doc) == 0:
+        return doc
+    
+    # Primeira passada: marca todas as sentenças normalmente
+    for token in doc:
+        token.is_sent_start = False
+    doc[0].is_sent_start = True
+    
+    for i, token in enumerate(doc[:-1]):
+        next_token = doc[i + 1]
+        
+        # Se o token atual termina com pontuação de fim de sentença
+        if token.text in '.!?':
+            # Verifica se é uma quebra válida
+            is_valid_break = True
+            
+            # 1. Não quebrar após números com ponto (bullets)
+            if token.text == '.' and i > 0:
+                prev_token = doc[i - 1]
+                # Se o token anterior é um número, provavelmente é bullet
+                if prev_token.text.isdigit() or prev_token.like_num:
+                    is_valid_break = False
+            
+            # 2. Não quebrar após abreviações conhecidas
+            if token.text == '.' and i > 0:
+                prev_token = doc[i - 1]
+                if prev_token.text.lower().rstrip('.') in _ABBREVIATIONS:
+                    is_valid_break = False
+            
+            # 3. Não quebrar se o próximo token é minúsculo (continuação)
+            if next_token.text and next_token.text[0].islower():
+                is_valid_break = False
+            
+            if is_valid_break:
+                next_token.is_sent_start = True
+        
+        # 4. Quebra de linha dupla é forte indicador de nova sentença
+        elif '\n\n' in token.text or token.text == '\n\n':
+            next_token.is_sent_start = True
+        
+        # 5. Linha que termina com dois pontos geralmente precede uma lista
+        elif token.text == ':' and next_token.text.strip().startswith('\n'):
+            next_token.is_sent_start = True
+    
+    return doc
+
+
 def load_nlp_for_language(language: str):
-    """Load SpaCy models based on language"""
+    """
+    Load SpaCy models based on language with smart sentencizer.
+    
+    O smart_sentencizer evita fragmentação excessiva em:
+    - Bullets numerados (1., 2., 3.)
+    - Abreviações (Dr., Fig., Sr.)
+    - Linhas curtas
+    """
     if language == "en":
         nlp = spacy.blank("en")
     elif language == "zh":
@@ -22,10 +102,13 @@ def load_nlp_for_language(language: str):
         nlp = spacy.blank("de")
     elif language == "nl":
         nlp = spacy.blank("nl")
+    elif language == "pt":
+        nlp = spacy.blank("pt")
     else:
         nlp = spacy.blank("en")
 
-    nlp.add_pipe("sentencizer")
+    # Usa sentenciador inteligente ao invés do básico
+    nlp.add_pipe("smart_sentencizer")
 
     return nlp
 
