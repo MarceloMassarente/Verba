@@ -274,13 +274,70 @@ Os plugins logam suas atividades:
 
 ---
 
+## 🔧 Consolidação e Otimização (2025-01)
+
+### Módulo Utilitário Comum
+
+**Novo:** `verba_extensions/utils/language_utils.py`
+
+Consolida código duplicado de múltiplos plugins:
+- `detect_query_language()` - Detecção de idioma centralizada
+- `get_nlp()` - Cache global de modelos spaCy
+- `STOPWORDS_PT` e `STOPWORDS_EN` - Constantes globais
+
+**Plugins atualizados para usar o módulo comum:**
+- `entity_aware_query_orchestrator.py`
+- `a2_etl_hook.py`
+- `bilingual_filter.py`
+- `adaptive_entropy.py`
+- `query_rewriter.py`
+
+### Consolidação de Query Processors
+
+**Mudança:** `query_parser.py` foi consolidado em `entity_aware_query_orchestrator.py`
+
+Funções movidas:
+- `parse_query()` - Parsing completo de queries
+- `classify_token()` - Classificação de tokens
+- `classify_query_intent()` - Detecção de intenção
+- `format_query_for_display()` - Formatação para exibição
+
+**Uso atualizado:**
+```python
+# ANTES:
+from verba_extensions.plugins.query_parser import parse_query
+
+# AGORA:
+from verba_extensions.plugins.entity_aware_query_orchestrator import parse_query
+```
+
+### Plugins Removidos/Consolidados
+
+**Arquivos deletados (consolidados):**
+- ~~`a2_reader.py`~~ → Consolidado no `universal_reader.py` (v2.0.0)
+- ~~`query_parser.py`~~ → Consolidado no `entity_aware_query_orchestrator.py`
+- ~~`recursive_document_splitter.py`~~ → Removido (já desabilitado, redundante)
+- ~~`tika_reader.py`~~ → Consolidado no `universal_reader.py` (v2.0.0)
+- ~~`v019_markdown_reader.py`~~ → Alias mantido em `slides_semantica_visual_reader.py`
+
+### Plugins Experimentais
+
+**Status:** Documentados em `docs/guides/RAG2_EXPERIMENTAL_PLUGINS.md`
+
+Plugins experimentais (não totalmente integrados):
+- `intelligent_cache.py` - Cache com busca por similaridade
+- `iterative_search.py` - Busca iterativa durante geração
+- `multi_vector_searcher.py` - Busca multi-vector com RRF
+
+---
+
 ## 🎯 Próximos Passos
 
 ### Plugins Planejados
 
 1. ✅ **LLMMetadataExtractor** - Implementado
-2. ⏭️ **Reranker Plugin** - Week 4
-3. ⏭️ **RecursiveDocumentSplitter** - Week 3
+2. ✅ **Reranker Plugin** - Implementado
+3. ~~**RecursiveDocumentSplitter**~~ - Removido (redundante)
 
 ### Melhorias Futuras
 

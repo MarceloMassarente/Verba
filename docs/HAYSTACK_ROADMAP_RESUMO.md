@@ -83,7 +83,7 @@ verba_extensions/plugins/
 ├── reranker.py                 ← Novo (Cross-encoder)
 ├── recursive_chunker.py        ← Novo (RecursiveDocumentSplitter)
 ├── entity_aware_retriever.py   ← Existente (manter)
-├── query_parser.py             ← Existente (manter)
+~~├── query_parser.py~~             ← CONSOLIDADO em entity_aware_query_orchestrator.py
 └── [outras plugins]
 
 Resultado:

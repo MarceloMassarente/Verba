@@ -252,6 +252,63 @@ if score < 0.3:  # Threshold configurável
 
 ---
 
+### 6. Language Utils ⭐ NOVO (2025-01)
+
+**Arquivo:** `language_utils.py`
+
+**Descrição:**
+Módulo utilitário comum que consolida código duplicado de detecção de idioma e NLP de múltiplos plugins. Elimina ~40% de código duplicado e fornece interface unificada.
+
+**Características:**
+- ✅ Detecção de idioma unificada (`detect_query_language()`)
+- ✅ Cache global de modelos spaCy (`get_nlp()`)
+- ✅ Stopwords PT/EN como constantes globais
+- ✅ Lazy loading de modelos NLP
+- ✅ Fallback gracioso se modelos não disponíveis
+
+**Uso:**
+
+```python
+from verba_extensions.utils.language_utils import (
+    detect_query_language,
+    get_nlp,
+    STOPWORDS_PT,
+    STOPWORDS_EN,
+    get_stopwords
+)
+
+# Detectar idioma
+language = detect_query_language("O que é inovação?")
+# Retorna: "pt"
+
+# Carregar modelo NLP (com cache global)
+nlp = get_nlp(language="pt")
+if nlp:
+    doc = nlp("Apple é uma empresa")
+    entities = [ent.text for ent in doc.ents]
+
+# Usar stopwords
+stopwords = get_stopwords("pt")
+filtered = [w for w in words if w not in stopwords]
+```
+
+**Plugins que usam:**
+- `entity_aware_query_orchestrator.py`
+- `a2_etl_hook.py`
+- `bilingual_filter.py`
+- `adaptive_entropy.py`
+- `query_rewriter.py`
+
+**Benefícios:**
+- Elimina código duplicado em 5+ plugins
+- Cache global eficiente (modelos carregados uma vez)
+- Implementação consistente em todos os plugins
+- Manutenção fácil (mudanças em um lugar)
+
+**Documentação completa:** `docs/utils/LANGUAGE_UTILS.md`
+
+---
+
 ## 📊 Comparação de Componentes
 
 | Componente | Impacto Performance | Impacto Qualidade | Impacto Observabilidade | Complexidade |
@@ -261,6 +318,7 @@ if score < 0.3:  # Threshold configurável
 | UUID Determinístico | ⭐ | ⭐⭐⭐⭐ | ⭐ | ⭐ |
 | Text Preprocessing | ⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐ |
 | Quality Scoring | ⭐ | ⭐⭐⭐⭐ | ⭐ | ⭐⭐ |
+| Language Utils | ⭐⭐ | ⭐⭐ | ⭐ | ⭐ |
 
 ---
 

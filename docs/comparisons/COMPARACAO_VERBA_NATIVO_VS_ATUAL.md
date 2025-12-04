@@ -242,10 +242,10 @@ Limitações:
 verba_extensions/plugins/
 ├── plugin_manager.py          # Gerencia plugins automaticamente
 ├── llm_metadata_extractor.py  # Enriquecimento de metadata
-├── recursive_document_splitter.py  # Chunking inteligente
+~~├── recursive_document_splitter.py~~  # REMOVIDO (redundante)
 ├── reranker.py                # Reranking de resultados
 ├── entity_aware_retriever.py  # Retrieval com entity filtering
-└── query_parser.py            # Parse inteligente de queries
+~~└── query_parser.py~~            # CONSOLIDADO em entity_aware_query_orchestrator.py
 
 # Pipeline automático:
 Documento → Chunker → 

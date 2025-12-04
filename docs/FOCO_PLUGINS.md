@@ -41,7 +41,7 @@ Campos para passages (chunks) de artigos:
   - URLs: Baixa HTML, extrai texto (Trafilatura), detecta idioma
   - JSON Results: Parse de pipelines externas
 - **Metadados**: URL, título, domínio, idioma, metadados de Tika/Docling
-- **Consolidado**: Substitui `a2_reader.py` (A2URLReader + A2ResultsReader)
+- **Consolidado**: Substitui `a2_reader.py` (A2URLReader + A2ResultsReader), `tika_reader.py`, `v019_markdown_reader.py`
 
 ### 2. **ETL A2** (`a2_etl_hook.py`)
 - **Foco**: NER em textos de artigos
