@@ -119,6 +119,26 @@ def get_etl_properties():
             description="Título da seção identificada (ETL pós-chunking) - opcional",
         ),
         Property(
+            name="section_level",
+            data_type=DataType.INT,
+            description="Nível hierárquico da seção (0=documento, 1=H1, 2=H2, 3=H3) - opcional",
+        ),
+        Property(
+            name="parent_section",
+            data_type=DataType.TEXT,
+            description="Título da seção pai - opcional",
+        ),
+        Property(
+            name="document_context",
+            data_type=DataType.TEXT,
+            description="Caminho hierárquico completo (ex: 'Capítulo 1 > Seção 3 > Subseção 3.2') - opcional",
+        ),
+        Property(
+            name="section_path",
+            data_type=DataType.TEXT_ARRAY,
+            description="Array de títulos do caminho hierárquico - opcional",
+        ),
+        Property(
             name="section_entity_ids",
             data_type=DataType.TEXT_ARRAY,
             description="Entity IDs relacionadas à seção (ETL pós-chunking) - opcional",

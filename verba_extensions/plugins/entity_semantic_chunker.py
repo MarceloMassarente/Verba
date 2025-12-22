@@ -12,7 +12,8 @@ Se indisponíveis, cai em fallback por tamanho máximo de sentenças.
 
 import asyncio
 import contextlib
-from typing import List, Dict, Any, Tuple
+import re
+from typing import List, Dict, Any, Tuple, Optional
 
 with contextlib.suppress(Exception):
     import numpy as np  # type: ignore
@@ -52,6 +53,172 @@ def _filter_sentences_in_section(
     return [
         s for s in all_sentences if s["start"] >= section_start and s["end"] <= section_end
     ]
+
+
+def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
+    """
+    Detecta seções hierárquicas no texto usando Markdown (# ## ###) e numeração (1. 1.1 1.1.1).
+    
+    Retorna lista de seções com metadados hierárquicos:
+    - level: Nível hierárquico (0=documento, 1=H1, 2=H2, 3=H3)
+    - parent: Título da seção pai (None se level=1)
+    - path: Array de títulos do caminho completo
+    - document_context: String legível do caminho completo
+    - title, content, start, end: Campos padrão de seção
+    """
+    sections: List[Dict[str, Any]] = []
+    lines = text.split('\n')
+    
+    # Stack de seções ativas (última seção de cada nível)
+    # stack[i] = última seção do nível i+1 (índice 0 = nível 1)
+    stack: List[Dict[str, Any]] = []
+    
+    # Acumula conteúdo da seção atual
+    current_content_lines: List[str] = []
+    current_section: Optional[Dict[str, Any]] = None
+    current_pos = 0
+    
+    def _detect_heading_level(line: str) -> Tuple[int, str]:
+        """
+        Detecta nível de heading e retorna (level, title).
+        Retorna (0, "") se não for heading.
+        """
+        line_stripped = line.strip()
+        
+        # Markdown headings: # H1, ## H2, ### H3
+        markdown_match = re.match(r'^(#{1,6})\s+(.+)$', line_stripped)
+        if markdown_match:
+            level = len(markdown_match.group(1))
+            title = markdown_match.group(2).strip()
+            return (level, title)
+        
+        # Numeração: 1., 1.1, 1.1.1, etc.
+        numbering_match = re.match(r'^(\d+(?:\.\d+)*)[\.)]\s+(.+)$', line_stripped)
+        if numbering_match:
+            numbering = numbering_match.group(1)
+            title = numbering_match.group(2).strip()
+            # Conta quantos pontos há na numeração para determinar nível
+            level = numbering.count('.') + 1
+            return (level, title)
+        
+        # Heurísticas para títulos (fallback)
+        # Linha curta, sem ponto final, pode ser título
+        if (len(line_stripped) < 100 and 
+            not line_stripped.endswith('.') and
+            len(line_stripped.split()) <= 15 and
+            (line_stripped.isupper() or 
+             re.match(r'^[A-Z][^\.]*:', line_stripped))):
+            # Assume nível 1 para heurísticas
+            return (1, line_stripped)
+        
+        return (0, "")
+    
+    def _finalize_section():
+        """Finaliza seção atual e adiciona à lista."""
+        nonlocal current_section, current_content_lines, current_pos
+        
+        if current_section is None:
+            return
+        
+        # Adiciona conteúdo acumulado
+        content = '\n'.join(current_content_lines).strip()
+        if content or current_section.get("title"):
+            # Atualiza conteúdo e end da seção
+            current_section["content"] = content
+            # End é a posição atual (último caractere processado)
+            current_section["end"] = current_pos
+            sections.append(current_section)
+        
+        current_content_lines = []
+        current_section = None
+    
+    for line_idx, line in enumerate(lines):
+        line_start_pos = current_pos
+        line_end_pos = current_pos + len(line)
+        
+        # Detecta se é heading
+        level, title = _detect_heading_level(line)
+        
+        if level > 0:
+            # Finaliza seção anterior
+            _finalize_section()
+            
+            # Remove seções do stack com nível >= nível atual
+            while stack and stack[-1].get("level", 0) >= level:
+                stack.pop()
+            
+            # Determina parent (última seção do nível anterior)
+            parent = None
+            parent_title = ""
+            if level > 1 and stack:
+                # Procura última seção com nível < level atual
+                for i in range(len(stack) - 1, -1, -1):
+                    if stack[i].get("level", 0) < level:
+                        parent = stack[i]
+                        parent_title = parent.get("title", "")
+                        break
+            
+            # Constrói path completo
+            path = [s.get("title", "") for s in stack if s.get("title")]
+            path.append(title)
+            
+            # Constrói document_context (string legível)
+            document_context = " > ".join(path) if path else title
+            
+            # Start da seção é após o heading (próxima linha)
+            section_start = line_end_pos + 1  # +1 para pular \n
+            
+            # Cria nova seção
+            current_section = {
+                "title": title,
+                "content": "",
+                "start": section_start,
+                "end": section_start,
+                "level": level,
+                "parent": parent_title,
+                "path": path,
+                "document_context": document_context
+            }
+            
+            # Adiciona ao stack
+            stack.append(current_section)
+            
+            current_pos = line_end_pos + 1  # +1 para \n
+        else:
+            # Linha normal, adiciona ao conteúdo da seção atual
+            if current_section is None:
+                # Se não há seção atual, cria seção raiz (nível 0)
+                current_section = {
+                    "title": "",
+                    "content": "",
+                    "start": 0,
+                    "end": 0,
+                    "level": 0,
+                    "parent": "",
+                    "path": [],
+                    "document_context": ""
+                }
+            
+            current_content_lines.append(line)
+            current_pos = line_end_pos + 1  # +1 para \n
+    
+    # Finaliza última seção
+    _finalize_section()
+    
+    # Se não detectou nenhuma seção, retorna documento inteiro
+    if not sections:
+        return [{
+            "title": "",
+            "content": text,
+            "start": 0,
+            "end": len(text),
+            "level": 0,
+            "parent": "",
+            "path": [],
+            "document_context": ""
+        }]
+    
+    return sections
 
 
 def _has_library(lib_name: str) -> bool:
@@ -94,6 +261,105 @@ def _get_frequent_entities(
             entity_counts[text] += 1
     
     return {ent for ent, count in entity_counts.items() if count >= min_frequency}
+
+
+def _normalize_company(text: str) -> List[str]:
+    """
+    Normaliza nomes de empresas usando gazetteer (se disponível).
+    Retorna lista com variações: [normalizada, original] (dedup).
+    """
+    # Cache simples para evitar recarregar gazetteer a cada chamada
+    if not hasattr(_normalize_company, "_gazetteer_cache"):
+        _normalize_company._gazetteer_cache = None  # type: ignore
+    if not hasattr(_normalize_company, "_gazetteer_loaded"):
+        _normalize_company._gazetteer_loaded = False  # type: ignore
+
+    variants = set()
+    norm = text.strip().lower()
+    if norm:
+        variants.add(norm)
+    # Tenta gazetteer do a2_etl_hook (aliases)
+    try:
+        if not _normalize_company._gazetteer_loaded:  # type: ignore
+            from verba_extensions.plugins.a2_etl_hook import load_gazetteer
+            _normalize_company._gazetteer_cache = load_gazetteer()  # type: ignore
+            _normalize_company._gazetteer_loaded = True  # type: ignore
+        gaz = _normalize_company._gazetteer_cache  # type: ignore
+        for eid, aliases in gaz.items():
+            for alias in aliases:
+                if alias.strip().lower() == norm:
+                    variants.add(eid.lower())
+                    # também inclui alias canônico (primeiro)
+                    if aliases:
+                        variants.add(aliases[0].strip().lower())
+                    break
+    except Exception:
+        pass
+    return list(variants) if variants else ([norm] if norm else [])
+
+
+def _extract_companies_from_spans(entity_spans: List[Dict[str, Any]]) -> List[str]:
+    """
+    Extrai empresas (ORG) dos spans e normaliza (aliases/gazetteer).
+    """
+    companies: set[str] = set()
+    for ent in entity_spans or []:
+        try:
+            label = ent.get("label", "").upper()
+            if label != "ORG":
+                continue
+            text = ent.get("text", "")
+            if not text or not text.strip():
+                continue
+            for variant in _normalize_company(text):
+                if variant:
+                    companies.add(variant)
+            # preserva texto original normalizado também
+            companies.add(text.strip().lower())
+        except Exception:
+            continue
+    return sorted(companies)
+
+
+def _merge_small_chunks(chunks: List[Chunk], min_chars: int) -> List[Chunk]:
+    """
+    Mescla chunks muito pequenos com o anterior quando possível.
+    Regras conservadoras:
+    - Só mescla se chunk atual < min_chars
+    - Não altera ordem
+    """
+    if not chunks or len(chunks) < 2:
+        return chunks
+    
+    merged: List[Chunk] = []
+    for chunk in chunks:
+        if merged and len(chunk.content or "") < min_chars:
+            prev = merged[-1]
+            # Concatena conteúdos
+            new_content = f"{prev.content} {chunk.content}".strip()
+            prev.content = new_content
+            prev.content_without_overlap = new_content
+            # Atualiza end_i se disponível
+            if hasattr(prev, "end_i") and hasattr(chunk, "end_i"):
+                try:
+                    prev.end_i = chunk.end_i
+                except Exception:
+                    pass
+            # Merge metadados básicos (companies)
+            if hasattr(prev, "meta") or hasattr(chunk, "meta"):
+                prev.meta = prev.meta or {}
+                for key in ["companies"]:
+                    vals = []
+                    if key in (prev.meta or {}):
+                        vals.extend(prev.meta.get(key, []))
+                    if hasattr(chunk, "meta") and chunk.meta and key in chunk.meta:
+                        vals.extend(chunk.meta.get(key, []))
+                    if vals:
+                        prev.meta[key] = sorted(set(vals))
+            # end_i já ajustado, start_i mantém
+        else:
+            merged.append(chunk)
+    return merged
 
 
 def _get_anchor_entities_in_range(
@@ -265,10 +531,6 @@ class EntitySemanticChunker(Chunker):
         # Constante: tamanho mínimo de sentença para não ser descartada
         MIN_SENTENCE_CHARS = 10
 
-        # Importa detecção de seções do chunker existente
-        with contextlib.suppress(Exception):
-            from verba_extensions.plugins.section_aware_chunker import detect_sections  # type: ignore
-
         for document in documents:
             if len(document.chunks) > 0:
                 continue
@@ -286,6 +548,9 @@ class EntitySemanticChunker(Chunker):
                     entity_spans = sorted(entity_spans, key=lambda e: int(e.get("start", 0)))
                 except Exception:
                     pass
+            
+            # Extrai empresas normalizadas para enriquecer metadados (named vectors)
+            companies_doc: List[str] = _extract_companies_from_spans(entity_spans)
 
             # Sentenças com offsets (para mapear seções e spans)
             all_sentences_raw = _sentences_with_offsets(document)
@@ -315,18 +580,29 @@ class EntitySemanticChunker(Chunker):
                 )
                 continue
 
-            # Detecta seções (se disponível); caso contrário, usa documento inteiro
+            # Detecta seções hierárquicas (se disponível); caso contrário, usa documento inteiro
             sections: List[Dict[str, Any]] = []
             try:
-                sections = detect_sections(text)  # type: ignore[name-defined]
-                msg.info(f"[Entity-Semantic] Detectadas {len(sections)} seções no documento")
+                sections = detect_hierarchical_sections(text)
+                msg.info(f"[Entity-Semantic] Detectadas {len(sections)} seções hierárquicas no documento")
                 for i, sec in enumerate(sections):
                     sec_title = sec.get("title", "(sem título)")[:50]
+                    sec_level = sec.get("level", 0)
                     sec_size = sec.get("end", 0) - sec.get("start", 0)
-                    msg.info(f"[Entity-Semantic]   Seção {i+1}: '{sec_title}' ({sec_size} chars)")
+                    sec_context = sec.get("document_context", "")[:80]
+                    msg.info(f"[Entity-Semantic]   Seção {i+1} (nível {sec_level}): '{sec_title}' ({sec_size} chars) - {sec_context}")
             except Exception as e:
-                msg.warn(f"[Entity-Semantic] Erro ao detectar seções: {str(e)}, usando documento inteiro")
-                sections = [{"title": "", "content": text, "start": 0, "end": len(text)}]
+                msg.warn(f"[Entity-Semantic] Erro ao detectar seções hierárquicas: {str(e)}, usando documento inteiro")
+                sections = [{
+                    "title": "", 
+                    "content": text, 
+                    "start": 0, 
+                    "end": len(text),
+                    "level": 0,
+                    "parent": "",
+                    "path": [],
+                    "document_context": ""
+                }]
 
             chunk_id_counter = 0
 
@@ -479,9 +755,26 @@ class EntitySemanticChunker(Chunker):
                         content_without_overlap=chunk_text,
                     )
                     
+                    # Inicializa meta se necessário
+                    if not hasattr(chunk, "meta") or chunk.meta is None:
+                        chunk.meta = {}
+                    
+                    # Adiciona metadados hierárquicos da seção
+                    chunk.meta.update({
+                        "section_level": section.get("level", 0),
+                        "parent_section": section.get("parent", ""),
+                        "document_context": section.get("document_context", ""),
+                        "section_path": section.get("path", [])
+                    })
+                    
                     # NOTA: Detecção de frameworks removida deste chunker genérico
                     # Para slides de consultoria, usar SlidesSemanticaVisualReader + SlidesSemanticaVisualChunker
                     # que já fazem detecção de frameworks no reader e preservam no chunker
+                    # Enriquecer metadados com companies extraídas do documento
+                    if companies_doc:
+                        existing_companies = set(chunk.meta.get("companies", [])) if isinstance(chunk.meta.get("companies", []), list) else set()
+                        merged_companies = sorted(existing_companies.union(set(companies_doc)))
+                        chunk.meta["companies"] = merged_companies
                     
                     document.chunks.append(chunk)
                     chunk_id_counter += 1
@@ -502,7 +795,32 @@ class EntitySemanticChunker(Chunker):
                     end_i=len(text),
                     content_without_overlap=text,
                 )
+                if not hasattr(chunk, "meta") or chunk.meta is None:
+                    chunk.meta = {}
+                
+                # Adiciona metadados hierárquicos (seção raiz)
+                if sections and len(sections) > 0:
+                    first_section = sections[0]
+                    chunk.meta.update({
+                        "section_level": first_section.get("level", 0),
+                        "parent_section": first_section.get("parent", ""),
+                        "document_context": first_section.get("document_context", ""),
+                        "section_path": first_section.get("path", [])
+                    })
+                else:
+                    chunk.meta.update({
+                        "section_level": 0,
+                        "parent_section": "",
+                        "document_context": "",
+                        "section_path": []
+                    })
+                
+                if companies_doc:
+                    chunk.meta["companies"] = sorted(set(companies_doc))
                 document.chunks.append(chunk)
+
+            # Pós-processamento: mesclar chunks minúsculos
+            document.chunks = _merge_small_chunks(document.chunks, min_chunk_chars)
 
         return documents
 

@@ -284,6 +284,12 @@ async def run_etl_on_passages(
                 first_para = safe_get("section_first_para") or ""
                 parent_ents = safe_get("parent_entities") or []
                 
+                # Preserva metadados hierárquicos se já existirem (do chunking)
+                section_level = safe_get("section_level")
+                parent_section = safe_get("parent_section") or ""
+                document_context = safe_get("document_context") or ""
+                section_path = safe_get("section_path") or []
+                
                 # Handle case where parent_ents might be a string or other type
                 if not isinstance(parent_ents, list):
                     if isinstance(parent_ents, str):
@@ -338,6 +344,44 @@ async def run_etl_on_passages(
                     if prop_name in existing_prop_names:
                         props[prop_name] = prop_value
                     # Se propriedade não existe, simplesmente não adiciona (não é erro)
+                
+                # Preserva ou adiciona metadados hierárquicos
+                # Se chunk já tem metadados hierárquicos (do chunking), preserva
+                # Se não tem, tenta inferir do section_title (fallback básico)
+                if "section_level" in existing_prop_names:
+                    if section_level is not None and section_level != "":
+                        # Preserva metadados hierárquicos existentes
+                        try:
+                            props["section_level"] = int(section_level) if isinstance(section_level, (int, str)) else 0
+                        except (ValueError, TypeError):
+                            props["section_level"] = 0
+                        
+                        if "parent_section" in existing_prop_names:
+                            props["parent_section"] = parent_section
+                        if "document_context" in existing_prop_names:
+                            props["document_context"] = document_context
+                        if "section_path" in existing_prop_names:
+                            # Garante que section_path é uma lista
+                            if isinstance(section_path, list):
+                                props["section_path"] = section_path
+                            elif isinstance(section_path, str):
+                                # Tenta parsear JSON se for string
+                                try:
+                                    import json
+                                    props["section_path"] = json.loads(section_path) if section_path else []
+                                except (json.JSONDecodeError, TypeError):
+                                    props["section_path"] = []
+                            else:
+                                props["section_path"] = []
+                    elif sect_title:
+                        # Fallback: assume level 1 se tem section_title mas não tem metadados hierárquicos
+                        props["section_level"] = 1
+                        if "parent_section" in existing_prop_names:
+                            props["parent_section"] = ""
+                        if "document_context" in existing_prop_names:
+                            props["document_context"] = sect_title
+                        if "section_path" in existing_prop_names:
+                            props["section_path"] = [sect_title] if sect_title else []
                 
                 # Se não há propriedades para atualizar, pula este chunk
                 if not props:
