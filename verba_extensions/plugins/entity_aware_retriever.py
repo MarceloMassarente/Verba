@@ -136,6 +136,14 @@ class EntityAwareRetriever(Retriever):
             values=["Hybrid Search"],
             block="fundamental",
         )
+
+        self.config["Use Section Hierarchy"] = InputConfig(
+            type="bool",
+            value=True,
+            description="Use section hierarchy for better filtering (section_level, parent_section)",
+            values=[],
+            block="fundamental",
+        )
         self.config["Limit Mode"] = InputConfig(
             type="dropdown",
             value="Autocut",
