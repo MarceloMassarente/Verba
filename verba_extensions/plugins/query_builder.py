@@ -178,6 +178,7 @@ class QueryBuilderPlugin:
             properties = []
             etl_properties = [
                 "entities_local_ids", "section_title", "section_entity_ids",
+                "section_level", "parent_section", "document_context", "section_path",  # Hierarquia
                 "section_scope_confidence", "primary_entity_id", "entity_focus_score",
                 "etl_version"
             ]
@@ -436,7 +437,9 @@ class QueryBuilderPlugin:
             ],
             "etl_aware": True,
             "available_filters": [
-                "entities_local_ids", "section_title", "section_entity_ids", "chunk_lang", "chunk_date", "labels",
+                "entities_local_ids", "section_title", "section_entity_ids",
+                "section_level", "parent_section", "document_context", "section_path",  # Hierarquia
+                "chunk_lang", "chunk_date", "labels",
                 "frameworks", "companies", "persons", "conceitos_negocio", "metricas_mencionadas", "tipo_conteudo", "sectors"
             ],
             "timestamp": time.time()
