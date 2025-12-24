@@ -20,6 +20,18 @@ from goldenverba.components.types import InputConfig
 from wasabi import msg
 import re
 
+# Importa funções de entity guard-rails do EntitySemanticChunker
+try:
+    from .entity_semantic_chunker import (
+        _entity_crosses_boundary,
+        _adjust_boundary_with_entities,
+        _merge_small_chunks
+    )
+    ENTITY_GUARDS_AVAILABLE = True
+except ImportError:
+    ENTITY_GUARDS_AVAILABLE = False
+    msg.warn("[SlidesSemanticaVisual] Entity guard-rails não disponíveis")
+
 
 class SlidesSemanticaVisualChunker(SentenceChunker):
     """
@@ -67,6 +79,18 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 type="bool",
                 value=True,
                 description="Criar chunk de síntese com todos os frameworks e stakeholders",
+                values=[],
+            ),
+            "Entity Guard Rails": InputConfig(
+                type="bool",
+                value=True,
+                description="Não cortar entidades (frameworks, stakeholders) no meio de um chunk",
+                values=[],
+            ),
+            "Merge Small Chunks": InputConfig(
+                type="bool",
+                value=True,
+                description="Mesclar chunks muito pequenos (<100 chars) com o anterior",
                 values=[],
             ),
         }
@@ -188,6 +212,14 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             except Exception as e:
                 msg.warn(f"[SlidesSemanticaVisual] Erro ao processar slide {slide_number}: {str(e)}")
                 continue
+        
+        # 3. Merge de chunks pequenos (se habilitado)
+        if self.config.get("Merge Small Chunks", {}).get("value", True) and ENTITY_GUARDS_AVAILABLE:
+            original_count = len(chunked_doc.chunks)
+            chunked_doc.chunks = _merge_small_chunks(chunked_doc.chunks, min_chars=100)
+            merged_count = original_count - len(chunked_doc.chunks)
+            if merged_count > 0:
+                msg.info(f"[SlidesSemanticaVisual] Merged {merged_count} chunks pequenos")
         
         msg.good(f"[SlidesSemanticaVisual] Chunking completo: {len(chunked_doc.chunks)} chunks totais")
         return chunked_doc
