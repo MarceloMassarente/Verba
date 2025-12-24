@@ -46,6 +46,12 @@ except ImportError:
     msg.warn("xlrd not installed, .xls file functionality will be limited.")
     xlrd = None
 
+try:
+    from pptx import Presentation
+except ImportError:
+    msg.warn("python-pptx not installed, PPTX functionality will be limited.")
+    Presentation = None
+
 
 class BasicReader(Reader):
     """
@@ -113,6 +119,8 @@ class BasicReader(Reader):
                 file_content = await self.load_pdf_file(decoded_bytes)
             elif fileConfig.extension.lower() == "docx":
                 file_content = await self.load_docx_file(decoded_bytes)
+            elif fileConfig.extension.lower() == "pptx":
+                file_content = await self.load_pptx_file(decoded_bytes)
             elif fileConfig.extension.lower() == "csv":
                 file_content = await self.load_csv_file(decoded_bytes)
             elif fileConfig.extension.lower() in ["xlsx", "xls"]:
@@ -232,6 +240,45 @@ class BasicReader(Reader):
         docx_bytes = io.BytesIO(decoded_bytes)
         reader = docx.Document(docx_bytes)
         return "\n".join(paragraph.text for paragraph in reader.paragraphs)
+
+    async def load_pptx_file(self, decoded_bytes: bytes) -> str:
+        """Load and extract text from a PPTX file (runs in executor to avoid blocking)."""
+        if not Presentation:
+            raise ImportError(
+                "python-pptx is not installed. Cannot process PPTX files."
+            )
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._load_pptx_file_sync, decoded_bytes)
+
+    def _load_pptx_file_sync(self, decoded_bytes: bytes) -> str:
+        """Synchronous implementation of PPTX loading."""
+        pptx_bytes = io.BytesIO(decoded_bytes)
+        prs = Presentation(pptx_bytes)
+        
+        text_parts = []
+        for slide_num, slide in enumerate(prs.slides, 1):
+            slide_text = []
+            slide_text.append(f"--- Slide {slide_num} ---")
+            
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_text.append(shape.text.strip())
+                # Também extrai texto de tabelas se houver
+                if hasattr(shape, "table"):
+                    table = shape.table
+                    for row in table.rows:
+                        row_text = []
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                row_text.append(cell.text.strip())
+                        if row_text:
+                            slide_text.append(" | ".join(row_text))
+            
+            if len(slide_text) > 1:  # Mais que só o header "--- Slide X ---"
+                text_parts.append("\n".join(slide_text))
+        
+        return "\n\n".join(text_parts)
 
     async def load_csv_file(self, decoded_bytes: bytes) -> str:
         """Load and convert CSV file to readable text format (runs in executor)."""
