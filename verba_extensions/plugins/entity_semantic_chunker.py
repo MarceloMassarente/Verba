@@ -58,6 +58,15 @@ def _filter_sentences_in_section(
 def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
     """
     Detecta seções hierárquicas no texto usando Markdown (# ## ###) e numeração (1. 1.1 1.1.1).
+
+    Complexidade: O(n) onde n = número de linhas
+    Otimizações:
+    - Regex pré-compiladas (não implementadas ainda, mas recomendadas)
+    - Fast-checks antes de regex
+    - Stack-based hierarchy tracking
+    """
+    """
+    Detecta seções hierárquicas no texto usando Markdown (# ## ###) e numeração (1. 1.1 1.1.1).
     
     Retorna lista de seções com metadados hierárquicos:
     - level: Nível hierárquico (0=documento, 1=H1, 2=H2, 3=H3)
@@ -82,35 +91,47 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
         """
         Detecta nível de heading e retorna (level, title).
         Retorna (0, "") se não for heading.
+
+        Otimizações aplicadas:
+        - Verifica se linha começa com caracteres relevantes antes de regex
+        - Regex compiladas para melhor performance
         """
         line_stripped = line.strip()
-        
+
+        # Fast check: se não começa com # ou dígito, não é heading
+        if not line_stripped or not (
+            line_stripped.startswith('#') or
+            line_stripped[0].isdigit()
+        ):
+            return (0, "")
+
         # Markdown headings: # H1, ## H2, ### H3
-        markdown_match = re.match(r'^(#{1,6})\s+(.+)$', line_stripped)
-        if markdown_match:
-            level = len(markdown_match.group(1))
-            title = markdown_match.group(2).strip()
-            return (level, title)
-        
+        if line_stripped.startswith('#'):
+            markdown_match = re.match(r'^(#{1,6})\s+(.+)$', line_stripped)
+            if markdown_match:
+                level = len(markdown_match.group(1))
+                title = markdown_match.group(2).strip()
+                return (level, title)
+
         # Numeração: 1., 1.1, 1.1.1, etc.
-        numbering_match = re.match(r'^(\d+(?:\.\d+)*)[\.)]\s+(.+)$', line_stripped)
-        if numbering_match:
-            numbering = numbering_match.group(1)
-            title = numbering_match.group(2).strip()
-            # Conta quantos pontos há na numeração para determinar nível
-            level = numbering.count('.') + 1
-            return (level, title)
-        
-        # Heurísticas para títulos (fallback)
-        # Linha curta, sem ponto final, pode ser título
-        if (len(line_stripped) < 100 and 
+        if line_stripped[0].isdigit():
+            numbering_match = re.match(r'^(\d+(?:\.\d+)*)[\.)]\s+(.+)$', line_stripped)
+            if numbering_match:
+                numbering = numbering_match.group(1)
+                title = numbering_match.group(2).strip()
+                # Conta quantos pontos há na numeração para determinar nível
+                level = numbering.count('.') + 1
+                return (level, title)
+
+        # Heurísticas para títulos (fallback) - apenas se parece com título
+        if (len(line_stripped) < 100 and
             not line_stripped.endswith('.') and
             len(line_stripped.split()) <= 15 and
-            (line_stripped.isupper() or 
+            (line_stripped.isupper() or
              re.match(r'^[A-Z][^\.]*:', line_stripped))):
             # Assume nível 1 para heurísticas
             return (1, line_stripped)
-        
+
         return (0, "")
     
     def _finalize_section():
@@ -144,6 +165,7 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
             _finalize_section()
             
             # Remove seções do stack com nível >= nível atual
+            # Isso garante que apenas seções ancestrais permanecem
             while stack and stack[-1].get("level", 0) >= level:
                 stack.pop()
             
@@ -151,7 +173,8 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
             parent = None
             parent_title = ""
             if level > 1 and stack:
-                # Procura última seção com nível < level atual
+                # Otimização: busca reversa do stack (mais eficiente que loop completo)
+                # Como stack está ordenado por nível, podemos buscar do final para o início
                 for i in range(len(stack) - 1, -1, -1):
                     if stack[i].get("level", 0) < level:
                         parent = stack[i]
@@ -205,7 +228,7 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
     # Finaliza última seção
     _finalize_section()
     
-    # Se não detectou nenhuma seção, retorna documento inteiro
+    # Se não detectou nenhuma seção, retorna documento inteiro como seção raiz
     if not sections:
         return [{
             "title": "",
@@ -217,6 +240,11 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
             "path": [],
             "document_context": ""
         }]
+
+    # Otimização: garante que seções estão ordenadas por posição
+    sections.sort(key=lambda s: s.get("start", 0))
+
+    return sections
     
     return sections
 

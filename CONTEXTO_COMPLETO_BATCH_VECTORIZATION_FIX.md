@@ -319,3 +319,8 @@ python TESTE_FIX_BATCH_VECTORIZATION.py
 
 
 
+
+
+
+
+
