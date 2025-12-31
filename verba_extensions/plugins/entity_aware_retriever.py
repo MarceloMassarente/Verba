@@ -3248,6 +3248,8 @@ class EntityAwareRetriever(Retriever):
                         "score": 0,
                         "metadata": document.get("metadata", {}),
                     }
+                    
+                    import json
                 except Exception as e:
                     msg.warn(f"Erro ao buscar documento {doc_uuid}: {str(e)}")
                     continue
@@ -3272,11 +3274,29 @@ class EntityAwareRetriever(Retriever):
             except (ValueError, TypeError):
                 chunk_id = 0
             
+            # Preservar metadados
+            meta_str = chunk_props.get("meta", "{}")
+            try:
+                chunk_meta = json.loads(meta_str) if isinstance(meta_str, str) else (meta_str or {})
+            except:
+                chunk_meta = {}
+            
+            # Copiar propriedades importantes para o meta
+            important_properties = [
+                "slide_position", "slide_type", "pattern_genetics", 
+                "reusability_score", "visual_archetype", "semantic_bridge_quality",
+                "frameworks", "companies", "conceitos_negocio", "chunk_lang", "chunk_date"
+            ]
+            for prop in important_properties:
+                if prop in chunk_props and chunk_props[prop] is not None:
+                    chunk_meta[prop] = chunk_props[prop]
+            
             doc_map[doc_uuid]["chunks"].append({
                 "uuid": str(chunk.uuid),
                 "score": chunk_score,
                 "chunk_id": chunk_id,  # Agora garantidamente int
                 "content": chunk_props.get("content", ""),
+                "meta": json.dumps(chunk_meta),
             })
             doc_map[doc_uuid]["score"] += chunk_score
         
@@ -3292,6 +3312,7 @@ class EntityAwareRetriever(Retriever):
                     "score": chunk["score"],
                     "chunk_id": chunk["chunk_id"],
                     "embedder": embedder,
+                    "meta": chunk.get("meta", "{}"),
                 }
                 for chunk in doc_data["chunks"]
             ]
@@ -3304,8 +3325,9 @@ class EntityAwareRetriever(Retriever):
                     "content": chunk["content"],
                     "chunk_id": chunk["chunk_id"],
                     "embedder": embedder,
+                    "meta": chunk.get("meta", "{}"),
                 }
-                for chunk in doc_data["chunks"]
+                for chunk in doc_map[doc_uuid]["chunks"]
             ]
             
             # Ordenar por chunk_id
@@ -3361,6 +3383,7 @@ class EntityAwareRetriever(Retriever):
                         "score": chunk["score"],
                         "chunk_id": chunk["chunk_id"],
                         "embedder": embedder,
+                        "meta": chunk.get("meta", "{}"),
                     }
                     for chunk in filtered_doc["chunks"]
                 ]
