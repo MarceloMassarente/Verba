@@ -498,17 +498,56 @@ def patch_weaviate_manager_verify_collection():
                 should_have_etl = ("VERBA_Embedding" in collection_name) or (collection_name in etl_collections)
                 
                 if should_have_etl:
-                    has_etl = await check_collection_has_etl_properties(client, collection_name)
-                    if has_etl:
-                        msg.info(f"✅ Collection {collection_name} já tem schema ETL-aware")
-                        return True
-                    else:
-                        msg.warn(f"⚠️  Collection {collection_name} existe mas NÃO tem schema ETL-aware")
-                        msg.warn(f"   ⚠️  Weaviate v4 não permite adicionar propriedades depois")
-                        msg.warn(f"   💡 Delete e recrie a collection para ter schema ETL-aware")
-                        msg.warn(f"   📝 Chunks normais funcionarão, mas ETL pós-chunking não salvará metadados")
-                        # Ainda retorna True para não quebrar o fluxo
-                        return True
+                    # Verifica quais propriedades faltam
+                    all_props = get_all_embedding_properties(include_named_vectors=True) # Always check for all including named vectors in strict mode, or detect config
+                    
+                    # Detecta se named vectors devem estar habilitados
+                    enable_named_vectors = True
+                    try:
+                        env_value = os.getenv("ENABLE_NAMED_VECTORS")
+                        if env_value is not None:
+                            enable_named_vectors = env_value.lower() == "true"
+                    except:
+                        pass
+
+                    all_props = get_all_embedding_properties(include_named_vectors=enable_named_vectors)
+
+                    try:
+                        collection = client.collections.get(collection_name)
+                        config = await collection.config.get()
+                        existing_names = {p.name for p in config.properties}
+                        
+                        missing_props = [p for p in all_props if p.name not in existing_names]
+                        
+                        if not missing_props:
+                            msg.info(f"✅ Collection {collection_name} já tem schema ETL-aware completo")
+                            return True
+                        
+                        msg.warn(f"⚠️  Collection {collection_name} existe mas faltam {len(missing_props)} propriedades ETL/Advanced")
+                        msg.info(f"🔧 Tentando Auto-Heal: Adicionando propriedades faltantes...")
+                        
+                        added_count = 0
+                        for prop in missing_props:
+                            try:
+                                # Weaviate v4 suporta adicionar propriedades (additive changes)
+                                # Mas precisa converter Property object para o formato correto se não for suportado diretamente
+                                # A biblioteca python v4 suporta passar o objeto Property diretamente para add_property
+                                await collection.config.add_property(prop)
+                                msg.good(f"   ✅ Adicionada propriedade: {prop.name}")
+                                added_count += 1
+                            except Exception as add_err:
+                                msg.warn(f"   ❌ Erro ao adicionar {prop.name}: {str(add_err)}")
+                        
+                        if added_count > 0:
+                            msg.good(f"✨ Auto-Heal concluído: {added_count} propriedades adicionadas a {collection_name}")
+                        else:
+                            msg.warn(f"⚠️ Auto-Heal falhou ou nenhuma propriedade pôde ser adicionada")
+                            
+                    except Exception as e:
+                        msg.warn(f"⚠️ Erro durante verificação/Auto-Heal de schema: {str(e)}")
+                        # Fallback: continua mesmo com erro
+                    
+                    return True
                 else:
                     # Collection que não precisa de ETL - usa método original
                     return await original_verify(self, client, collection_name)
