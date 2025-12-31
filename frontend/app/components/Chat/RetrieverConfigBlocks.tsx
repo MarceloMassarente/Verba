@@ -686,11 +686,80 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       </div>
 
       {/* 2. PRESETS UNIFICADOS - COMMENTED OUT FOR DEBUGGING */}
-      {/*
+      {/* 2. PRESETS UNIFICADOS */}
       {(rerankerPresets.length > 0 || presetsError || loadingPresets) && (
-          <div className="p-4 bg-bg-alt-verba rounded-lg">Presets Placeholder</div>
+        <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-secondary-verba">
+          <div className="flex gap-2 justify-between items-center text-text-verba">
+            <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">★ Presets de Busca</p>
+
+            <div className="flex flex-grow gap-2 items-center">
+              {loadingPresets ? (
+                <div className="flex items-center gap-2 text-text-alt-verba text-sm">
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Carregando presets...
+                </div>
+              ) : presetsError ? (
+                <div className="text-warning-verba text-sm italic flex-grow">
+                  {presetsError}
+                </div>
+              ) : (
+                <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
+                  <button
+                    tabIndex={0}
+                    role="button"
+                    disabled={blocked}
+                    className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
+                  >
+                    <GoTriangleDown size={15} />
+                    <p className="truncate">
+                      {selectedPreset ? selectedPreset.name : "Selecionar Preset..."}
+                    </p>
+                  </button>
+                  <ul
+                    tabIndex={0}
+                    className="dropdown-content menu bg-base-100 rounded-box z-[1] w-full p-2 shadow max-h-60 overflow-y-auto"
+                  >
+                    {rerankerPresets.map((preset) => (
+                      <li
+                        key={"Preset_" + preset.name}
+                        onClick={() => {
+                          if (!blocked) {
+                            setSelectedPreset(preset);
+                          }
+                        }}
+                      >
+                        <a>
+                          <span className="font-bold">{preset.name}</span>
+                          {preset.description && (
+                            <span className="text-xs opacity-70 ml-2"> - {preset.description}</span>
+                          )}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {selectedPreset && !presetsError && !loadingPresets && (
+                <VerbaButton
+                  title="Aplicar"
+                  disabled={blocked}
+                  onClick={() => {
+                    applyPreset(selectedPreset);
+                  }}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-2 items-start text-text-verba">
+            <p className="flex min-w-[8vw]"></p>
+            <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
+              💡 {selectedPreset ? selectedPreset.description : "Escolha uma configuração otimizada"}
+            </p>
+          </div>
+        </div>
       )}
-      */}
 
       {/* 3. WARNINGS */}
       {
