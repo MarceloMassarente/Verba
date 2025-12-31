@@ -262,6 +262,7 @@ Este documento serve como índice centralizado de toda a documentação do proje
 1. `GUIA_DEPLOY_RAILWAY.md`
 2. `GUIA_DOCKER.md`
 3. `CONFIGURACAO_WEAVIATE_RAILWAY.md`
+4. `SCRIPTS_README.md` ⭐ (Novos scripts de verificação)
 
 ### 📚 **Referência Técnica**
 1. `TECHNICAL.md`
@@ -335,7 +336,7 @@ Este índice é atualizado sempre que:
 - Documentação é reorganizada
 - Nova versão de patches é adicionada
 
-**Última atualização:** 2025-11-04
+**Última atualização:** 2025-12-31
 
 ---
 

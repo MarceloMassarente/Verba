@@ -187,3 +187,24 @@ Filtra por entidades + keywords
 ❌ Quer buscar por **conceitos abstratos** (inovação, tendências)  
 ❌ Query é **muito complexa** (múltiplas condições lógicas)  
 ❌ Precisa de **relacionamentos** entre entidades  
+
+---
+
+## 🛠️ **Melhorias Técnicas (Dezembro 2025)**
+
+### **1. Preservação de Metadados**
+O EntityAware Retriever foi atualizado para garantir que **todos** os metadados enriquecidos sejam retornados para o frontend.
+- **Antes**: Metadados usados apenas no reranking interno, mas perdidos na resposta final.
+- **Agora**: O objeto `Chunk` final inclui um campo `meta` serializado com:
+  - `frameworks`, `companies`, `concepts` (do ETL)
+  - Propriedades V019: `slide_position`, `visual_archetype`, `semantic_bridge_quality`, etc.
+  - `chunk_lang` e `chunk_date`
+
+Isso permite que a interface mostre badges, ícones e visualizações baseadas nesses dados ricos.
+
+### **2. Chunk Window & Filtro de Qualidade**
+Implementada uma lógica avançada de janela deslizante (`Chunk Window`) com filtros de qualidade para limpar o contexto:
+- **Clean Context**: Remove chunks repetitivos, fragmentados ou de baixa qualidade antes de enviá-los ao LLM.
+- **Detecção Inteligente**: Identifica e preserva tabelas/gráficos (que parecem repetitivos mas são dados válidos), enquanto remove cabeçalhos/rodapés de PDF.
+- **Fallback Automático**: Se o filtro for muito agressivo e remover muitos chunks, um modo de "emergência" é ativado automaticamente para garantir que informações não sejam perdidas.
+

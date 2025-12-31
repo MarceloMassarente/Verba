@@ -46,6 +46,7 @@ This project is organized into the following directories:
   - `changelogs/` - Change history and summaries
   - `comparisons/` - Comparisons and evaluations
   - `integrations/` - Integration documentation
+  - `archive/` - Archived documentation and logs
   - `assets/` - Static resources (PDFs, images)
 
 - **`scripts/`** - Utility scripts organized by purpose:
@@ -58,7 +59,7 @@ This project is organized into the following directories:
 
 - **`tests/`** - Test files and test runners
 
-For more details, see `docs/README.md` and `scripts/README.md`.
+For more details, see `docs/INDICE_DOCUMENTACAO.md` and `scripts/README.md`.
 
 ## What Is Verba?
 

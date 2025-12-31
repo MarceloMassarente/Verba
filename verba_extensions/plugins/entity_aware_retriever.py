@@ -203,24 +203,7 @@ class EntityAwareRetriever(Retriever):
             values=[],
             block="filters",
         )
-        self.config["Enable Query Rewriting"] = InputConfig(
-            type="bool",
-            value=False,
-            description="Enable LLM-based query rewriting for better search results",
-            values=[],
-        )
-        self.config["Query Rewriter Cache TTL"] = InputConfig(
-            type="number",
-            value=3600,
-            description="Cache TTL in seconds for query rewriting (default: 3600)",
-            values=[],
-        )
-        self.config["Reranker Top K"] = InputConfig(
-            type="number",
-            value=5,
-            description="Number of top chunks to return after reranking (default: 5, use 0 to return all)",
-            values=[],
-        )
+
         self.config["Enable Temporal Filter"] = InputConfig(
             type="bool",
             value=True,
@@ -254,14 +237,14 @@ class EntityAwareRetriever(Retriever):
         )
         self.config["Two-Phase Search Filter Level"] = InputConfig(
             type="dropdown",
-            value="chunk",
+            value="document",
             description="Filter level for Phase 1: 'chunk' filters individual chunks, 'document' filters entire documents (better context, less fragmentation)",
             values=["chunk", "document"],
             block="search_mode",
         )
         self.config["Enable Multi-Vector Search"] = InputConfig(
             type="bool",
-            value=False,
+            value=True,
             description="Enable multi-vector search using named vectors (concept_vec, sector_vec, company_vec)",
             values=[],
             block="search_mode",
@@ -309,9 +292,9 @@ class EntityAwareRetriever(Retriever):
         )
         self.config["Reranker Preset"] = InputConfig(
             type="dropdown",
-            value="auto",
-            description="Preset otimizado para reranking (auto seleciona baseado na query)",
-            values=["auto", "production", "max_quality", "local_only", "custom"],
+            value="consulting_frameworks",
+            description="Preset otimizado para reranking. 'consulting_frameworks' é o padrão para documentos de consultoria.",
+            values=["consulting_frameworks", "company_research", "sector_analysis", "speed", "max_quality", "balanced", "offline", "custom"],
             block="optimizations",
         )
         self.config["Query Rewriter Cache TTL"] = InputConfig(
@@ -323,7 +306,7 @@ class EntityAwareRetriever(Retriever):
         )
         self.config["Chunk Window"] = InputConfig(
             type="number",
-            value=1,
+            value=2,
             description="Number of surrounding chunks",
             values=[],
             block="optimizations",
@@ -332,7 +315,7 @@ class EntityAwareRetriever(Retriever):
         # RAG 2.0: Intelligent Cache
         self.config["Enable Intelligent Cache"] = InputConfig(
             type="bool",
-            value=False,
+            value=True,
             description="Enable intelligent cache with similarity search (reuses similar queries)",
             values=[],
             block="optimizations",
@@ -348,7 +331,7 @@ class EntityAwareRetriever(Retriever):
         # RAG 2.0: Dynamic Reranking
         self.config["Enable Dynamic Reranking"] = InputConfig(
             type="bool",
-            value=False,
+            value=True,
             description="Enable multi-dimensional reranking (similarity + recency + entity frequency)",
             values=[],
             block="optimizations",
@@ -3220,6 +3203,71 @@ class EntityAwareRetriever(Retriever):
         except Exception as e:
             msg.warn(f"Reranking falhou (não crítico): {str(e)}")
             # Continua sem reranking
+        
+        # 6.5. CHUNK WINDOW EXPANSION (buscar chunks adjacentes)
+        # Resolve o problema de "Entity Mention Decay": quando uma entidade é mencionada
+        # em um chunk e os chunks seguintes continuam falando dela sem repetir o nome.
+        chunk_window_config = config.get("Chunk Window", {})
+        chunk_window = 0
+        if chunk_window_config and hasattr(chunk_window_config, 'value'):
+            chunk_window = int(chunk_window_config.value)
+        
+        if chunk_window > 0 and len(chunks) > 0:
+            try:
+                msg.info(f"  🪟 Chunk Window: Expandindo {len(chunks)} chunks com window={chunk_window}")
+                
+                # Agrupar chunks por documento
+                doc_chunks = {}
+                for chunk in chunks:
+                    if hasattr(chunk, "properties"):
+                        doc_uuid = chunk.properties.get("doc_uuid", "")
+                        chunk_id_raw = chunk.properties.get("chunk_id", 0)
+                        try:
+                            chunk_id = int(float(chunk_id_raw)) if chunk_id_raw else 0
+                        except:
+                            chunk_id = 0
+                        
+                        if doc_uuid not in doc_chunks:
+                            doc_chunks[doc_uuid] = set()
+                        doc_chunks[doc_uuid].add(chunk_id)
+                
+                # Para cada documento, calcular IDs adjacentes necessários
+                all_expanded_chunks = list(chunks)  # Começar com chunks existentes
+                existing_uuids = {str(c.uuid) for c in chunks if hasattr(c, "uuid")}
+                
+                for doc_uuid, chunk_ids in doc_chunks.items():
+                    if not doc_uuid:
+                        continue
+                    
+                    # Gerar lista de chunk_ids adjacentes
+                    adjacent_ids = set()
+                    for cid in chunk_ids:
+                        for offset in range(-chunk_window, chunk_window + 1):
+                            adj_id = cid + offset
+                            if adj_id >= 0 and adj_id not in chunk_ids:  # Não incluir os já existentes
+                                adjacent_ids.add(adj_id)
+                    
+                    if adjacent_ids:
+                        try:
+                            # Buscar chunks adjacentes
+                            adjacent_chunks = await weaviate_manager.get_chunk_by_ids(
+                                client, embedder, doc_uuid, list(adjacent_ids)
+                            )
+                            
+                            for adj_chunk in adjacent_chunks:
+                                if hasattr(adj_chunk, "uuid") and str(adj_chunk.uuid) not in existing_uuids:
+                                    all_expanded_chunks.append(adj_chunk)
+                                    existing_uuids.add(str(adj_chunk.uuid))
+                        except Exception as e:
+                            msg.debug(f"  Erro ao buscar chunks adjacentes para doc {doc_uuid}: {str(e)}")
+                
+                new_chunks_count = len(all_expanded_chunks) - len(chunks)
+                if new_chunks_count > 0:
+                    msg.good(f"  ✅ Chunk Window: Adicionados {new_chunks_count} chunks adjacentes (total: {len(all_expanded_chunks)})")
+                    chunks = all_expanded_chunks
+                    
+            except Exception as e:
+                msg.debug(f"  Chunk Window expansion falhou (não crítico): {str(e)}")
         
         # 7. CONVERTE CHUNKS PARA FORMATO ESPERADO (dicionários serializáveis)
         # Similar ao WindowRetriever, precisa converter objetos Weaviate para dicionários

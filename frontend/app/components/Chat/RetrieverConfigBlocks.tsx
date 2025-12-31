@@ -39,7 +39,7 @@ interface ConfigBlock {
 
 const BLOCKS: ConfigBlock[] = [
   // ORDEM INTUITIVA: Top-Down Decision Flow
-  
+
   // 1. ARQUITETURA - Decisão mais importante
   {
     name: "search_mode",
@@ -48,7 +48,12 @@ const BLOCKS: ConfigBlock[] = [
     mode: "radio",
     priority: "critical",
     defaultOpen: true,
-    configs: ["Two-Phase Search Mode", "Enable Multi-Vector Search", "Enable Aggregation"],
+    configs: [
+      "Two-Phase Search Mode",
+      "Two-Phase Search Filter Level",
+      "Enable Multi-Vector Search",
+      "Enable Aggregation"
+    ],
   },
 
   // 2. FUNDAMENTOS - Parâmetros principais
@@ -60,6 +65,7 @@ const BLOCKS: ConfigBlock[] = [
     defaultOpen: true,
     configs: [
       "Search Mode",
+      "Use Section Hierarchy",
       "Limit Mode",
       "Limit/Sensitivity",
       "Alpha",
@@ -94,6 +100,12 @@ const BLOCKS: ConfigBlock[] = [
     collapsible: true,
     defaultOpen: false,
     configs: [
+      "Enable Intelligent Cache",
+      "Cache Similarity Threshold",
+      "Enable Dynamic Reranking",
+      "Reranking Recency Weight",
+      "Reranking Entity Weight",
+      "Reranker Preset",
       "Enable Query Expansion",
       "Enable Dynamic Alpha",
       "Enable Relative Score Fusion",
@@ -142,6 +154,7 @@ const BLOCKS: ConfigBlock[] = [
       "Enable Cohere Reranker",
       "Cohere Model",
       "Cohere API Key",
+      "Cohere Base URL",
     ],
   },
   {
@@ -155,6 +168,7 @@ const BLOCKS: ConfigBlock[] = [
     configs: [
       "Enable Jina Reranker",
       "Jina API Key",
+      "Jina Base URL",
     ],
   },
   {
@@ -168,6 +182,7 @@ const BLOCKS: ConfigBlock[] = [
     configs: [
       "Enable VoyageAI Reranker",
       "VoyageAI API Key",
+      "VoyageAI Base URL",
     ],
   },
   {
@@ -183,6 +198,7 @@ const BLOCKS: ConfigBlock[] = [
       "ContextualAI Model",
       "ContextualAI Instruction",
       "ContextualAI API Key",
+      "ContextualAI Base URL",
     ],
   },
 ];
@@ -199,14 +215,15 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
   const [rerankerPresets, setRerankerPresets] = useState<RerankerPreset[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState<string>("auto");
+  const [selectedPreset, setSelectedPreset] = useState<string>("consulting_frameworks");
   const [loadingPresets, setLoadingPresets] = useState(false);
-  
+  const [presetsError, setPresetsError] = useState<string | null>(null);
+
   // Estado para collapse de blocos
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(
     new Set(BLOCKS.filter(b => b.defaultOpen !== false).map(b => b.name))
   );
-  
+
   const toggleBlock = (blockName: string) => {
     setExpandedBlocks(prev => {
       const next = new Set(prev);
@@ -287,16 +304,22 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   // Carrega presets ao montar componente
   useEffect(() => {
     if (!credentials) return;
-    
+
     const loadPresets = async () => {
       setLoadingPresets(true);
+      setPresetsError(null);
       try {
         const data = await fetchRerankerPresets(credentials);
         if (data && data.presets) {
           setRerankerPresets(data.presets);
         }
+        if (data && data.error) {
+          setPresetsError(data.error);
+        }
       } catch (error) {
-        console.error("Error loading reranker presets:", error);
+        const errorMsg = error instanceof Error ? error.message : "Erro desconhecido ao carregar presets";
+        console.error("Error loading presets:", error);
+        setPresetsError(errorMsg);
       } finally {
         setLoadingPresets(false);
       }
@@ -319,16 +342,16 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
 
   const handlePresetChange = async (presetName: string) => {
     if (blocked || !credentials) return;
-    
+
     setSelectedPreset(presetName);
-    
+
     try {
       const result = await applyRerankerPreset(
         presetName,
         currentQuery || null,
         credentials
       );
-      
+
       if (result && result.status === 200) {
         // Recarrega RAG config para refletir mudanças
         window.location.reload();
@@ -363,7 +386,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const renderConfigField = (configTitle: string, config: ConfigSetting) => {
     const isDisabled = disabledFields.has(configTitle);
     const hasWarning = warnings.some((w) => w.includes(configTitle));
-    
+
     // Mensagem de ajuda para campos desabilitados
     const getDisabledMessage = () => {
       if (!isDisabled) return null;
@@ -371,7 +394,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       const component = RAGConfig.Retriever.components[selected];
       const twoPhase = component?.config["Two-Phase Search Mode"];
       const aggregation = component?.config["Enable Aggregation"];
-      
+
       if (configTitle === "Enable Entity Filter" || configTitle === "Entity Filter Mode") {
         if (twoPhase?.value && twoPhase.value !== "disabled") {
           return "Desabilite 'Two-Phase Search Mode' no bloco 'Arquitetura de Busca' para ativar";
@@ -382,7 +405,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       }
       return null;
     };
-    
+
     const disabledMessage = getDisabledMessage();
 
     return (
@@ -398,9 +421,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                 tabIndex={0}
                 role="button"
                 disabled={blocked || isDisabled}
-                className={`btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none ${
-                  isDisabled ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                className={`btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none ${isDisabled ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
               >
                 <GoTriangleDown size={15} />
                 <p className="truncate">{config.value}</p>
@@ -418,9 +440,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           {typeof config.value !== "boolean" &&
             ["text", "number", "password"].includes(config.type) && (
               <label
-                className={`input flex text-sm items-center gap-2 w-full bg-bg-verba ${
-                  isDisabled ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                className={`input flex text-sm items-center gap-2 w-full bg-bg-verba ${isDisabled ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
               >
                 <input
                   type={config.type}
@@ -482,7 +503,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
             </p>
           </div>
         )}
-        
+
         {/* Disabled Help Message */}
         {isDisabled && disabledMessage && (
           <div className="flex gap-2 items-start text-text-verba mt-2">
@@ -520,12 +541,12 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       if (block.name !== "search_mode") return null;
       const twoPhase = component.config["Two-Phase Search Mode"];
       const aggregation = component.config["Enable Aggregation"];
-      
+
       if (aggregation?.value) return "Aggregation";
       if (twoPhase?.value && twoPhase.value !== "disabled") return "Two-Phase";
       return "Padrão";
     };
-    
+
     const activeMode = getActiveMode();
     const isExpanded = expandedBlocks.has(block.name);
     const isCollapsible = block.collapsible !== false && (blockConfigs.length > 3 || block.collapsible);
@@ -536,15 +557,15 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       important: "bg-bg-alt-verba border-l-4 border-button-verba/60",
       advanced: "bg-bg-verba/30 border-l-4 border-button-verba/30",
     };
-    
+
     const bgColor = priorityColors[block.priority || "important"] || priorityColors.important;
 
     return (
       <div key={block.name} className={`mb-4 p-4 rounded-lg ${bgColor} transition-all`}>
         <div className="mb-4">
           {/* Header com toggle para collapse */}
-          <div className="flex items-center justify-between cursor-pointer" 
-               onClick={() => isCollapsible && toggleBlock(block.name)}>
+          <div className="flex items-center justify-between cursor-pointer"
+            onClick={() => isCollapsible && toggleBlock(block.name)}>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-text-verba">
                 {block.title}
@@ -586,7 +607,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
             {blockConfigs.map(({ name, config }) => renderConfigField(name, config))}
           </div>
         )}
-        
+
         {/* Indicador de collapse */}
         {isCollapsible && !isExpanded && (
           <div className="text-xs text-text-alt-verba italic text-center py-2">
@@ -663,107 +684,123 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
         </div>
       </div>
 
-      {/* 2. PRESETS - SECOND */}
-      {rerankerPresets.length > 0 && (
+      {/* 2. PRESETS UNIFICADOS - Retriever + Reranker */}
+      {(rerankerPresets.length > 0 || presetsError || loadingPresets) && (
         <div className="mb-4 p-4 bg-bg-alt-verba rounded-lg border border-button-verba/50 border-l-4 border-l-button-verba">
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-text-verba">
-              ⚡ Presets Rápidos de Reranking
+              ⚡ Presets de Busca
             </h3>
             <p className="text-sm text-text-alt-verba">
-              Clique em um preset para aplicar configuração otimizada automaticamente
+              Clique para aplicar configuração completa (arquitetura + reranking + otimizações)
             </p>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {rerankerPresets.map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => handlePresetChange(preset.name)}
-                disabled={blocked || !preset.available || loadingPresets}
-                className={`p-3 rounded-lg border-2 text-left transition-all ${
-                  selectedPreset === preset.name
+
+          {/* Error display */}
+          {presetsError && (
+            <div className="p-3 mb-4 bg-red-500/20 rounded-lg border border-red-500/50 text-red-400">
+              <p className="text-sm font-semibold">❌ Erro ao carregar presets:</p>
+              <p className="text-xs">{presetsError}</p>
+            </div>
+          )}
+
+          {/* Loading indicator */}
+          {loadingPresets && (
+            <div className="text-center text-text-alt-verba py-4">
+              <span className="animate-pulse">Carregando presets...</span>
+            </div>
+          )}
+
+          {/* Presets grid */}
+          {!loadingPresets && rerankerPresets.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {rerankerPresets.map((preset) => (
+                <button
+                  key={preset.name}
+                  onClick={() => handlePresetChange(preset.name)}
+                  disabled={blocked || !preset.available || loadingPresets}
+                  className={`p-3 rounded-lg border-2 text-left transition-all ${selectedPreset === preset.name
                     ? "border-button-verba bg-button-verba/20"
                     : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
-                } ${
-                  !preset.available || blocked || loadingPresets
+                    } ${!preset.available || blocked || loadingPresets
+                      ? "opacity-50 cursor-not-allowed"
+                      : "cursor-pointer"
+                    }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-semibold text-text-verba text-sm">
+                      {preset.display_name}
+                    </h4>
+                    {selectedPreset === preset.name && (
+                      <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
+                        ✓ Ativo
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-text-alt-verba mb-2 line-clamp-2">
+                    {preset.description}
+                  </p>
+                  <div className="flex gap-2 text-xs text-text-alt-verba">
+                    <span>⚡ {preset.latency_estimate}</span>
+                    <span>•</span>
+                    <span>⭐ {preset.quality_estimate}</span>
+                  </div>
+                  {!preset.available && preset.missing_requirements.length > 0 && (
+                    <p className="text-xs text-warning-verba mt-2">
+                      Faltam: {preset.missing_requirements.join(", ")}
+                    </p>
+                  )}
+                </button>
+              ))
+              }
+              < button
+                onClick={() => handlePresetChange("custom")}
+                disabled={blocked || loadingPresets}
+                className={`p-3 rounded-lg border-2 text-left transition-all ${selectedPreset === "custom"
+                  ? "border-button-verba bg-button-verba/20"
+                  : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
+                  } ${blocked || loadingPresets
                     ? "opacity-50 cursor-not-allowed"
                     : "cursor-pointer"
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-semibold text-text-verba text-sm">
-                    {preset.display_name}
-                  </h4>
-                  {selectedPreset === preset.name && (
+                  <h4 className="font-semibold text-text-verba text-sm">⚙️ Customizado</h4>
+                  {selectedPreset === "custom" && (
                     <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
                       ✓ Ativo
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-text-alt-verba mb-2 line-clamp-2">
-                  {preset.description}
+                <p className="text-xs text-text-alt-verba">
+                  Configuração manual abaixo
                 </p>
-                <div className="flex gap-2 text-xs text-text-alt-verba">
-                  <span>⚡ {preset.latency_estimate}</span>
-                  <span>•</span>
-                  <span>⭐ {preset.quality_estimate}</span>
-                </div>
-                {!preset.available && preset.missing_requirements.length > 0 && (
-                  <p className="text-xs text-warning-verba mt-2">
-                    Faltam: {preset.missing_requirements.join(", ")}
-                  </p>
-                )}
               </button>
-            ))}
-            <button
-              onClick={() => handlePresetChange("custom")}
-              disabled={blocked || loadingPresets}
-              className={`p-3 rounded-lg border-2 text-left transition-all ${
-                selectedPreset === "custom"
-                  ? "border-button-verba bg-button-verba/20"
-                  : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
-              } ${
-                blocked || loadingPresets
-                  ? "opacity-50 cursor-not-allowed"
-                  : "cursor-pointer"
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold text-text-verba text-sm">⚙️ Customizado</h4>
-                {selectedPreset === "custom" && (
-                  <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
-                    ✓ Ativo
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-text-alt-verba">
-                Configuração manual abaixo
-              </p>
-            </button>
-          </div>
-        </div>
+            </div>
+        </div >
       )}
 
       {/* 3. WARNINGS */}
-      {warnings.length > 0 && (
-        <div className="p-3 bg-warning-verba/20 rounded-lg border border-warning-verba/50">
-          <p className="text-sm font-semibold text-warning-verba mb-2">
-            ⚠️ Avisos de Configuração:
-          </p>
-          <ul className="list-disc list-inside text-xs text-text-verba space-y-1">
-            {warnings.map((warning, idx) => (
-              <li key={idx}>{warning}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {
+        warnings.length > 0 && (
+          <div className="p-3 bg-warning-verba/20 rounded-lg border border-warning-verba/50">
+            <p className="text-sm font-semibold text-warning-verba mb-2">
+              ⚠️ Avisos de Configuração:
+            </p>
+            <ul className="list-disc list-inside text-xs text-text-verba space-y-1">
+              {warnings.map((warning, idx) => (
+                <li key={idx}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )
+      }
 
       {/* 4. CONFIG BLOCKS - IN NEW ORDER */}
       <div className="space-y-2">
         {BLOCKS.map((block) => renderBlock(block))}
       </div>
-    </div>
+    </div >
   );
 };
 

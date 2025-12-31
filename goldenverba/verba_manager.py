@@ -751,26 +751,46 @@ class VerbaManager:
             
             if reranker and hasattr(reranker, 'get_presets_metadata'):
                 return reranker.get_presets_metadata()
-            else:
-                # Fallback: retorna presets básicos sem verificação de disponibilidade
-                from verba_extensions.plugins.reranker import RerankerPresets
-                presets = RerankerPresets.get_all_presets()
-                return [
-                    {
-                        "name": name,
-                        "display_name": name.replace("_", " ").title(),
-                        "description": config.get("description", ""),
-                        "latency_estimate": config.get("latency_estimate", "N/A"),
-                        "quality_estimate": config.get("quality_estimate", "N/A"),
-                        "available": True,  # Não podemos verificar sem instância do reranker
-                        "missing_requirements": [],
-                        "config": config
-                    }
-                    for name, config in presets.items()
-                ]
+            
+            # Fallback explícito: usa presets diretamente, SEM mascarar erro de disponibilidade
+            from verba_extensions.plugins.reranker import RerankerPresets
+            presets = RerankerPresets.get_all_presets()
+            
+            result = []
+            for name, config in presets.items():
+                # Usa display_name do config se existir, senão gera
+                display_name = config.get("display_name", name.replace("_", " ").title())
+                
+                # Verifica requisitos
+                requirements = config.get("requirements", [])
+                missing = []
+                for req in requirements:
+                    if req.startswith("CONTEXTUAL") or req.endswith("_API_KEY"):
+                        import os
+                        if not os.environ.get(req):
+                            missing.append(req)
+                    elif req == "haystack-ai":
+                        try:
+                            import haystack
+                        except ImportError:
+                            missing.append(req)
+                
+                result.append({
+                    "name": config.get("name", name),
+                    "display_name": display_name,
+                    "description": config.get("description", ""),
+                    "latency_estimate": config.get("latency_estimate", "N/A"),
+                    "quality_estimate": config.get("quality_estimate", "N/A"),
+                    "available": len(missing) == 0,
+                    "missing_requirements": missing,
+                    "config": config
+                })
+            
+            return result
+            
         except Exception as e:
-            msg.warn(f"Erro ao obter presets de reranker: {e}")
-            return []
+            msg.fail(f"Erro crítico ao obter presets: {e}")  # fail ao invés de warn
+            raise  # Re-raise ao invés de retornar lista vazia
 
     async def set_theme_config(self, client, config: dict):
         await self.weaviate_manager.set_config(client, self.theme_config_uuid, config)

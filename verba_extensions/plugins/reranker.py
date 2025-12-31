@@ -866,20 +866,25 @@ class ContextualAIReranker(BaseReranker):
 class RerankerPresets:
     """Presets otimizados para reranking."""
     
-    # Preset 1: Produção (velocidade + qualidade balanceada)
-    PRODUCTION = {
+    # Preset: Balanced (antigo Production)
+    BALANCED = {
+        "name": "balanced",
+        "display_name": "⚖️ Balanceado",
+        "description": "ContextualAI apenas (rápido e eficiente)",
         "Reranker Provider": "ContextualAI",
         "ContextualAI Model": "ctxl-rerank-v2-instruct-multilingual",
         "ContextualAI Instruction": "Prioritize recent and authoritative content.",
         "Top K": 5,
         "latency_estimate": "~500ms",
         "quality_estimate": "Alta",
-        "description": "ContextualAI apenas (rápido e eficiente)",
         "requirements": ["CONTEXTUAL_API_KEY"]
     }
     
     # Preset 2: Máxima Qualidade (Metadata + Haystack + ContextualAI)
     MAX_QUALITY = {
+        "name": "max_quality",
+        "display_name": "🎯 Qualidade Máxima",
+        "description": "Metadata + Haystack + ContextualAI (melhor precisão)",
         "Reranker Provider": "Combined",
         "Reranker Mode": "Hybrid",
         "Enable Metadata Reranker": True,
@@ -890,12 +895,14 @@ class RerankerPresets:
         "Top K": 5,
         "latency_estimate": "~1.5s",
         "quality_estimate": "Muito Alta",
-        "description": "Metadata + Haystack + ContextualAI (melhor precisão)",
         "requirements": ["haystack-ai", "CONTEXTUAL_API_KEY"]
     }
     
-    # Preset 3: Local Apenas (sem APIs)
-    LOCAL_ONLY = {
+    # Preset: Offline (Sem APIs)
+    OFFLINE = {
+        "name": "offline",
+        "display_name": "🔌 Offline",
+        "description": "Metadata + Haystack (sem APIs, local apenas)",
         "Reranker Provider": "Combined",
         "Reranker Mode": "Parallel",
         "Enable Metadata Reranker": True,
@@ -903,17 +910,152 @@ class RerankerPresets:
         "Top K": 5,
         "latency_estimate": "~500ms",
         "quality_estimate": "Alta",
-        "description": "Metadata + Haystack (sem APIs, local apenas)",
         "requirements": ["haystack-ai"]
+    }
+
+    # ============================================================================
+    # NEW PRESETS - CONSULTING OPTIMIZED
+    # ============================================================================
+
+    # Preset: Consulting Frameworks (DEFAULT)
+    CONSULTING_FRAMEWORKS = {
+        "name": "consulting_frameworks",
+        "display_name": "📊 Consultoria & Frameworks",
+        "description": "Otimizado para buscar frameworks (SWOT, Porter, BCG) e metodologias em documentos de consultoria",
+        
+        # Arquitetura
+        "Two-Phase Search Mode": "auto",
+        "Two-Phase Search Filter Level": "document",  # Contexto completo, evita fragmentação
+        "Enable Multi-Vector Search": True,
+        
+        # Busca
+        "Alpha": 0.6,
+        "Limit/Sensitivity": 2,
+        "Reranker Top K": 7,
+        
+        # Otimizações
+        "Enable Query Expansion": True,
+        "Enable Dynamic Alpha": True,
+        "Enable Relative Score Fusion": True,
+        "Enable Intelligent Cache": True,
+        "Enable Dynamic Reranking": True,
+        "Chunk Window": 2,
+        
+        # Filtros
+        "Enable Framework Filter": True,
+        "Enable Language Filter": True,
+        
+        # Reranker
+        "Reranker Provider": "Combined",
+        "Reranker Mode": "Cascade",
+        "Enable Metadata Reranker": True,
+        
+        "latency_estimate": "~800ms",
+        "quality_estimate": "Muito Alta",
+    }
+
+    # Preset: Company Research
+    COMPANY_RESEARCH = {
+        "name": "company_research",
+        "display_name": "🏢 Pesquisa de Empresas",
+        "description": "Otimizado para buscar informações sobre empresas específicas. Prioriza segmentação por documento.",
+        
+        # Arquitetura - Foco em entidades
+        "Two-Phase Search Mode": "enabled",  # Sempre Two-Phase para isolar documentos
+        "Two-Phase Search Filter Level": "document", # CRÍTICO: Evita contaminação entre empresas
+        "Enable Multi-Vector Search": True,
+        
+        # Busca
+        "Alpha": 0.4,  # Mais keyword para nomes
+        "Limit/Sensitivity": 3,
+        "Reranker Top K": 5,
+        
+        # Otimizações
+        "Enable Query Expansion": False,
+        "Enable Dynamic Alpha": False,
+        "Enable Relative Score Fusion": True,
+        "Enable Intelligent Cache": True,
+        "Enable Dynamic Reranking": True,
+        "Reranking Entity Weight": 0.3, # Prioriza entidades
+        "Chunk Window": 1,
+        
+        # Filtros
+        "Enable Entity Filter": False,
+        "Enable Framework Filter": True,
+        
+        "latency_estimate": "~600ms",
+        "quality_estimate": "Alta",
+    }
+
+    # Preset: Sector Analysis
+    SECTOR_ANALYSIS = {
+        "name": "sector_analysis",
+        "display_name": "📈 Análise Setorial",
+        "description": "Busca tendências e análises de setores (Agro, Tech, etc). Prioriza recência.",
+        
+        # Arquitetura
+        "Two-Phase Search Mode": "auto",
+        "Two-Phase Search Filter Level": "chunk",
+        "Enable Multi-Vector Search": True,
+        
+        # Busca
+        "Alpha": 0.7,
+        "Limit/Sensitivity": 2,
+        "Reranker Top K": 10,
+        
+        # Otimizações
+        "Enable Query Expansion": True,
+        "Enable Dynamic Alpha": True,
+        "Enable Relative Score Fusion": True,
+        "Enable Intelligent Cache": True,
+        "Enable Dynamic Reranking": True,
+        "Reranking Recency Weight": 0.25,
+        "Chunk Window": 2,
+        
+        "latency_estimate": "~900ms",
+        "quality_estimate": "Muito Alta",
+    }
+
+    # Preset: Speed Mode
+    SPEED_MODE = {
+        "name": "speed",
+        "display_name": "⚡ Velocidade",
+        "description": "Prioriza velocidade. Ideal para demos.",
+        
+        # Arquitetura
+        "Two-Phase Search Mode": "disabled",
+        "Enable Multi-Vector Search": False,
+        "Enable Aggregation": False,
+        
+        # Busca
+        "Alpha": 0.5,
+        "Limit/Sensitivity": 1,
+        "Reranker Top K": 3,
+        
+        # Otimizações
+        "Enable Query Expansion": False,
+        "Enable Dynamic Alpha": False,
+        "Enable Relative Score Fusion": False,
+        "Enable Intelligent Cache": True,
+        "Enable Dynamic Reranking": False,
+        "Chunk Window": 0,
+        "Reranker Provider": "Metadata Only",
+        
+        "latency_estimate": "~150ms",
+        "quality_estimate": "Moderada",
     }
     
     @classmethod
     def get_preset(cls, preset_name: str) -> Optional[Dict[str, Any]]:
         """Retorna preset por nome."""
         presets = {
-            "production": cls.PRODUCTION,
+            "consulting_frameworks": cls.CONSULTING_FRAMEWORKS,
+            "company_research": cls.COMPANY_RESEARCH,
+            "sector_analysis": cls.SECTOR_ANALYSIS,
+            "speed": cls.SPEED_MODE,
             "max_quality": cls.MAX_QUALITY,
-            "local_only": cls.LOCAL_ONLY
+            "balanced": cls.BALANCED,
+            "offline": cls.OFFLINE
         }
         return presets.get(preset_name.lower())
     
@@ -921,9 +1063,13 @@ class RerankerPresets:
     def get_all_presets(cls) -> Dict[str, Dict[str, Any]]:
         """Retorna todos os presets."""
         return {
-            "production": cls.PRODUCTION,
+            "consulting_frameworks": cls.CONSULTING_FRAMEWORKS,
+            "company_research": cls.COMPANY_RESEARCH,
+            "sector_analysis": cls.SECTOR_ANALYSIS,
+            "speed": cls.SPEED_MODE,
             "max_quality": cls.MAX_QUALITY,
-            "local_only": cls.LOCAL_ONLY
+            "balanced": cls.BALANCED,
+            "offline": cls.OFFLINE
         }
     
     @classmethod

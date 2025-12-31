@@ -188,6 +188,39 @@ $ python scripts/check_dependencies.py
 
 ---
 
+
+---
+
+#### `scripts/verify_ingestion_status.py`
+**Descrição:** Verifica o status de ingestão dos documentos, validando metadados e contagens.
+
+**Uso:**
+```bash
+python scripts/verify_ingestion_status.py
+```
+
+**Funcionalidades:**
+- ✅ Conta documentos e chunks
+- ✅ Verifica metadados críticos (frameworks, companies, etc.)
+- ✅ Valida integridade da ingestão
+
+---
+
+#### `scripts/migrate_collection_schema.py`
+**Descrição:** Migra e valida o schema das coleções Weaviate.
+
+**Uso:**
+```bash
+python scripts/migrate_collection_schema.py
+```
+
+**Funcionalidades:**
+- ✅ Atualiza schema para incluir novas propriedades
+- ✅ Verifica consistência entre WeaviateManager e classes Weaviate
+- ✅ Seguro: não deleta dados existentes
+
+---
+
 ### 🔍 **Scripts de Verificação**
 
 #### `scripts/verify_patches.py` (A criar)

@@ -7,7 +7,7 @@ load_dotenv()
 
 # Weaviate v4 Connection
 def get_client():
-    url = os.getenv("WEAVIATE_URL_VERBA", "http://localhost:8080")
+    url = os.getenv("WEAVIATE_URL_VERBA", "http://127.0.0.1:8080")
     # Parse URL to get host and port
     if "http" in url:
         host = url.split("://")[1].split(":")[0]
@@ -91,4 +91,4 @@ def verify_ingestion(filename):
         client.close()
 
 if __name__ == "__main__":
-    verify_ingestion("20250319_Caminhões a GNL_v1.pptx")
+    verify_ingestion("20240814_Qualificações_Agronegócio.pptx")

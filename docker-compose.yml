@@ -12,9 +12,9 @@ services:
       - WEAVIATE_API_KEY_VERBA=
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - COHERE_API_KEY=${COHERE_API_KEY:-}
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
-      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-}
+      # - OLLAMA_URL=http://host.docker.internal:11434
+      # - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      # - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-}
       - UNSTRUCTURED_API_KEY=${UNSTRUCTURED_API_KEY:-}
       - UNSTRUCTURED_API_URL=${UNSTRUCTURED_API_URL:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -69,7 +69,6 @@ services:
       CLUSTER_HOSTNAME: 'node1'
     networks:
       - ollama-docker
-
   # Uncomment to use Ollama within the same docker compose
 
   # ollama:
