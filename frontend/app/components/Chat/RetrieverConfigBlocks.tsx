@@ -215,7 +215,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
   const [rerankerPresets, setRerankerPresets] = useState<RerankerPreset[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState<string>("consulting_frameworks");
+  const [selectedPreset, setSelectedPreset] = useState<RerankerPreset | null>(null);
   const [loadingPresets, setLoadingPresets] = useState(false);
   const [presetsError, setPresetsError] = useState<string | null>(null);
 
@@ -333,21 +333,22 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       const selected = RAGConfig.Retriever.selected;
       const component = RAGConfig.Retriever.components[selected];
       const presetConfig = component?.config?.["Reranker Preset"];
-      if (presetConfig) {
-        const presetValue = typeof presetConfig.value === "string" ? presetConfig.value : "auto";
-        setSelectedPreset(presetValue);
+      if (presetConfig && typeof presetConfig.value === "string") {
+        const presetName = presetConfig.value;
+        const matchedPreset = rerankerPresets.find((p: RerankerPreset) => p.name === presetName);
+        setSelectedPreset(matchedPreset || null);
       }
     }
-  }, [RAGConfig]);
+  }, [RAGConfig, rerankerPresets]);
 
-  const handlePresetChange = async (presetName: string) => {
+  const handlePresetChange = async (preset: RerankerPreset) => {
     if (blocked || !credentials) return;
 
-    setSelectedPreset(presetName);
+    setSelectedPreset(preset);
 
     try {
       const result = await applyRerankerPreset(
-        presetName,
+        preset.name,
         currentQuery || null,
         credentials
       );
@@ -712,7 +713,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                   >
                     <GoTriangleDown size={15} />
                     <p className="truncate">
-                      {rerankerPresets.find(p => p.name === selectedPreset)?.name || "Selecionar Preset..."}
+                      {selectedPreset ? selectedPreset.name : "Selecionar Preset..."}
                     </p>
                   </button>
                   <ul
@@ -724,7 +725,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                         key={"Preset_" + preset.name}
                         onClick={() => {
                           if (!blocked) {
-                            setSelectedPreset(preset.name);
+                            setSelectedPreset(preset);
                           }
                         }}
                       >
@@ -755,7 +756,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           <div className="flex gap-2 items-start text-text-verba">
             <p className="flex min-w-[8vw]"></p>
             <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
-              💡 {rerankerPresets.find(p => p.name === selectedPreset)?.description || "Escolha uma configuração otimizada"}
+              💡 {selectedPreset ? selectedPreset.description : "Escolha uma configuração otimizada"}
             </p>
           </div>
         </div>
