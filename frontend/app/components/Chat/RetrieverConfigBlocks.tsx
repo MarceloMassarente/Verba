@@ -712,7 +712,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                   >
                     <GoTriangleDown size={15} />
                     <p className="truncate">
-                      {selectedPreset ? selectedPreset.name : "Selecionar Preset..."}
+                      {rerankerPresets.find(p => p.name === selectedPreset)?.name || "Selecionar Preset..."}
                     </p>
                   </button>
                   <ul
@@ -724,7 +724,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                         key={"Preset_" + preset.name}
                         onClick={() => {
                           if (!blocked) {
-                            setSelectedPreset(preset);
+                            setSelectedPreset(preset.name);
                           }
                         }}
                       >
@@ -745,7 +745,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                   title="Aplicar"
                   disabled={blocked}
                   onClick={() => {
-                    applyPreset(selectedPreset);
+                    handlePresetChange(selectedPreset);
                   }}
                 />
               )}
@@ -755,7 +755,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           <div className="flex gap-2 items-start text-text-verba">
             <p className="flex min-w-[8vw]"></p>
             <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
-              💡 {selectedPreset ? selectedPreset.description : "Escolha uma configuração otimizada"}
+              💡 {rerankerPresets.find(p => p.name === selectedPreset)?.description || "Escolha uma configuração otimizada"}
             </p>
           </div>
         </div>
