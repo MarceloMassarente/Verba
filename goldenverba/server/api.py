@@ -957,6 +957,11 @@ async def apply_reranker_preset(payload: ApplyRerankerPresetPayload):
         if "Retriever" in current_config:
             retriever_config = current_config["Retriever"]
             if "components" in retriever_config:
+                # IMPORTANTE: Muda o retriever selecionado para Entity-Aware
+                # já que os presets são específicos para esse retriever
+                if "Entity-Aware" in retriever_config["components"]:
+                    retriever_config["selected"] = "Entity-Aware"
+                
                 # Encontra Entity-Aware retriever
                 entity_aware = retriever_config["components"].get("Entity-Aware")
                 if entity_aware and "config" in entity_aware:
