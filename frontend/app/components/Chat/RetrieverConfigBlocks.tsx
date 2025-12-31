@@ -715,7 +715,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                 >
                   <GoTriangleDown size={15} />
                   <p className="truncate">
-                    {selectedPreset ? selectedPreset.name : "Selecionar Preset..."}
+                    {selectedPreset ? (selectedPreset.display_name || selectedPreset.name) : "Selecionar Preset..."}
                   </p>
                 </button>
                 <ul
@@ -732,7 +732,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                       }}
                     >
                       <a>
-                        <span className="font-bold">{preset.name}</span>
+                        <span className="font-bold">{preset.display_name || preset.name}</span>
                         {preset.description && (
                           <span className="text-xs opacity-70 ml-2"> - {preset.description}</span>
                         )}

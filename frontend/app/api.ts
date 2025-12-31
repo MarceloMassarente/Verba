@@ -252,7 +252,7 @@ export const fetchRerankerPresets = async (
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(credentials),
+      body: JSON.stringify({ credentials }),
     });
     const data = await response.json();
     return data;
