@@ -624,7 +624,96 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const component = RAGConfig.Retriever.components[selected];
 
 
-  return null;
+  return (
+    <div className="flex flex-col justify-start gap-3 rounded-2xl p-1 w-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="divider text-text-alt-verba flex-grow text-xs lg:text-sm">
+          <p>{component?.name || selected} - Busca Configurável</p>
+          <VerbaButton
+            title="Salvar"
+            onClick={() => {
+              if (component) {
+                saveComponentConfig("Retriever", selected, component);
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 1. RETRIEVER SELECTION */}
+      <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-button-verba">
+        <div className="flex gap-2 justify-between items-center text-text-verba">
+          <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">🔧 Retriever</p>
+          <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
+            <button
+              tabIndex={0}
+              role="button"
+              disabled={blocked}
+              className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
+            >
+              <GoTriangleDown size={15} />
+              <p className="truncate">{selected}</p>
+            </button>
+            <ul
+              tabIndex={0}
+              className="dropdown-content menu bg-base-100 rounded-box z-[1] w-full p-2 shadow"
+            >
+              {Object.entries(RAGConfig.Retriever.components)
+                .filter(([key, comp]) => comp.available)
+                .map(([key, comp]) => (
+                  <li
+                    key={"ComponentDropdown_" + comp.name}
+                    onClick={() => {
+                      if (!blocked) {
+                        selectComponent("Retriever", comp.name);
+                      }
+                    }}
+                  >
+                    <a>{comp.name}</a>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="flex gap-2 items-start text-text-verba">
+          <p className="flex min-w-[8vw]"></p>
+          <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
+            💡 {component?.description || "Selecione um retriever"}
+          </p>
+        </div>
+      </div>
+
+      {/* 2. PRESETS UNIFICADOS - COMMENTED OUT FOR DEBUGGING */}
+      {/*
+      {(rerankerPresets.length > 0 || presetsError || loadingPresets) && (
+          <div className="p-4 bg-bg-alt-verba rounded-lg">Presets Placeholder</div>
+      )}
+      */}
+
+      {/* 3. WARNINGS */}
+      {
+        warnings.length > 0 && (
+          <div className="p-3 bg-warning-verba/20 rounded-lg border border-warning-verba/50">
+            <p className="text-sm font-semibold text-warning-verba mb-2">
+              ⚠️ Avisos de Configuração:
+            </p>
+            <ul className="list-disc list-inside text-xs text-text-verba space-y-1">
+              {warnings.map((warning, idx) => (
+                <li key={idx}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )
+      }
+
+      {/* 4. CONFIG BLOCKS */}
+      <div className="space-y-2">
+        {BLOCKS.map((block) => renderBlock(block))}
+      </div>
+    </div>
+  );
 };
 
 export default RetrieverConfigBlocks;
