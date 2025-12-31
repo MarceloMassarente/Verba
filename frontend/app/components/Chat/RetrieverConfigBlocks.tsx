@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useCallback } from "react";
 import { GoTriangleDown } from "react-icons/go";
@@ -40,11 +40,11 @@ interface ConfigBlock {
 const BLOCKS: ConfigBlock[] = [
   // ORDEM INTUITIVA: Top-Down Decision Flow
 
-  // 1. ARQUITETURA - Decisão mais importante
+  // 1. ARQUITETURA - DecisÃ£o mais importante
   {
     name: "search_mode",
-    title: "🏗️ Arquitetura de Busca",
-    description: "Escolha como a busca será executada (mutuamente exclusivos)",
+    title: "ðŸ—ï¸ Arquitetura de Busca",
+    description: "Escolha como a busca serÃ¡ executada (mutuamente exclusivos)",
     mode: "radio",
     priority: "critical",
     defaultOpen: true,
@@ -56,11 +56,11 @@ const BLOCKS: ConfigBlock[] = [
     ],
   },
 
-  // 2. FUNDAMENTOS - Parâmetros principais
+  // 2. FUNDAMENTOS - ParÃ¢metros principais
   {
     name: "fundamental",
-    title: "⚙️ Busca Fundamental",
-    description: "Parâmetros principais de busca e reranking",
+    title: "âš™ï¸ Busca Fundamental",
+    description: "ParÃ¢metros principais de busca e reranking",
     priority: "critical",
     defaultOpen: true,
     configs: [
@@ -76,7 +76,7 @@ const BLOCKS: ConfigBlock[] = [
   // 3. FILTROS - Refinar resultados
   {
     name: "filters",
-    title: "🔍 Filtros",
+    title: "ðŸ” Filtros",
     description: "Aplique filtros independentes para refinar os resultados",
     priority: "important",
     defaultOpen: true,
@@ -91,11 +91,11 @@ const BLOCKS: ConfigBlock[] = [
     ],
   },
 
-  // 4. OTIMIZAÇÕES - Melhorias (avançado)
+  // 4. OTIMIZAÃ‡Ã•ES - Melhorias (avanÃ§ado)
   {
     name: "optimizations",
-    title: "⚡ Otimizações",
-    description: "Melhorias opcionais de performance e qualidade (usuários avançados)",
+    title: "âš¡ OtimizaÃ§Ãµes",
+    description: "Melhorias opcionais de performance e qualidade (usuÃ¡rios avanÃ§ados)",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -118,7 +118,7 @@ const BLOCKS: ConfigBlock[] = [
   // 5. RERANKER - Subdividido por provider
   {
     name: "reranker_basic",
-    title: "🎯 Reranker - Configuração Básica",
+    title: "ðŸŽ¯ Reranker - ConfiguraÃ§Ã£o BÃ¡sica",
     description: "Escolha o provedor de reranking",
     priority: "important",
     defaultOpen: true,
@@ -131,8 +131,8 @@ const BLOCKS: ConfigBlock[] = [
   },
   {
     name: "reranker_haystack",
-    title: "🎯 Reranker - Haystack",
-    description: "Configurações específicas do Haystack",
+    title: "ðŸŽ¯ Reranker - Haystack",
+    description: "ConfiguraÃ§Ãµes especÃ­ficas do Haystack",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -144,8 +144,8 @@ const BLOCKS: ConfigBlock[] = [
   },
   {
     name: "reranker_cohere",
-    title: "🎯 Reranker - Cohere",
-    description: "Configurações específicas do Cohere",
+    title: "ðŸŽ¯ Reranker - Cohere",
+    description: "ConfiguraÃ§Ãµes especÃ­ficas do Cohere",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -159,8 +159,8 @@ const BLOCKS: ConfigBlock[] = [
   },
   {
     name: "reranker_jina",
-    title: "🎯 Reranker - Jina",
-    description: "Configurações específicas do Jina",
+    title: "ðŸŽ¯ Reranker - Jina",
+    description: "ConfiguraÃ§Ãµes especÃ­ficas do Jina",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -173,8 +173,8 @@ const BLOCKS: ConfigBlock[] = [
   },
   {
     name: "reranker_voyageai",
-    title: "🎯 Reranker - VoyageAI",
-    description: "Configurações específicas do VoyageAI",
+    title: "ðŸŽ¯ Reranker - VoyageAI",
+    description: "ConfiguraÃ§Ãµes especÃ­ficas do VoyageAI",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -187,8 +187,8 @@ const BLOCKS: ConfigBlock[] = [
   },
   {
     name: "reranker_contextualai",
-    title: "🎯 Reranker - ContextualAI",
-    description: "Configurações específicas do ContextualAI",
+    title: "ðŸŽ¯ Reranker - ContextualAI",
+    description: "ConfiguraÃ§Ãµes especÃ­ficas do ContextualAI",
     priority: "advanced",
     collapsible: true,
     defaultOpen: false,
@@ -236,7 +236,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     });
   };
 
-  // Validação e auto-ajuste no cliente
+  // ValidaÃ§Ã£o e auto-ajuste no cliente
   const validateAndAdjust = useCallback(
     (config: { [key: string]: ConfigSetting }) => {
       const newWarnings: string[] = [];
@@ -268,7 +268,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           adjusted["Enable Multi-Vector Search"].value = false;
         }
         newWarnings.push(
-          "Modo Agregação: filtros e outros modos desabilitados automaticamente"
+          "Modo AgregaÃ§Ã£o: filtros e outros modos desabilitados automaticamente"
         );
         newDisabledFields.add("Enable Entity Filter");
         newDisabledFields.add("Entity Filter Mode");
@@ -276,9 +276,9 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
         newDisabledFields.add("Enable Multi-Vector Search");
       }
 
-      // REGRA 3: Multi-Vector requer Named Vectors (aviso apenas, não desabilita aqui)
+      // REGRA 3: Multi-Vector requer Named Vectors (aviso apenas, nÃ£o desabilita aqui)
       if (adjusted["Enable Multi-Vector Search"]?.value) {
-        // Verificação seria feita no backend, aqui apenas aviso
+        // VerificaÃ§Ã£o seria feita no backend, aqui apenas aviso
         // newWarnings.push("Multi-Vector Search requer Enable Named Vectors (global)");
       }
 
@@ -287,7 +287,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     []
   );
 
-  // Aplicar validação quando config muda
+  // Aplicar validaÃ§Ã£o quando config muda
   useEffect(() => {
     if (RAGConfig?.Retriever) {
       const selected = RAGConfig.Retriever.selected;
@@ -353,7 +353,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       );
 
       if (result && result.status === 200) {
-        // Recarrega RAG config para refletir mudanças
+        // Recarrega RAG config para refletir mudanÃ§as
         window.location.reload();
       } else {
         console.error("Failed to apply preset:", result?.status_msg);
@@ -489,7 +489,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           <div className="flex gap-2 items-start text-text-verba mt-2">
             <p className="flex min-w-[8vw]"></p>
             <p className="text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic">
-              💡 {config.description}
+              ðŸ’¡ {config.description}
             </p>
           </div>
         )}
@@ -499,7 +499,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           <div className="flex gap-2 items-start text-text-verba mt-2">
             <p className="flex min-w-[8vw]"></p>
             <p className="text-xs text-warning-verba text-start bg-warning-verba/10 p-2 rounded">
-              ⚠️ {warnings.find((w) => w.includes(configTitle))}
+              âš ï¸ {warnings.find((w) => w.includes(configTitle))}
             </p>
           </div>
         )}
@@ -509,7 +509,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           <div className="flex gap-2 items-start text-text-verba mt-2">
             <p className="flex min-w-[8vw]"></p>
             <p className="text-xs text-text-alt-verba italic text-start bg-button-verba/10 p-2 rounded">
-              🔒 {disabledMessage}
+              ðŸ”’ {disabledMessage}
             </p>
           </div>
         )}
@@ -522,7 +522,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     const component = RAGConfig.Retriever.components[selected];
     if (!component?.config) return null;
 
-    // Verificar condição do bloco
+    // Verificar condiÃ§Ã£o do bloco
     if (block.condition && !block.condition(component.config)) {
       return null;
     }
@@ -544,7 +544,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
 
       if (aggregation?.value) return "Aggregation";
       if (twoPhase?.value && twoPhase.value !== "disabled") return "Two-Phase";
-      return "Padrão";
+      return "PadrÃ£o";
     };
 
     const activeMode = getActiveMode();
@@ -571,7 +571,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                 {block.title}
                 {block.priority === "advanced" && (
                   <span className="ml-2 text-xs bg-button-verba/20 px-2 py-1 rounded">
-                    Avançado
+                    AvanÃ§ado
                   </span>
                 )}
               </h3>
@@ -593,15 +593,15 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
           {/* Status ativo para Modo de Busca */}
           {activeMode && (
             <div className="mt-3 p-2 bg-button-verba/20 rounded text-xs text-text-verba">
-              <strong>🎯 Modo Ativo:</strong> {activeMode}
-              {activeMode === "Padrão" && " (Entity Filter + Semantic Search)"}
+              <strong>ðŸŽ¯ Modo Ativo:</strong> {activeMode}
+              {activeMode === "PadrÃ£o" && " (Entity Filter + Semantic Search)"}
               {activeMode === "Two-Phase" && " (Two-Phase Search)"}
-              {activeMode === "Aggregation" && " (Análise Estatística)"}
+              {activeMode === "Aggregation" && " (AnÃ¡lise EstatÃ­stica)"}
             </div>
           )}
         </div>
 
-        {/* Conteúdo - colapsável */}
+        {/* ConteÃºdo - colapsÃ¡vel */}
         {(!isCollapsible || isExpanded) && (
           <div className="space-y-3">
             {blockConfigs.map(({ name, config }) => renderConfigField(name, config))}
@@ -623,186 +623,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const selected = RAGConfig.Retriever.selected;
   const component = RAGConfig.Retriever.components[selected];
 
-  return (
-    <div className="flex flex-col justify-start gap-3 rounded-2xl p-1 w-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="divider text-text-alt-verba flex-grow text-xs lg:text-sm">
-          <p>{component?.name || selected} - Busca Configurável</p>
-          <VerbaButton
-            title="Salvar"
-            onClick={() => {
-              if (component) {
-                saveComponentConfig("Retriever", selected, component);
-              }
-            }}
-          />
-        </div>
-      </div>
 
-      {/* 1. RETRIEVER SELECTION - FIRST */}
-      <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-button-verba">
-        <div className="flex gap-2 justify-between items-center text-text-verba">
-          <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">🔧 Retriever</p>
-          <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
-            <button
-              tabIndex={0}
-              role="button"
-              disabled={blocked}
-              className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
-            >
-              <GoTriangleDown size={15} />
-              <p className="truncate">{selected}</p>
-            </button>
-            <ul
-              tabIndex={0}
-              className="dropdown-content menu bg-base-100 rounded-box z-[1] w-full p-2 shadow"
-            >
-              {Object.entries(RAGConfig.Retriever.components)
-                .filter(([key, comp]) => comp.available)
-                .map(([key, comp]) => (
-                  <li
-                    key={"ComponentDropdown_" + comp.name}
-                    onClick={() => {
-                      if (!blocked) {
-                        selectComponent("Retriever", comp.name);
-                      }
-                    }}
-                  >
-                    <a>{comp.name}</a>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="flex gap-2 items-start text-text-verba">
-          <p className="flex min-w-[8vw]"></p>
-          <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
-            💡 {component?.description || "Selecione um retriever"}
-          </p>
-        </div>
-      </div>
-
-      {/* 2. PRESETS UNIFICADOS - Retriever + Reranker */}
-      {(rerankerPresets.length > 0 || presetsError || loadingPresets) && (
-        <div className="mb-4 p-4 bg-bg-alt-verba rounded-lg border border-button-verba/50 border-l-4 border-l-button-verba">
-          <div className="mb-4">
-            <h3 className="text-lg font-semibold text-text-verba">
-              ⚡ Presets de Busca
-            </h3>
-            <p className="text-sm text-text-alt-verba">
-              Clique para aplicar configuração completa (arquitetura + reranking + otimizações)
-            </p>
-          </div>
-
-          {/* Error display */}
-          {presetsError && (
-            <div className="p-3 mb-4 bg-red-500/20 rounded-lg border border-red-500/50 text-red-400">
-              <p className="text-sm font-semibold">❌ Erro ao carregar presets:</p>
-              <p className="text-xs">{presetsError}</p>
-            </div>
-          )}
-
-          {/* Loading indicator */}
-          {loadingPresets && (
-            <div className="text-center text-text-alt-verba py-4">
-              <span className="animate-pulse">Carregando presets...</span>
-            </div>
-          )}
-
-          {/* Presets grid */}
-          {!loadingPresets && rerankerPresets.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {rerankerPresets.map((preset) => (
-                <button
-                  key={preset.name}
-                  onClick={() => handlePresetChange(preset.name)}
-                  disabled={blocked || !preset.available || loadingPresets}
-                  className={`p-3 rounded-lg border-2 text-left transition-all ${selectedPreset === preset.name
-                    ? "border-button-verba bg-button-verba/20"
-                    : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
-                    } ${!preset.available || blocked || loadingPresets
-                      ? "opacity-50 cursor-not-allowed"
-                      : "cursor-pointer"
-                    }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-semibold text-text-verba text-sm">
-                      {preset.display_name}
-                    </h4>
-                    {selectedPreset === preset.name && (
-                      <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
-                        ✓ Ativo
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-text-alt-verba mb-2 line-clamp-2">
-                    {preset.description}
-                  </p>
-                  <div className="flex gap-2 text-xs text-text-alt-verba">
-                    <span>⚡ {preset.latency_estimate}</span>
-                    <span>•</span>
-                    <span>⭐ {preset.quality_estimate}</span>
-                  </div>
-                  {!preset.available && preset.missing_requirements.length > 0 && (
-                    <p className="text-xs text-warning-verba mt-2">
-                      Faltam: {preset.missing_requirements.join(", ")}
-                    </p>
-                  )}
-                </button>
-              ))}
-              <button
-                onClick={() => handlePresetChange("custom")}
-                disabled={blocked || loadingPresets}
-                className={`p-3 rounded-lg border-2 text-left transition-all ${selectedPreset === "custom"
-                  ? "border-button-verba bg-button-verba/20"
-                  : "border-button-verba/30 bg-bg-verba hover:bg-button-verba/10"
-                  } ${blocked || loadingPresets
-                    ? "opacity-50 cursor-not-allowed"
-                    : "cursor-pointer"
-                  }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-semibold text-text-verba text-sm">⚙️ Customizado</h4>
-                  {selectedPreset === "custom" && (
-                    <span className="text-xs bg-button-verba text-text-verba px-2 py-1 rounded">
-                      ✓ Ativo
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-text-alt-verba">
-                  Configuração manual abaixo
-                </p>
-              </button>
-            </div>
-          </div>
-      )}
-
-
-      {/* 3. WARNINGS */}
-      {
-        warnings.length > 0 && (
-          <div className="p-3 bg-warning-verba/20 rounded-lg border border-warning-verba/50">
-            <p className="text-sm font-semibold text-warning-verba mb-2">
-              ⚠️ Avisos de Configuração:
-            </p>
-            <ul className="list-disc list-inside text-xs text-text-verba space-y-1">
-              {warnings.map((warning, idx) => (
-                <li key={idx}>{warning}</li>
-              ))}
-            </ul>
-          </div>
-        )
-      }
-
-      {/* 4. CONFIG BLOCKS - IN NEW ORDER */}
-      <div className="space-y-2">
-        {BLOCKS.map((block) => renderBlock(block))}
-      </div>
-    </div>
-  );
+  return null;
 };
 
 export default RetrieverConfigBlocks;
-
