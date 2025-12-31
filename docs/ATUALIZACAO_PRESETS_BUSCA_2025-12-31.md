@@ -86,9 +86,10 @@ Frontend                          Backend
    │                                 │
    │                                 │  3. Carrega RAG config
    │                                 │  4. Obtém plugin Reranker
-   │                                 │  5. Aplica preset.config ao plugin
-   │                                 │  6. Atualiza Entity-Aware retriever
-   │                                 │  7. Salva config no Weaviate
+   │                                 │  5. **AUTO-SWITCH**: Muda retriever para Entity-Aware
+   │                                 │  6. Aplica preset.config ao plugin
+   │                                 │  7. Atualiza Entity-Aware retriever
+   │                                 │  8. Salva config no Weaviate
    │                                 │
    <─────────────────────────────────┤
    │  { status: 200, preset_applied, config }
