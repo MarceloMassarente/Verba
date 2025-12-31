@@ -186,8 +186,26 @@ async def migrate_collection_schema(
                         }
                         
                         # Adiciona vetor se disponível
+                        # Trata ambos os formatos: dict (named vectors) e list (single vector)
                         if hasattr(obj, "vector") and obj.vector:
-                            obj_data["vector"] = obj.vector.get("default") if isinstance(obj.vector, dict) else obj.vector
+                            if isinstance(obj.vector, dict):
+                                # Já está em formato named vectors
+                                obj_data["vector"] = obj.vector
+                            else:
+                                # Formato simples - nova collection pode precisar de named vectors
+                                # Verifica config da nova collection
+                                try:
+                                    new_cfg = await new_collection.config.get()
+                                    vec_cfg = getattr(new_cfg, 'vector_config', None)
+                                    if vec_cfg and (
+                                        (isinstance(vec_cfg, dict) and "default" in vec_cfg) or
+                                        (isinstance(vec_cfg, (list, tuple)) and any(getattr(v, 'name', '') == 'default' for v in vec_cfg))
+                                    ):
+                                        obj_data["vector"] = {"default": obj.vector}
+                                    else:
+                                        obj_data["vector"] = obj.vector
+                                except Exception:
+                                    obj_data["vector"] = obj.vector
                         
                         objects_to_insert.append(obj_data)
                     except Exception as e:

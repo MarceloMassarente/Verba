@@ -97,7 +97,8 @@ class UniversalA2Reader(Reader):
         # Aceita todos os formatos
         self.extension = [
             ".txt", ".md", ".csv", ".json", ".pdf", 
-            ".docx", ".xlsx", ".xls", ".html", ".htm"
+            ".docx", ".pptx", ".ppt",  # Added PPTX/PPT support
+            ".xlsx", ".xls", ".html", ".htm"
         ]
         self.description = (
             "Reader verdadeiramente universal: processa ARQUIVOS (PDF, DOCX, etc.) e URLs (páginas web). "
@@ -615,8 +616,11 @@ class UniversalA2Reader(Reader):
         # ══════════════════════════════════════════════════════════════════════
         # MODO 2: Processa JSON de Results (formato pipeline externa)
         # ══════════════════════════════════════════════════════════════════════
-        extension = fileConfig.extension.lower() if fileConfig.extension else ""
-        if extension == ".json" or extension == "json":
+        # Normaliza extensão para sempre ter ponto no início
+        raw_ext = fileConfig.extension.lower() if fileConfig.extension else ""
+        extension = f".{raw_ext}" if raw_ext and not raw_ext.startswith(".") else raw_ext
+        
+        if extension == ".json":
             json_docs = await self._try_load_json_results(fileConfig, enable_etl, language_hint)
             if json_docs:
                 return json_docs
@@ -684,15 +688,34 @@ class UniversalA2Reader(Reader):
             except Exception as e:
                 msg.warn(f"[UNIVERSAL-READER] Erro ao usar Docling, tentando Tika/BasicReader: {str(e)}")
         
+        # Formatos que se beneficiam muito do Tika (aviso especial se não disponível)
+        tika_beneficial_formats = ['.pptx', '.ppt', '.doc', '.rtf', '.odt', '.ods', '.odp', '.epub']
+        ext_lower = extension.lower() if extension else ""
+        
+        # Avisa se Tika seria útil mas não está disponível
+        if ext_lower in tika_beneficial_formats and not self._check_tika_available():
+            msg.warn(f"[UNIVERSAL-READER] Tika não disponível para {ext_lower}. Usando BasicReader (requer python-pptx/python-docx instalados).")
+        
         # Tenta usar Tika se Docling não foi usado e está configurado
         if use_tika and self._should_use_tika(extension, use_tika):
             try:
                 msg.info(f"[UNIVERSAL-READER] Usando Tika para '{fileConfig.filename}' (formato: {extension})")
                 
-                # Decodifica conteúdo
-                decoded_bytes = fileConfig.content if isinstance(fileConfig.content, bytes) else fileConfig.content.encode() if isinstance(fileConfig.content, str) else None
+                # Decodifica conteúdo (fileConfig.content geralmente vem como base64 string)
+                try:
+                    if isinstance(fileConfig.content, str):
+                        decoded_bytes = base64.b64decode(fileConfig.content)
+                    elif isinstance(fileConfig.content, bytes):
+                        decoded_bytes = fileConfig.content
+                    else:
+                        decoded_bytes = base64.b64decode(str(fileConfig.content))
+                except Exception as decode_err:
+                    msg.warn(f"[UNIVERSAL-READER] Erro ao decodificar conteúdo para Tika: {str(decode_err)}")
+                    decoded_bytes = None
+                
                 if not decoded_bytes:
-                    decoded_bytes = fileConfig.content.encode('utf-8') if hasattr(fileConfig, 'content') else b''
+                    msg.warn(f"[UNIVERSAL-READER] Não foi possível decodificar conteúdo para Tika, tentando BasicReader...")
+                    raise ValueError("Conteúdo não pode ser decodificado")
                 
                 # Extrai com Tika (agora async/thread-safe)
                 text, metadata = await self._extract_with_tika(decoded_bytes, extract_metadata=True)
@@ -763,6 +786,20 @@ class UniversalA2Reader(Reader):
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
+            
+            # Mensagem específica para formatos que precisam de Tika ou bibliotecas específicas
+            ext_lower = extension.lower() if extension else ""
+            if ext_lower in ['.pptx', '.ppt']:
+                tika_available = self._check_tika_available()
+                if not tika_available:
+                    msg.fail(f"[UNIVERSAL-READER] PPTX requer 'python-pptx' ou servidor Tika!")
+                    msg.fail(f"[UNIVERSAL-READER] Soluções: 1) pip install python-pptx OU 2) Configurar TIKA_SERVER_URL")
+                    raise ImportError(
+                        f"Falha ao processar '{fileConfig.filename}': "
+                        f"PPTX requer 'python-pptx' instalado ou servidor Tika configurado (TIKA_SERVER_URL). "
+                        f"Erro original: {str(e)}"
+                    )
+            
             msg.fail(f"[UNIVERSAL-READER] Erro ao carregar arquivo '{fileConfig.filename}': {str(e)}")
             msg.fail(f"Traceback completo:\n{error_trace}")
             raise

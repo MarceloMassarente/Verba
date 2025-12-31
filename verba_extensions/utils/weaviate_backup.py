@@ -267,8 +267,23 @@ async def restore_collection(
                     }
                     
                     # Adiciona vetor se disponível
+                    # Backup salva vetor como array simples, mas named vectors collections
+                    # precisam de formato dict {"default": [...]}
                     if chunk.get("vector"):
-                        obj_data["vector"] = chunk["vector"]
+                        # Verifica se collection usa named vectors
+                        try:
+                            config = await collection.config.get()
+                            vec_cfg = getattr(config, 'vector_config', None)
+                            if vec_cfg and (
+                                (isinstance(vec_cfg, dict) and "default" in vec_cfg) or
+                                (isinstance(vec_cfg, (list, tuple)) and any(getattr(v, 'name', '') == 'default' for v in vec_cfg))
+                            ):
+                                obj_data["vector"] = {"default": chunk["vector"]}
+                            else:
+                                obj_data["vector"] = chunk["vector"]
+                        except Exception:
+                            # Fallback: tenta com formato simples
+                            obj_data["vector"] = chunk["vector"]
                     
                     objects_to_insert.append(obj_data)
                 

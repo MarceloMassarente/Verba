@@ -265,15 +265,20 @@ class BasicReader(Reader):
                 if hasattr(shape, "text") and shape.text.strip():
                     slide_text.append(shape.text.strip())
                 # Também extrai texto de tabelas se houver
-                if hasattr(shape, "table"):
-                    table = shape.table
-                    for row in table.rows:
-                        row_text = []
-                        for cell in row.cells:
-                            if cell.text.strip():
-                                row_text.append(cell.text.strip())
-                        if row_text:
-                            slide_text.append(" | ".join(row_text))
+                # Nota: hasattr retorna True mas shape.table lança exceção se não for tabela
+                try:
+                    if shape.has_table:  # Usa has_table instead of hasattr
+                        table = shape.table
+                        for row in table.rows:
+                            row_text = []
+                            for cell in row.cells:
+                                if cell.text.strip():
+                                    row_text.append(cell.text.strip())
+                            if row_text:
+                                slide_text.append(" | ".join(row_text))
+                except Exception:
+                    # Shape não é tabela ou erro ao acessar - ignora
+                    pass
             
             if len(slide_text) > 1:  # Mais que só o header "--- Slide X ---"
                 text_parts.append("\n".join(slide_text))

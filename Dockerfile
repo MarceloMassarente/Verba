@@ -35,6 +35,10 @@ RUN pip install --no-cache-dir '.'
 # Instala sentence-transformers (para embedder local)
 RUN pip install --no-cache-dir sentence-transformers || true
 
+# Instala dependências críticas para leitura de arquivos Office (PPTX, DOCX)
+# Instalados explicitamente para garantir que não falhem silenciosamente
+RUN pip install --no-cache-dir python-pptx python-docx lxml
+
 # Instala dependências das extensões
 RUN pip install --no-cache-dir -r requirements-extensions.txt || true
 

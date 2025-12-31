@@ -301,9 +301,22 @@ async def run_etl_patch_for_passage_uuids(
     gaz = load_gazetteer()
 
     changed = 0
+    skipped = 0  # NOVO: Contagem de chunks já processados
 
     schema_props: Set[str] = set()
     missing_update_notified: Set[str] = set()
+    
+    # NOVO: Cache do FrameworkDetector (lazy load)
+    _framework_detector = None
+    def get_framework_detector():
+        nonlocal _framework_detector
+        if _framework_detector is None:
+            try:
+                from verba_extensions.utils.framework_detector import FrameworkDetector
+                _framework_detector = FrameworkDetector()
+            except Exception as e:
+                print(f"⚠️ FrameworkDetector não disponível: {str(e)}")
+        return _framework_detector
 
     # Busca objetos - usando apenas propriedades garantidas no schema
     try:
@@ -381,10 +394,39 @@ async def run_etl_patch_for_passage_uuids(
         
         try:
             p = o.properties
+            
+            # OTIMIZAÇÃO 1: Skip se já foi processado pelo ETL
+            existing_etl_version = p.get("etl_version")
+            if existing_etl_version:
+                skipped += 1
+                continue
+            
             text = p.get("content") or p.get("text") or p.get("chunk_text") or ""
             sect_title = p.get("section_title") or ""
             first_para = p.get("section_first_para") or ""
             parent_ents = p.get("parent_entities") or []
+            
+            # OTIMIZAÇÃO 2: Detectar frameworks, empresas e setores via FrameworkDetector
+            frameworks = []
+            companies = []
+            sectors = []
+            detector = get_framework_detector()
+            if detector and text:
+                try:
+                    import asyncio
+                    # Usar detect_frameworks (é async)
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Se já está dentro de um loop async, usar await diretamente
+                        fw_result = await detector.detect_frameworks(text, extract_concepts=False, extract_metrics=False, classify_content=False)
+                    else:
+                        fw_result = asyncio.run(detector.detect_frameworks(text, extract_concepts=False, extract_metrics=False, classify_content=False))
+                    frameworks = fw_result.get("frameworks", [])[:10]  # Limitar a 10
+                    companies = fw_result.get("companies", [])[:10]  # Limitar a 10
+                    sectors = fw_result.get("sectors", [])[:5]  # Limitar a 5
+                except Exception as fw_err:
+                    # Silently ignore - não falha o ETL por causa do FrameworkDetector
+                    pass
             
             # NOVO: Extração inteligente de entidades (sem gazetteer obrigatório)
             entity_mentions = extract_entities_intelligent(text)
@@ -441,7 +483,13 @@ async def run_etl_patch_for_passage_uuids(
                 "section_scope_confidence": scope_conf,
                 "primary_entity_id": primary or "",
                 "entity_focus_score": focus,
-                "etl_version": "entity_scope_intelligent_v2"
+                "etl_version": "entity_scope_intelligent_v3",  # Versão atualizada
+                # OTIMIZAÇÃO 3: Adicionar frameworks, empresas e setores
+                "frameworks": frameworks,
+                "companies": companies,
+                "sectors": sectors,
+                "persons": fw_result.get("persons", [])[:10] if detector else [],
+                "tipo_conteudo": fw_result.get("tipo_conteudo", "contexto") if detector else "contexto",
             }
 
             if schema_props:
@@ -516,13 +564,18 @@ async def run_etl_patch_for_passage_uuids(
                     raise
             changed += 1
             
-            time.sleep(0.002)  # Rate limiting
+            # OTIMIZAÇÃO 4: Rate limiting reduzido (antes: 0.002s)
+            time.sleep(0.0005)  # 0.5ms - suficiente para não sobrecarregar
             
         except Exception as e:
             print(f"Erro ao processar passage {uid}: {str(e)}")
             continue
     
-    return {"patched": changed, "total": len(uuids)}
+    # Log de chunks skipped
+    if skipped > 0:
+        print(f"ℹ️ ETL: {skipped} chunks já processados anteriormente (skipped)")
+    
+    return {"patched": changed, "total": len(uuids), "skipped": skipped}
 
 # Compatibilidade com código antigo
 async def run_etl_patch_for_passage_uuids_legacy(*args, **kwargs):

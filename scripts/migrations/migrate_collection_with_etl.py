@@ -125,10 +125,13 @@ async def migrate_collection(old_collection_name: str, new_collection_name: str 
                 
                 objects_to_insert.append({
                     'properties': props,
+                    # Mantém formato original do vetor (named vectors ou simples)
                     'vector': obj.vector
                 })
             
             # Insere batch
+            # Nota: o formato do vetor é passado como está - se a collection antiga
+            # tinha named vectors, a nova também terá (criada com mesma config)
             new_collection.data.insert_many(objects_to_insert)
             msg.info(f"   ✅ {min(i+batch_size, len(all_objects))}/{len(all_objects)} objetos copiados")
         

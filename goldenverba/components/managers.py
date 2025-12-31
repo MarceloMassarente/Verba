@@ -850,12 +850,49 @@ class WeaviateManager:
                     chunk.labels = document.labels
                     chunk.title = document.title
 
-                chunk_response = await embedder_collection.data.insert_many(
-                    [
+                # Check if collection uses named vectors (BYOV mode)
+                # With named vectors, vector must be dict: {"default": [...], ...}
+                # Without named vectors, vector is just the array: [...]
+                has_named_vectors = False
+                try:
+                    collection_config = await embedder_collection.config.get()
+                    vec_cfg = getattr(collection_config, 'vector_config', None)
+                    
+                    if vec_cfg:
+                        # vector_config pode ser dict ou lista dependendo da versão do Weaviate
+                        if isinstance(vec_cfg, dict):
+                            # Dict format: {"default": {...}, "concept_vec": {...}}
+                            has_named_vectors = "default" in vec_cfg
+                        elif isinstance(vec_cfg, (list, tuple)):
+                            # List format: [VectorConfig(name="default"), ...]
+                            has_named_vectors = any(
+                                getattr(v, 'name', '') == 'default' for v in vec_cfg
+                            )
+                        # Se vec_cfg existe mas não é dict/list, assume que tem named vectors
+                        # (porque collections sem named vectors têm vector_config=None)
+                        else:
+                            has_named_vectors = True
+                except Exception as e:
+                    # Se não conseguir verificar, tenta inserir sem named vectors primeiro
+                    msg.debug(f"[MANAGER] Erro ao verificar named vectors: {str(e)}")
+                
+                # Build data objects with proper vector format
+                if has_named_vectors:
+                    msg.info(f"[MANAGER] Collection usa named vectors - formatando vetores como dict")
+                    data_objects = [
+                        DataObject(
+                            properties=chunk.to_json(), 
+                            vector={"default": chunk.vector}  # Named vector format
+                        )
+                        for chunk in document.chunks
+                    ]
+                else:
+                    data_objects = [
                         DataObject(properties=chunk.to_json(), vector=chunk.vector)
                         for chunk in document.chunks
                     ]
-                )
+
+                chunk_response = await embedder_collection.data.insert_many(data_objects)
                 chunk_ids = [
                     chunk_response.uuids[uuid] for uuid in chunk_response.uuids
                 ]

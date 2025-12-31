@@ -211,7 +211,8 @@ class MultiVectorSearcher:
                         limit=int(limit * alpha * 1.5),  # Buscar mais para combinar com BM25
                         filters=filters,
                         return_metadata=MetadataQuery(distance=True),
-                        return_properties=["text", "doc_uuid", "chunk_id", "frameworks", "companies", "sectors"]
+                        # Usa apenas propriedades obrigatórias (avoid schema errors)
+                        return_properties=["content", "doc_uuid", "chunk_id"]
                     )
                     
                     if response and hasattr(response, 'objects'):
@@ -238,7 +239,8 @@ class MultiVectorSearcher:
                         "limit": int(limit * (1 - alpha) * 1.5),
                         "filters": filters,
                         "return_metadata": MetadataQuery(score=True),
-                        "return_properties": ["text", "doc_uuid", "chunk_id", "frameworks", "companies", "sectors"]
+                        # Usa apenas propriedades obrigatórias (avoid schema errors)
+                        "return_properties": ["content", "doc_uuid", "chunk_id"]
                     }
                     
                     # Adiciona query_properties se disponível (Weaviate v4+)
