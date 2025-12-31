@@ -751,9 +751,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                     </p>
                   )}
                 </button>
-              ))
-              }
-              < button
+              ))}
+              <button
                 onClick={() => handlePresetChange("custom")}
                 disabled={blocked || loadingPresets}
                 className={`p-3 rounded-lg border-2 text-left transition-all ${selectedPreset === "custom"
@@ -777,7 +776,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
                 </p>
               </button>
             </div>
-        </div >
+          </div>
       )}
 
       {/* 3. WARNINGS */}
@@ -800,7 +799,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
       <div className="space-y-2">
         {BLOCKS.map((block) => renderBlock(block))}
       </div>
-    </div >
+    </div>
   );
 };
 
