@@ -119,6 +119,7 @@ interface ComponentViewProps {
   ) => void;
   credentials?: Credentials;
   currentQuery?: string;
+  refreshRAGConfig?: () => Promise<void>;
 }
 
 const ComponentView: React.FC<ComponentViewProps> = ({
@@ -131,6 +132,7 @@ const ComponentView: React.FC<ComponentViewProps> = ({
   skip_component,
   credentials,
   currentQuery,
+  refreshRAGConfig,
 }) => {
   function renderComponents(rag_config: RAGConfig) {
     return Object.entries(rag_config[component_name].components)
@@ -189,6 +191,7 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         saveComponentConfig={saveComponentConfig}
         credentials={credentials || { deployment: "Local", url: "", key: "", default_deployment: "" }}
         currentQuery={currentQuery || ""}
+        refreshRAGConfig={refreshRAGConfig}
       />
     );
   }
@@ -205,7 +208,7 @@ const ComponentView: React.FC<ComponentViewProps> = ({
                 component_name,
                 RAGConfig[component_name].selected,
                 RAGConfig[component_name].components[
-                  RAGConfig[component_name].selected
+                RAGConfig[component_name].selected
                 ]
               );
             }}

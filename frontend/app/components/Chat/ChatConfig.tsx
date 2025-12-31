@@ -14,6 +14,7 @@ interface ChatConfigProps {
   setRAGConfig: React.Dispatch<React.SetStateAction<RAGConfig | null>>;
   onSave: () => void; // New parameter for handling save
   onReset: () => void; // New parameter for handling reset
+  refreshRAGConfig: () => Promise<void>;
   addStatusMessage: (
     message: string,
     type: "INFO" | "WARNING" | "SUCCESS" | "ERROR"
@@ -30,6 +31,7 @@ const ChatConfig: React.FC<ChatConfigProps> = ({
   credentials,
   onReset,
   production,
+  refreshRAGConfig,
 }) => {
   const updateConfig = (
     component_n: string,
@@ -116,6 +118,7 @@ const ChatConfig: React.FC<ChatConfigProps> = ({
             updateConfig={updateConfig}
             saveComponentConfig={saveComponentConfig}
             blocked={production == "Demo"}
+            refreshRAGConfig={refreshRAGConfig}
           />
           <ComponentView
             RAGConfig={RAGConfig}
@@ -124,6 +127,7 @@ const ChatConfig: React.FC<ChatConfigProps> = ({
             updateConfig={updateConfig}
             saveComponentConfig={saveComponentConfig}
             blocked={production == "Demo"}
+            refreshRAGConfig={refreshRAGConfig}
           />
           <ComponentView
             RAGConfig={RAGConfig}
@@ -132,6 +136,7 @@ const ChatConfig: React.FC<ChatConfigProps> = ({
             updateConfig={updateConfig}
             saveComponentConfig={saveComponentConfig}
             blocked={production == "Demo"}
+            refreshRAGConfig={refreshRAGConfig}
           />
         </div>
       </div>

@@ -97,8 +97,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const currentEmbedding = RAGConfig
     ? (RAGConfig["Embedder"].components[RAGConfig["Embedder"].selected].config[
-        "Model"
-      ].value as string)
+      "Model"
+    ].value as string)
     : "No Config found";
 
   const retrieveDatacount = useCallback(async () => {
@@ -290,9 +290,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleSuccessResponse = (data: QueryPayload, sendInput: string) => {
     setMessages((prev) => [
       ...prev,
-      { 
-        type: "retrieval", 
-        content: data.documents, 
+      {
+        type: "retrieval",
+        content: data.documents,
         context: data.context,
         debug_info: data.debug_info  // Incluir informações de debug
       },
@@ -587,6 +587,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             setRAGConfig={setRAGConfig}
             onReset={onResetConfig}
             onSave={onSaveConfig}
+            refreshRAGConfig={retrieveRAGConfig}
           />
         )}
       </div>
@@ -631,15 +632,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         {suggestion.query.length > 50
                           ? suggestion.query.substring(0, 50) + "..."
                           : suggestion.query
-                              .split(new RegExp(`(${userInput})`, "gi"))
-                              .map((part, i) =>
-                                part.toLowerCase() ===
+                            .split(new RegExp(`(${userInput})`, "gi"))
+                            .map((part, i) =>
+                              part.toLowerCase() ===
                                 userInput.toLowerCase() ? (
-                                  <strong key={i}>{part}</strong>
-                                ) : (
-                                  part
-                                )
-                              )}
+                                <strong key={i}>{part}</strong>
+                              ) : (
+                                part
+                              )
+                            )}
                       </p>
                     </li>
                   ))}

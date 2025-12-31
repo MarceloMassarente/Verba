@@ -22,6 +22,7 @@ interface RetrieverConfigBlocksProps {
   ) => void;
   credentials: Credentials;
   currentQuery?: string;
+  refreshRAGConfig?: () => Promise<void>;
 }
 
 interface ConfigBlock {
@@ -211,6 +212,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   saveComponentConfig,
   credentials,
   currentQuery = "",
+  refreshRAGConfig,
 }) => {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
@@ -355,7 +357,11 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
 
       if (result && result.status === 200) {
         // Recarrega RAG config para refletir mudanças
-        window.location.reload();
+        if (refreshRAGConfig) {
+          await refreshRAGConfig();
+        } else {
+          window.location.reload();
+        }
       } else {
         console.error("Failed to apply preset:", result?.status_msg);
       }

@@ -640,9 +640,9 @@ def patch_weaviate_manager_verify_collection():
                                 continue
                             
                             # Verifica se Property tem data_type antes de acessar
-                            if not hasattr(prop, 'data_type'):
+                            if not hasattr(prop, 'data_type') and not hasattr(prop, 'dataType'):
                                 prop_name = getattr(prop, 'name', 'unknown')
-                                msg.warn(f"   ⚠️  Property {prop_name} não tem atributo 'data_type' - pulando")
+                                msg.warn(f"   ⚠️  Property {prop_name} não tem atributo 'data_type' nem 'dataType' - pulando")
                                 msg.debug(f"   🔍 Tipo do objeto: {type(prop)}")
                                 msg.debug(f"   🔍 Atributos disponíveis: {dir(prop)}")
                                 continue
@@ -652,19 +652,25 @@ def patch_weaviate_manager_verify_collection():
                                 msg.warn(f"   ⚠️  Property não tem atributo 'name' - pulando")
                                 continue
                             
-                            if not prop.data_type:
+                            # Normaliza data_type
+                            if hasattr(prop, 'data_type'):
+                                prop_data_type = prop.data_type
+                            else:
+                                prop_data_type = prop.dataType
+
+                            if not prop_data_type:
                                 msg.warn(f"   ⚠️  Property {getattr(prop, 'name', 'unknown')} tem data_type None - pulando")
                                 continue
                             
                             # Converte dataType para formato esperado pelo Weaviate
                             # Weaviate espera uma lista com o nome do tipo (ex: ["text"], ["number"], ["uuid"])
                             try:
-                                if hasattr(prop.data_type, 'value'):
+                                if hasattr(prop_data_type, 'value'):
                                     # DataType enum tem atributo 'value' (ex: "text", "number", "uuid")
-                                    data_type_value = prop.data_type.value
-                                elif hasattr(prop.data_type, 'name'):
+                                    data_type_value = prop_data_type.value
+                                elif hasattr(prop_data_type, 'name'):
                                     # Se for um enum, pega o nome e converte para lowercase
-                                    data_type_value = prop.data_type.name.lower()
+                                    data_type_value = prop_data_type.name.lower()
                                     # Mapeia nomes de enum para valores esperados pelo Weaviate
                                     type_mapping = {
                                         "number": "number",
@@ -677,7 +683,7 @@ def patch_weaviate_manager_verify_collection():
                                     data_type_value = type_mapping.get(data_type_value, data_type_value)
                                 else:
                                     # Fallback: converte para string e remove prefixos comuns
-                                    data_type_str = str(prop.data_type).lower()
+                                    data_type_str = str(prop_data_type).lower()
                                     # Remove prefixos como "DataType." se existirem
                                     if "." in data_type_str:
                                         data_type_value = data_type_str.split(".")[-1]
@@ -687,7 +693,7 @@ def patch_weaviate_manager_verify_collection():
                                 # Se falhar, usa string direta como último recurso
                                 msg.warn(f"   ⚠️  Erro ao converter dataType para {getattr(prop, 'name', 'unknown')}: {str(e)}")
                                 try:
-                                    data_type_value = str(prop.data_type).lower().replace("datatype.", "")
+                                    data_type_value = str(prop_data_type).lower().replace("datatype.", "")
                                 except:
                                     # Se ainda falhar, usa fallback genérico
                                     msg.warn(f"   ⚠️  Não foi possível determinar dataType para {getattr(prop, 'name', 'unknown')} - usando 'text' como fallback")
