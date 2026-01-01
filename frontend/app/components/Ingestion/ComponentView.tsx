@@ -120,6 +120,7 @@ interface ComponentViewProps {
   credentials?: Credentials;
   currentQuery?: string;
   refreshRAGConfig?: () => Promise<void>;
+  setRAGConfig?: (config: RAGConfig) => void;
 }
 
 const ComponentView: React.FC<ComponentViewProps> = ({
@@ -133,6 +134,7 @@ const ComponentView: React.FC<ComponentViewProps> = ({
   credentials,
   currentQuery,
   refreshRAGConfig,
+  setRAGConfig,
 }) => {
   function renderComponents(rag_config: RAGConfig) {
     return Object.entries(rag_config[component_name].components)
@@ -191,6 +193,7 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         saveComponentConfig={saveComponentConfig}
         credentials={credentials || { deployment: "Local", url: "", key: "", default_deployment: "" }}
         currentQuery={currentQuery || ""}
+        setRAGConfig={setRAGConfig}
       />
     );
   }

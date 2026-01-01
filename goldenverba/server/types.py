@@ -291,3 +291,9 @@ class DocumentSearchFilters(BaseModel):
 class ResetPayload(BaseModel):
     resetMode: str
     credentials: Credentials
+
+
+class GetPresetConfigPayload(BaseModel):
+    """Payload for getting RAGConfig with preset applied."""
+    preset_name: str
+    credentials: Credentials

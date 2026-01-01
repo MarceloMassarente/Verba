@@ -137,6 +137,8 @@ const ChatConfig: React.FC<ChatConfigProps> = ({
             saveComponentConfig={saveComponentConfig}
             blocked={production == "Demo"}
             refreshRAGConfig={refreshRAGConfig}
+            credentials={credentials}
+            setRAGConfig={setRAGConfig}
           />
         </div>
       </div>

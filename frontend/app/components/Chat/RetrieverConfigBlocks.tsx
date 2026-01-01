@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { GoTriangleDown } from "react-icons/go";
 import { RAGConfig, RAGComponentConfig, ConfigSetting, Credentials, RerankerPreset } from "@/app/types";
 import VerbaButton from "../Navigation/VerbaButton";
-import { fetchRerankerPresets } from "@/app/api";
+import { fetchRerankerPresets, fetchPresetConfig } from "@/app/api";
 
 interface RetrieverConfigBlocksProps {
   RAGConfig: RAGConfig;
@@ -22,6 +22,7 @@ interface RetrieverConfigBlocksProps {
   ) => void;
   credentials: Credentials;
   currentQuery?: string;
+  setRAGConfig?: (config: RAGConfig) => void;  // Para aplicar preset via backend
 }
 
 interface ConfigBlock {
@@ -211,6 +212,7 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   saveComponentConfig,
   credentials,
   currentQuery = "",
+  setRAGConfig,
 }) => {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
@@ -345,50 +347,56 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     }
   }, [RAGConfig, rerankerPresets]);
 
-  const handlePresetChange = (preset: RerankerPreset) => {
+  const handlePresetChange = async (preset: RerankerPreset) => {
     if (blocked) return;
 
     setSelectedPreset(preset);
+    setLoadingPresets(true);  // Mostra loading enquanto aplica
 
-    // Aplica valores do preset diretamente via updateConfig (sem chamar backend)
-    const presetConfig = preset.config || {};
+    try {
+      // ABORDAGEM 1: Server-Side (recomendada) - Backend retorna RAGConfig completo
+      if (setRAGConfig && credentials) {
+        const result = await fetchPresetConfig(preset.name, credentials);
 
-    // Lista de campos que devem ser aplicados do preset
-    const configFields = [
-      "Two-Phase Search Mode",
-      "Two-Phase Search Filter Level",
-      "Enable Multi-Vector Search",
-      "Enable Aggregation",
-      "Alpha",
-      "Limit/Sensitivity",
-      "Reranker Top K",
-      "Enable Query Expansion",
-      "Enable Dynamic Alpha",
-      "Enable Relative Score Fusion",
-      "Enable Intelligent Cache",
-      "Enable Dynamic Reranking",
-      "Chunk Window",
-      "Enable Framework Filter",
-      "Enable Language Filter",
-      "Enable Semantic Search",
-      "Enable Temporal Filter",
-      "Enable Entity Filter",
-      "Entity Filter Mode",
-      "Reranking Recency Weight",
-      "Reranking Entity Weight",
-    ];
-
-    // Aplica cada campo do preset
-    configFields.forEach((field) => {
-      if (presetConfig[field] !== undefined) {
-        updateConfig("Retriever", field, presetConfig[field]);
+        if (result && result.status === 200 && result.rag_config) {
+          setRAGConfig(result.rag_config);
+          console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado via backend`);
+          setLoadingPresets(false);
+          return;
+        } else {
+          console.warn(`⚠️ Backend falhou, usando fallback: ${result?.status_msg || "erro desconhecido"}`);
+        }
       }
-    });
 
-    // Atualiza o campo "Reranker Preset" para indicar qual preset está ativo
-    updateConfig("Retriever", "Reranker Preset", preset.name);
+      // ABORDAGEM 2: Fallback - Aplica valores diretamente via updateConfig
+      const presetConfig = preset.config || {};
+      const configFields = [
+        "Two-Phase Search Mode", "Two-Phase Search Filter Level",
+        "Enable Multi-Vector Search", "Enable Aggregation",
+        "Alpha", "Limit/Sensitivity", "Reranker Top K",
+        "Enable Query Expansion", "Enable Dynamic Alpha",
+        "Enable Relative Score Fusion", "Enable Intelligent Cache",
+        "Enable Dynamic Reranking", "Chunk Window",
+        "Enable Framework Filter", "Enable Language Filter",
+        "Enable Semantic Search", "Enable Temporal Filter",
+        "Enable Entity Filter", "Entity Filter Mode",
+        "Reranking Recency Weight", "Reranking Entity Weight",
+      ];
 
-    console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado com sucesso`);
+      configFields.forEach((field) => {
+        if (presetConfig[field] !== undefined) {
+          updateConfig("Retriever", field, presetConfig[field]);
+        }
+      });
+      updateConfig("Retriever", "Reranker Preset", preset.name);
+      console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado via fallback`);
+
+    } catch (error) {
+      console.error("Erro ao aplicar preset:", error);
+      setPresetsError("Erro ao aplicar preset");
+    } finally {
+      setLoadingPresets(false);
+    }
   };
 
   const renderConfigOptions = (configKey: string) => {

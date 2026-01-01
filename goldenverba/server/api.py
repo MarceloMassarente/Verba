@@ -63,6 +63,7 @@ from goldenverba.server.types import (
     FileStatus,
     GetRerankerPresetsPayload,
     ApplyRerankerPresetPayload,
+    GetPresetConfigPayload,
 )
 
 load_dotenv()
@@ -1000,6 +1001,83 @@ async def apply_reranker_preset(payload: ApplyRerankerPresetPayload):
             content={
                 "status": 400,
                 "status_msg": f"Failed to apply reranker preset: {str(e)}",
+            }
+        )
+
+
+@app.post("/api/get_preset_config")
+async def get_preset_config(payload: GetPresetConfigPayload):
+    """
+    Retorna RAGConfig completo com preset aplicado ao EntityAware.
+    
+    Esta é a abordagem recomendada: o backend é o source of truth para presets.
+    O frontend apenas aplica o config retornado via setRAGConfig().
+    """
+    try:
+        client = await client_manager.connect(payload.credentials)
+        
+        # Carrega config atual
+        current_config = await manager.load_rag_config(client)
+        
+        # Carrega presets disponíveis
+        from verba_extensions.plugins.reranker import RerankerPresets
+        presets = RerankerPresets.get_all_presets()
+        
+        preset_config = presets.get(payload.preset_name)
+        if not preset_config:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "status": 404,
+                    "status_msg": f"Preset '{payload.preset_name}' não encontrado",
+                }
+            )
+        
+        # Aplica preset ao EntityAware
+        if "Retriever" in current_config:
+            retriever_config = current_config["Retriever"]
+            if "components" in retriever_config:
+                # Muda selecionado para EntityAware
+                if "EntityAware" in retriever_config["components"]:
+                    retriever_config["selected"] = "EntityAware"
+                    
+                    entity_aware = retriever_config["components"]["EntityAware"]
+                    if entity_aware and "config" in entity_aware:
+                        # Aplica cada campo do preset
+                        for key, value in preset_config.items():
+                            # Skip metadados do preset
+                            if key in ["name", "display_name", "description", 
+                                       "latency_estimate", "quality_estimate", "requirements"]:
+                                continue
+                            
+                            if key in entity_aware["config"]:
+                                if isinstance(entity_aware["config"][key], dict):
+                                    entity_aware["config"][key]["value"] = value
+                                else:
+                                    entity_aware["config"][key] = value
+                        
+                        # Marca qual preset está ativo
+                        if "Reranker Preset" in entity_aware["config"]:
+                            if isinstance(entity_aware["config"]["Reranker Preset"], dict):
+                                entity_aware["config"]["Reranker Preset"]["value"] = payload.preset_name
+                            else:
+                                entity_aware["config"]["Reranker Preset"] = payload.preset_name
+        
+        msg.good(f"Preset '{payload.preset_name}' aplicado ao RAGConfig")
+        
+        return JSONResponse(
+            content={
+                "status": 200,
+                "rag_config": current_config,
+                "preset_applied": payload.preset_name,
+            }
+        )
+    except Exception as e:
+        msg.warn(f"Failed to get preset config: {str(e)}")
+        return JSONResponse(
+            content={
+                "status": 400,
+                "status_msg": f"Failed to get preset config: {str(e)}",
             }
         )
 

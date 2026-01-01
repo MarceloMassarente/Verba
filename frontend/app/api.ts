@@ -289,6 +289,31 @@ export const applyRerankerPreset = async (
   }
 };
 
+// Endpoint /api/get_preset_config - Retorna RAGConfig completo com preset aplicado
+export const fetchPresetConfig = async (
+  presetName: string,
+  credentials: Credentials
+): Promise<{ status: number; rag_config?: RAGConfig; preset_applied?: string; status_msg?: string } | null> => {
+  try {
+    const host = await detectHost();
+    const response = await fetch(`${host}/api/get_preset_config`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        preset_name: presetName,
+        credentials: credentials,
+      }),
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error fetching preset config:", error);
+    return null;
+  }
+};
+
 // Endpoint /api/query
 export const sendUserQuery = async (
   query: string,
