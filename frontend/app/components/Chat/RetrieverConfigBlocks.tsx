@@ -351,49 +351,39 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     if (blocked) return;
 
     setSelectedPreset(preset);
-    setLoadingPresets(true);  // Mostra loading enquanto aplica
+    setLoadingPresets(true);
+    setPresetsError(null);
 
     try {
-      // ABORDAGEM 1: Server-Side (recomendada) - Backend retorna RAGConfig completo
-      if (setRAGConfig && credentials) {
-        const result = await fetchPresetConfig(preset.name, credentials);
-
-        if (result && result.status === 200 && result.rag_config) {
-          setRAGConfig(result.rag_config);
-          console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado via backend`);
-          setLoadingPresets(false);
-          return;
-        } else {
-          console.warn(`⚠️ Backend falhou, usando fallback: ${result?.status_msg || "erro desconhecido"}`);
-        }
+      if (!setRAGConfig) {
+        throw new Error("setRAGConfig não disponível");
+      }
+      if (!credentials) {
+        throw new Error("Credentials não disponível");
       }
 
-      // ABORDAGEM 2: Fallback - Aplica valores diretamente via updateConfig
-      const presetConfig = preset.config || {};
-      const configFields = [
-        "Two-Phase Search Mode", "Two-Phase Search Filter Level",
-        "Enable Multi-Vector Search", "Enable Aggregation",
-        "Alpha", "Limit/Sensitivity", "Reranker Top K",
-        "Enable Query Expansion", "Enable Dynamic Alpha",
-        "Enable Relative Score Fusion", "Enable Intelligent Cache",
-        "Enable Dynamic Reranking", "Chunk Window",
-        "Enable Framework Filter", "Enable Language Filter",
-        "Enable Semantic Search", "Enable Temporal Filter",
-        "Enable Entity Filter", "Entity Filter Mode",
-        "Reranking Recency Weight", "Reranking Entity Weight",
-      ];
+      console.log(`🔄 Aplicando preset "${preset.name}" via backend...`);
+      const result = await fetchPresetConfig(preset.name, credentials);
 
-      configFields.forEach((field) => {
-        if (presetConfig[field] !== undefined) {
-          updateConfig("Retriever", field, presetConfig[field]);
-        }
-      });
-      updateConfig("Retriever", "Reranker Preset", preset.name);
-      console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado via fallback`);
+      if (!result) {
+        throw new Error("Sem resposta do backend");
+      }
+
+      if (result.status !== 200) {
+        throw new Error(result.status_msg || `Erro ${result.status}`);
+      }
+
+      if (!result.rag_config) {
+        throw new Error("Backend não retornou rag_config");
+      }
+
+      setRAGConfig(result.rag_config);
+      console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado com sucesso`);
 
     } catch (error) {
-      console.error("Erro ao aplicar preset:", error);
-      setPresetsError("Erro ao aplicar preset");
+      const errorMsg = error instanceof Error ? error.message : "Erro desconhecido";
+      console.error(`❌ Erro ao aplicar preset: ${errorMsg}`, error);
+      setPresetsError(`Erro ao aplicar preset: ${errorMsg}`);
     } finally {
       setLoadingPresets(false);
     }
