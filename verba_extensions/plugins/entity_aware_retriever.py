@@ -47,6 +47,24 @@ from typing import Optional, Dict, Any, List, Tuple
 from wasabi import msg
 
 
+def safe_config_to_dict(config):
+    """
+    Converte config Pydantic ou dict para dict puro.
+    Defensive programming para compatibilidade total.
+    """
+    if isinstance(config, dict):
+        return config
+    elif hasattr(config, 'model_dump'):
+        # Pydantic v2
+        return config.model_dump()
+    elif hasattr(config, 'dict'):
+        # Pydantic v1
+        return config.dict()
+    else:
+        # Fallback: tentar vars()
+        return vars(config) if hasattr(config, '__dict__') else {}
+
+
 # Cache de verificação de schema ETL (evita verificar repetidamente)
 _etl_schema_cache: Dict[str, bool] = {}
 
@@ -539,12 +557,22 @@ class EntityAwareRetriever(Retriever):
                             raise Exception("Falha ao gerar embedding da query")
                         query_vector_phase2 = query_embeddings[0]
                     
-                    # Configurar fusion type
-                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
-                    fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
-                    
-                    # Configurar query_properties para BM25 boosting
-                    query_properties = ["content", "title^2"]  # Boost de título
+            # Configurar fusion type
+            # Usa safe_config_to_dict caso self.config ainda seja um objeto (defensive)
+            config_dict = safe_config_to_dict(self.config)
+            relative_score_config = config_dict.get("Enable Relative Score Fusion", {})
+            
+            if isinstance(relative_score_config, dict):
+                enable_relative_score = relative_score_config.get("value", True)
+            elif hasattr(relative_score_config, 'value'):
+                enable_relative_score = relative_score_config.value
+            else:
+                enable_relative_score = True
+                
+            fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
+            
+            # Configurar query_properties para BM25 boosting
+            query_properties = ["content", "title^2"]  # Boost de título
                     
                     # Executar multi-vector search
                     multi_vector_searcher = MultiVectorSearcher()
@@ -1329,6 +1357,17 @@ class EntityAwareRetriever(Retriever):
         3. Dentro dos filtrados: faz busca semântica
         4. Retorna chunks ordenados por relevância
         """
+        # ===================================================================
+        # GARANTIA DE ROBUSTEZ: Converter config para dict
+        # ===================================================================
+        # O sistema pode passar config como objeto Pydantic ou dict dependendo
+        # do ponto de chamada. Normalizamos aqui para evitar AttributeError.
+        config = safe_config_to_dict(config)
+        self.config = config # Atualiza self.config também para garantir consistência
+        
+        if rag_config:
+            rag_config = safe_config_to_dict(rag_config)
+            
         from goldenverba.components.retriever.WindowRetriever import WindowRetriever
         from verba_extensions.plugins.entity_aware_query_orchestrator import parse_query
         
