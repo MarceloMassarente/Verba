@@ -219,6 +219,10 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const [loadingPresets, setLoadingPresets] = useState(false);
   const [presetsError, setPresetsError] = useState<string | null>(null);
 
+  // Debug log para presets
+  console.log(`🔧 RetrieverConfigBlocks: selected="${RAGConfig.Retriever.selected}", presets=${rerankerPresets.length}, showPresets=${RAGConfig.Retriever.selected === "EntityAware"}`);
+
+
   // Estado para collapse de blocos
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(
     new Set(BLOCKS.filter(b => b.defaultOpen !== false).map(b => b.name))
@@ -709,8 +713,8 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
         </div>
       </div>
 
-      {/* 2. PRESETS UNIFICADOS - Só aparece quando Entity-Aware está selecionado */}
-      {selected === "Entity-Aware" && (
+      {/* 2. PRESETS UNIFICADOS - Só aparece quando EntityAware está selecionado */}
+      {selected === "EntityAware" && (
         <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-secondary-verba">
           <div className="flex gap-2 justify-between items-center text-text-verba">
             <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">★ Presets de Busca</p>
