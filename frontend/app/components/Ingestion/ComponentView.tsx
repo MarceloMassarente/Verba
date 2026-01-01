@@ -191,7 +191,6 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         saveComponentConfig={saveComponentConfig}
         credentials={credentials || { deployment: "Local", url: "", key: "", default_deployment: "" }}
         currentQuery={currentQuery || ""}
-        refreshRAGConfig={refreshRAGConfig}
       />
     );
   }

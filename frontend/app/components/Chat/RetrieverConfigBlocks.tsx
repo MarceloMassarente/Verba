@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { GoTriangleDown } from "react-icons/go";
 import { RAGConfig, RAGComponentConfig, ConfigSetting, Credentials, RerankerPreset } from "@/app/types";
 import VerbaButton from "../Navigation/VerbaButton";
-import { fetchRerankerPresets, applyRerankerPreset } from "@/app/api";
+import { fetchRerankerPresets } from "@/app/api";
 
 interface RetrieverConfigBlocksProps {
   RAGConfig: RAGConfig;
@@ -22,7 +22,6 @@ interface RetrieverConfigBlocksProps {
   ) => void;
   credentials: Credentials;
   currentQuery?: string;
-  refreshRAGConfig?: () => Promise<void>;
 }
 
 interface ConfigBlock {
@@ -212,7 +211,6 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   saveComponentConfig,
   credentials,
   currentQuery = "",
-  refreshRAGConfig,
 }) => {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [disabledFields, setDisabledFields] = useState<Set<string>>(new Set());
@@ -343,31 +341,50 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     }
   }, [RAGConfig, rerankerPresets]);
 
-  const handlePresetChange = async (preset: RerankerPreset) => {
-    if (blocked || !credentials) return;
+  const handlePresetChange = (preset: RerankerPreset) => {
+    if (blocked) return;
 
     setSelectedPreset(preset);
 
-    try {
-      const result = await applyRerankerPreset(
-        preset.name,
-        currentQuery || null,
-        credentials
-      );
+    // Aplica valores do preset diretamente via updateConfig (sem chamar backend)
+    const presetConfig = preset.config || {};
 
-      if (result && result.status === 200) {
-        // Recarrega RAG config para refletir mudanças
-        if (refreshRAGConfig) {
-          await refreshRAGConfig();
-        } else {
-          window.location.reload();
-        }
-      } else {
-        console.error("Failed to apply preset:", result?.status_msg);
+    // Lista de campos que devem ser aplicados do preset
+    const configFields = [
+      "Two-Phase Search Mode",
+      "Two-Phase Search Filter Level",
+      "Enable Multi-Vector Search",
+      "Enable Aggregation",
+      "Alpha",
+      "Limit/Sensitivity",
+      "Reranker Top K",
+      "Enable Query Expansion",
+      "Enable Dynamic Alpha",
+      "Enable Relative Score Fusion",
+      "Enable Intelligent Cache",
+      "Enable Dynamic Reranking",
+      "Chunk Window",
+      "Enable Framework Filter",
+      "Enable Language Filter",
+      "Enable Semantic Search",
+      "Enable Temporal Filter",
+      "Enable Entity Filter",
+      "Entity Filter Mode",
+      "Reranking Recency Weight",
+      "Reranking Entity Weight",
+    ];
+
+    // Aplica cada campo do preset
+    configFields.forEach((field) => {
+      if (presetConfig[field] !== undefined) {
+        updateConfig("Retriever", field, presetConfig[field]);
       }
-    } catch (error) {
-      console.error("Error applying preset:", error);
-    }
+    });
+
+    // Atualiza o campo "Reranker Preset" para indicar qual preset está ativo
+    updateConfig("Retriever", "Reranker Preset", preset.name);
+
+    console.log(`✅ Preset "${preset.display_name || preset.name}" aplicado com sucesso`);
   };
 
   const renderConfigOptions = (configKey: string) => {
@@ -692,83 +709,84 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
         </div>
       </div>
 
-      {/* 2. PRESETS UNIFICADOS */}
-      <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-secondary-verba">
-        <div className="flex gap-2 justify-between items-center text-text-verba">
-          <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">★ Presets de Busca</p>
+      {/* 2. PRESETS UNIFICADOS - Só aparece quando Entity-Aware está selecionado */}
+      {selected === "Entity-Aware" && (
+        <div className="flex flex-col gap-2 p-4 bg-bg-alt-verba rounded-lg border-l-4 border-secondary-verba">
+          <div className="flex gap-2 justify-between items-center text-text-verba">
+            <p className="flex min-w-[8vw] lg:text-base text-sm font-semibold">★ Presets de Busca</p>
 
-          <div className="flex flex-grow gap-2 items-center">
-            {loadingPresets ? (
-              <div className="flex items-center gap-2 text-text-alt-verba text-sm">
-                <span className="loading loading-spinner loading-xs"></span>
-                Carregando presets...
-              </div>
-            ) : presetsError ? (
-              <div className="text-warning-verba text-sm italic flex-grow">
-                {presetsError}
-              </div>
-            ) : rerankerPresets.length === 0 ? (
-              <div className="text-text-alt-verba text-sm italic flex-grow">
-                Nenhum preset disponível.
-              </div>
-            ) : (
-              <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
-                <button
-                  tabIndex={0}
-                  role="button"
+            <div className="flex flex-grow gap-2 items-center">
+              {loadingPresets ? (
+                <div className="flex items-center gap-2 text-text-alt-verba text-sm">
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Carregando presets...
+                </div>
+              ) : presetsError ? (
+                <div className="text-warning-verba text-sm italic flex-grow">
+                  {presetsError}
+                </div>
+              ) : rerankerPresets.length === 0 ? (
+                <div className="text-text-alt-verba text-sm italic flex-grow">
+                  Nenhum preset disponível.
+                </div>
+              ) : (
+                <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
+                  <button
+                    tabIndex={0}
+                    role="button"
+                    disabled={blocked}
+                    className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
+                  >
+                    <GoTriangleDown size={15} />
+                    <p className="truncate">
+                      {selectedPreset ? (selectedPreset.display_name || selectedPreset.name) : "Selecionar Preset..."}
+                    </p>
+                  </button>
+                  <ul
+                    tabIndex={0}
+                    className="dropdown-content menu bg-base-100 rounded-box z-[1] w-full p-2 shadow max-h-60 overflow-y-auto"
+                  >
+                    {rerankerPresets.map((preset) => (
+                      <li
+                        key={"Preset_" + preset.name}
+                        onClick={() => {
+                          if (!blocked) {
+                            setSelectedPreset(preset);
+                          }
+                        }}
+                      >
+                        <a>
+                          <span className="font-bold">{preset.display_name || preset.name}</span>
+                          {preset.description && (
+                            <span className="text-xs opacity-70 ml-2"> - {preset.description}</span>
+                          )}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {selectedPreset && !presetsError && !loadingPresets && (
+                <VerbaButton
+                  title="Aplicar"
                   disabled={blocked}
-                  className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
-                >
-                  <GoTriangleDown size={15} />
-                  <p className="truncate">
-                    {selectedPreset ? (selectedPreset.display_name || selectedPreset.name) : "Selecionar Preset..."}
-                  </p>
-                </button>
-                <ul
-                  tabIndex={0}
-                  className="dropdown-content menu bg-base-100 rounded-box z-[1] w-full p-2 shadow max-h-60 overflow-y-auto"
-                >
-                  {rerankerPresets.map((preset) => (
-                    <li
-                      key={"Preset_" + preset.name}
-                      onClick={() => {
-                        if (!blocked) {
-                          setSelectedPreset(preset);
-                        }
-                      }}
-                    >
-                      <a>
-                        <span className="font-bold">{preset.display_name || preset.name}</span>
-                        {preset.description && (
-                          <span className="text-xs opacity-70 ml-2"> - {preset.description}</span>
-                        )}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+                  onClick={() => {
+                    handlePresetChange(selectedPreset);
+                  }}
+                />
+              )}
+            </div>
+          </div>
 
-            {selectedPreset && !presetsError && !loadingPresets && (
-              <VerbaButton
-                title="Aplicar"
-                disabled={blocked}
-                onClick={() => {
-                  handlePresetChange(selectedPreset);
-                }}
-              />
-            )}
+          <div className="flex gap-2 items-start text-text-verba">
+            <p className="flex min-w-[8vw]"></p>
+            <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
+              💡 {selectedPreset ? selectedPreset.description : "Escolha uma configuração otimizada"}
+            </p>
           </div>
         </div>
-
-        <div className="flex gap-2 items-start text-text-verba">
-          <p className="flex min-w-[8vw]"></p>
-          <p className="lg:text-sm text-xs text-text-alt-verba text-start bg-bg-verba/40 p-2 rounded italic flex-1">
-            💡 {selectedPreset ? selectedPreset.description : "Escolha uma configuração otimizada"}
-          </p>
-        </div>
-      </div>
-
+      )}
 
       {/* 3. WARNINGS */}
       {
