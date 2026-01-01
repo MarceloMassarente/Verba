@@ -183,11 +183,26 @@ class GetAllSuggestionsPayload(BaseModel):
 
 
 class QueryPayload(BaseModel):
+    """
+    Payload para endpoint /api/query.
+    
+    Attributes:
+        query: A query string to search for
+        RAG: RAG configuration to use for the query
+        labels: Labels to filter documents
+        documentFilter: Document filters to apply
+        credentials: Weaviate connection credentials
+        preset: (Optional) Nome do preset a aplicar. Se especificado, sobrescreve
+                as configurações do EntityAware Retriever com os valores do preset.
+                Valores válidos: consulting_frameworks, company_research, 
+                sector_analysis, speed, max_quality, balanced, offline
+    """
     query: str
     RAG: dict[str, RAGComponentClass]
     labels: list[str]
     documentFilter: list[DocumentFilter]
     credentials: Credentials
+    preset: Optional[str] = None  # Preset to apply (optional)
 
 
 class DatacountPayload(BaseModel):

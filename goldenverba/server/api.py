@@ -1114,9 +1114,63 @@ async def query(payload: QueryPayload):
         client = await client_manager.connect(payload.credentials)
         documents_uuid = [document.uuid for document in payload.documentFilter] if payload.documentFilter else []
         
+        # ===================================================================
+        # PRESET HANDLING: Aplicar preset se especificado
+        # ===================================================================
+        # Se o parâmetro 'preset' foi fornecido, carrega e aplica as configurações
+        # do preset ao EntityAware Retriever antes de executar a busca.
+        # Isso permite controle stateless de qual preset usar via API.
+        # ===================================================================
+        rag_config = payload.RAG
+        preset_applied = None
+        
+        if payload.preset:
+            msg.info(f"🎯 Preset especificado: {payload.preset}")
+            try:
+                from verba_extensions.plugins.reranker import RerankerPresets
+                presets = RerankerPresets.get_all_presets()
+                
+                preset_config = presets.get(payload.preset)
+                if not preset_config:
+                    # Tenta buscar pelo nome sem underscore
+                    preset_config = presets.get(payload.preset.replace("-", "_").lower())
+                
+                if preset_config:
+                    # Aplica preset ao EntityAware se disponível no RAG config
+                    if "Retriever" in rag_config:
+                        retriever = rag_config["Retriever"]
+                        if "components" in retriever and "EntityAware" in retriever.get("components", {}):
+                            # Muda retriever selecionado para EntityAware
+                            rag_config["Retriever"]["selected"] = "EntityAware"
+                            
+                            entity_aware = retriever["components"]["EntityAware"]
+                            if entity_aware and "config" in entity_aware:
+                                # Aplica cada campo do preset
+                                for key, value in preset_config.items():
+                                    if key in ["name", "display_name", "description", 
+                                               "latency_estimate", "quality_estimate", "requirements"]:
+                                        continue
+                                    
+                                    if key in entity_aware["config"]:
+                                        if isinstance(entity_aware["config"][key], dict):
+                                            entity_aware["config"][key]["value"] = value
+                                        else:
+                                            entity_aware["config"][key] = value
+                                
+                                preset_applied = payload.preset
+                                msg.good(f"✅ Preset '{payload.preset}' aplicado com sucesso")
+                        else:
+                            msg.warn(f"⚠️ EntityAware não disponível no RAG config, preset ignorado")
+                    else:
+                        msg.warn(f"⚠️ Retriever não encontrado no RAG config, preset ignorado")
+                else:
+                    msg.warn(f"⚠️ Preset '{payload.preset}' não encontrado. Presets disponíveis: {list(presets.keys())}")
+            except Exception as preset_error:
+                msg.warn(f"⚠️ Erro ao aplicar preset '{payload.preset}': {str(preset_error)}")
+        
         # Verificar se há chunks disponíveis antes de processar query
         try:
-            embedder = payload.RAG.get("Embedder", {}).get("selected", "")
+            embedder = rag_config.get("Embedder", {}).get("selected", "")
             if embedder:
                 from goldenverba.components.managers import WeaviateManager
                 weaviate_manager = WeaviateManager()
@@ -1140,8 +1194,9 @@ async def query(payload: QueryPayload):
             # Não falha a query se a verificação der erro, apenas loga
             msg.warn(f"Could not verify chunks availability: {str(check_error)}")
         
+        # Usa rag_config (que pode ter preset aplicado) em vez de payload.RAG
         result = await manager.retrieve_chunks(
-            client, payload.query, payload.RAG, payload.labels, documents_uuid
+            client, payload.query, rag_config, payload.labels, documents_uuid
         )
         
         # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
@@ -1150,22 +1205,25 @@ async def query(payload: QueryPayload):
             # Garantir que documents é uma lista
             if documents is None:
                 documents = []
-            return JSONResponse(
-                content={
-                    "error": "", 
-                    "documents": documents, 
-                    "context": context or "",
-                    "debug_info": debug_info  # Informações de debug para exibir no frontend
-                }
-            )
+            response_content = {
+                "error": "", 
+                "documents": documents, 
+                "context": context or "",
+                "debug_info": debug_info
+            }
+            # Adiciona info de preset se foi aplicado
+            if preset_applied:
+                response_content["preset_applied"] = preset_applied
+            return JSONResponse(content=response_content)
         else:
             documents, context = result
             # Garantir que documents é uma lista
             if documents is None:
                 documents = []
-            return JSONResponse(
-                content={"error": "", "documents": documents, "context": context or ""}
-            )
+            response_content = {"error": "", "documents": documents, "context": context or ""}
+            if preset_applied:
+                response_content["preset_applied"] = preset_applied
+            return JSONResponse(content=response_content)
     except Exception as e:
         msg.fail(f"Query failed: {str(e)}")
         import traceback
