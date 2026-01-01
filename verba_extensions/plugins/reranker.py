@@ -944,6 +944,8 @@ class RerankerPresets:
         # Filtros
         "Enable Framework Filter": True,
         "Enable Language Filter": True,
+        "Enable Semantic Search": True,
+        "Enable Temporal Filter": False,  # Frameworks são atemporais
         
         # Reranker
         "Reranker Provider": "Combined",
@@ -981,7 +983,10 @@ class RerankerPresets:
         
         # Filtros
         "Enable Entity Filter": False,
+        "Entity Filter Mode": "strict",  # Quando reabilitado pelo usuário
         "Enable Framework Filter": True,
+        "Enable Semantic Search": True,
+        "Enable Temporal Filter": False,  # Foco em entidades, não tempo
         
         "latency_estimate": "~600ms",
         "quality_estimate": "Alta",
@@ -1011,6 +1016,11 @@ class RerankerPresets:
         "Enable Dynamic Reranking": True,
         "Reranking Recency Weight": 0.25,
         "Chunk Window": 2,
+        
+        # Filtros
+        "Enable Semantic Search": True,
+        "Enable Temporal Filter": True,  # CRÍTICO: Prioriza documentos recentes
+        "Enable Language Filter": True,
         
         "latency_estimate": "~900ms",
         "quality_estimate": "Muito Alta",
