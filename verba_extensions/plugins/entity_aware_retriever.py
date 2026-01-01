@@ -1715,7 +1715,14 @@ class EntityAwareRetriever(Retriever):
                 msg.info(f"  Query builder: alpha ajustado para {rewritten_alpha}")
             
             # Alpha Dinâmico (sobrescreve se habilitado)
-            enable_dynamic_alpha = self.config.get("Enable Dynamic Alpha", {}).get("value", True)
+            dyn_alpha_config_dict = safe_config_to_dict(self.config)
+            dyn_alpha_config = dyn_alpha_config_dict.get("Enable Dynamic Alpha", {})
+            if isinstance(dyn_alpha_config, dict):
+                enable_dynamic_alpha = dyn_alpha_config.get("value", True)
+            elif hasattr(dyn_alpha_config, 'value'):
+                enable_dynamic_alpha = dyn_alpha_config.value
+            else:
+                enable_dynamic_alpha = True
             if enable_dynamic_alpha:
                 try:
                     from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
@@ -2198,7 +2205,15 @@ class EntityAwareRetriever(Retriever):
         
         # 2.4. FILTRO DE FRAMEWORK (se habilitado e collection suporta)
         framework_filter = None
-        enable_framework_filter = config.get("Enable Framework Filter", {}).value if isinstance(config.get("Enable Framework Filter"), InputConfig) else True
+        # Usa safe_config_to_dict para compatibilidade Pydantic/dict
+        local_config_dict = safe_config_to_dict(config)
+        framework_filter_config = local_config_dict.get("Enable Framework Filter", {})
+        if isinstance(framework_filter_config, dict):
+            enable_framework_filter = framework_filter_config.get("value", True)
+        elif hasattr(framework_filter_config, 'value'):
+            enable_framework_filter = framework_filter_config.value
+        else:
+            enable_framework_filter = True
         
         # Prioridade: filtros do QueryBuilder > detecção automática na query
         builder_frameworks = query_filters_from_builder.get("frameworks")
@@ -2563,7 +2578,14 @@ class EntityAwareRetriever(Retriever):
                 use_multi_vector = False
         
         # 3.6. VERIFICAR TWO-PHASE SEARCH MODE
-        two_phase_mode = self.config.get("Two-Phase Search Mode", {}).get("value", "auto")
+        config_dict = safe_config_to_dict(self.config)
+        two_phase_config = config_dict.get("Two-Phase Search Mode", {})
+        if isinstance(two_phase_config, dict):
+            two_phase_mode = two_phase_config.get("value", "auto")
+        elif hasattr(two_phase_config, 'value'):
+            two_phase_mode = two_phase_config.value
+        else:
+            two_phase_mode = "auto"
         should_use_two_phase = False
         
         if two_phase_mode == "enabled":
@@ -2591,8 +2613,14 @@ class EntityAwareRetriever(Retriever):
                 # Se Two-Phase Search está ativo, executar Fase 1 primeiro
                 if should_use_two_phase:
                     # Verificar qual nível de filtro usar (chunk ou document)
-                    filter_level_config = config.get("Two-Phase Search Filter Level", {})
-                    filter_level = filter_level_config.value if isinstance(filter_level_config, InputConfig) else "chunk"
+                    # Usa config_dict já convertido anteriormente
+                    filter_level_config = config_dict.get("Two-Phase Search Filter Level", {})
+                    if isinstance(filter_level_config, dict):
+                        filter_level = filter_level_config.get("value", "chunk")
+                    elif hasattr(filter_level_config, 'value'):
+                        filter_level = filter_level_config.value
+                    else:
+                        filter_level = "chunk"
                     
                     if filter_level == "document":
                         msg.info(f"  📄 Two-Phase Search: Modo Document-Level (filtra por documentos, melhor contexto)")
