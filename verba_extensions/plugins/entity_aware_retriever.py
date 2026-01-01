@@ -556,6 +556,13 @@ class EntityAwareRetriever(Retriever):
                         if not query_embeddings or len(query_embeddings) == 0:
                             raise Exception("Falha ao gerar embedding da query")
                         query_vector_phase2 = query_embeddings[0]
+                except Exception as e:
+                    msg.warn(f"Erro ao vetorizar query para multi-vector search: {str(e)}")
+                    # Fallback para query original (sem vetor) ou interromper?
+                    # Se falhar vetorização, multi-vector search vai falhar.
+                    # Vamos logar e deixar estourar erro no search se for crítico, ou tentar continuar.
+                    # Mas query_vector_phase2 não estará definido.
+                    raise e
                     
             # Configurar fusion type
             # Usa safe_config_to_dict caso self.config ainda seja um objeto (defensive)
@@ -574,48 +581,49 @@ class EntityAwareRetriever(Retriever):
             # Configurar query_properties para BM25 boosting
             query_properties = ["content", "title^2"]  # Boost de título
                     
-                    # Executar multi-vector search
-                    multi_vector_searcher = MultiVectorSearcher()
-                    result = await multi_vector_searcher.search_multi_vector(
-                        client=client,
-                        collection_name=collection_name,
-                        query=phase2_query,
-                        query_vector=query_vector_phase2,
-                        vectors=vectors_to_search,
-                        filters=phase2_filter,
-                        limit=limit,
-                        alpha=rewritten_alpha,
-                        fusion_type=fusion_type,
-                        query_properties=query_properties
-                    )
+            # Executar multi-vector search
+            try:
+                multi_vector_searcher = MultiVectorSearcher()
+                result = await multi_vector_searcher.search_multi_vector(
+                    client=client,
+                    collection_name=collection_name,
+                    query=phase2_query,
+                    query_vector=query_vector_phase2,
+                    vectors=vectors_to_search,
+                    filters=phase2_filter,
+                    limit=limit,
+                    alpha=rewritten_alpha,
+                    fusion_type=fusion_type,
+                    query_properties=query_properties
+                )
+                
+                if result and result.get("results"):
+                    # Converter resultados dict para objetos Weaviate
+                    # Buscar chunks completos pelos UUIDs retornados
+                    phase2_uuids = [r.get("_uuid") for r in result["results"] if r.get("_uuid")]
                     
-                    if result and result.get("results"):
-                        # Converter resultados dict para objetos Weaviate
-                        # Buscar chunks completos pelos UUIDs retornados
-                        phase2_uuids = [r.get("_uuid") for r in result["results"] if r.get("_uuid")]
+                    if phase2_uuids:
+                        # Buscar objetos completos do Weaviate
+                        collection = client.collections.get(collection_name)
+                        phase2_objects = await collection.query.fetch_objects(
+                            filters=Filter.by_property("uuid").contains_any(phase2_uuids)
+                        )
                         
-                        if phase2_uuids:
-                            # Buscar objetos completos do Weaviate
-                            collection = client.collections.get(collection_name)
-                            phase2_objects = await collection.query.fetch_objects(
-                                filters=Filter.by_property("uuid").contains_any(phase2_uuids)
-                            )
+                        if phase2_objects and hasattr(phase2_objects, 'objects'):
+                            phase2_chunks = phase2_objects.objects
+                            msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados")
+                            debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+                            debug_info["two_phase_search"]["fusion_type"] = fusion_type
                             
-                            if phase2_objects and hasattr(phase2_objects, 'objects'):
-                                phase2_chunks = phase2_objects.objects
-                                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados")
-                                debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
-                                debug_info["two_phase_search"]["fusion_type"] = fusion_type
-                                
-                                return phase2_chunks
-                            else:
-                                msg.warn(f"    Fase 2: Não foi possível buscar objetos completos")
+                            return phase2_chunks
                         else:
-                            msg.warn(f"    Fase 2: Nenhum UUID extraído dos resultados")
+                            msg.warn(f"    Fase 2: Não foi possível buscar objetos completos")
                     else:
-                        msg.warn(f"    Fase 2: Multi-vector não retornou resultados")
-                except Exception as e:
-                    msg.warn(f"    Fase 2: Erro em multi-vector search: {str(e)}")
+                        msg.warn(f"    Fase 2: Nenhum UUID extraído dos resultados")
+                else:
+                    msg.warn(f"    Fase 2: Multi-vector não retornou resultados")
+            except Exception as e:
+                msg.warn(f"    Fase 2: Erro em multi-vector search: {str(e)}")
             
             # Fallback: busca híbrida simples na Fase 2
             # Se tem apenas 1 named vector relevante, usar target_vector

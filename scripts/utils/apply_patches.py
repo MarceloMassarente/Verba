@@ -84,6 +84,19 @@ except Exception as e:
                     msg.warn(f"[ETL-PRE] Erro no ETL pré-chunking (não crítico, continuando): {str(e)}")
             ''',
         "description": "ETL Pré-Chunking Hook - extrai entidades antes do chunking para entity-aware chunking"
+    },
+    "api_pydantic_dict_fix": {
+        "file": "goldenverba/server/api.py",
+        "find": "rag_config = payload.RAG.dict()",
+        "insert": """        # PATCH: Fix Pydantic/dict incompatibility for payload.RAG
+        # Ensures compatibility with both dict (runtime) and Pydantic models (validation)
+        if isinstance(payload.RAG, dict):
+            rag_config = payload.RAG
+        elif hasattr(payload.RAG, 'model_dump'):
+            rag_config = payload.RAG.model_dump()
+        else:
+            rag_config = payload.RAG.dict()""",
+        "description": "Fix AttributeError: 'dict' object has no attribute 'dict' in /api/query"
     }
 }
 
