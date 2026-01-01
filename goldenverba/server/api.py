@@ -1123,7 +1123,10 @@ async def query(payload: QueryPayload):
         # ===================================================================
         # Convert RAGConfig to dict to ensure consistent dictionary access throughout the code
         # Pydantic v2 uses model_dump(), v1 uses dict(). Supporting both just in case.
-        if hasattr(payload.RAG, "model_dump"):
+        # Also handling the case where payload.RAG is already a dict (runtime behavior)
+        if isinstance(payload.RAG, dict):
+            rag_config = payload.RAG
+        elif hasattr(payload.RAG, "model_dump"):
             rag_config = payload.RAG.model_dump()
         else:
             rag_config = payload.RAG.dict()
