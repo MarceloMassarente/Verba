@@ -32,7 +32,11 @@ WORKDIR /Verba
 # 4. Instala dependências do Backend (Python)
 RUN pip install --no-cache-dir '.'
 
-# Instala sentence-transformers (para embedder local)
+# Instala torch CPU-only ANTES de sentence-transformers
+# Isso evita baixar ~2GB de dependências CUDA desnecessárias
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Instala sentence-transformers (para embedder local) - usará torch CPU já instalado
 RUN pip install --no-cache-dir sentence-transformers || true
 
 # Instala dependências críticas para leitura de arquivos Office (PPTX, DOCX)
