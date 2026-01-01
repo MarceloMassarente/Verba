@@ -1136,14 +1136,22 @@ async def query(payload: QueryPayload):
                     preset_config = presets.get(payload.preset.replace("-", "_").lower())
                 
                 if preset_config:
-                    # Aplica preset ao EntityAware se disponível no RAG config
                     if "Retriever" in rag_config:
                         retriever = rag_config["Retriever"]
-                        if "components" in retriever and "EntityAware" in retriever.get("components", {}):
-                            # Muda retriever selecionado para EntityAware
-                            rag_config["Retriever"]["selected"] = "EntityAware"
+                        components = retriever.get("components", {})
+                        
+                        # Detecta nome correto do componente (com ou sem hífen)
+                        entity_aware_key = None
+                        if "EntityAware" in components:
+                            entity_aware_key = "EntityAware"
+                        elif "Entity-Aware" in components:
+                            entity_aware_key = "Entity-Aware"
                             
-                            entity_aware = retriever["components"]["EntityAware"]
+                        if entity_aware_key:
+                            # Muda retriever selecionado para EntityAware
+                            rag_config["Retriever"]["selected"] = entity_aware_key
+                            
+                            entity_aware = components[entity_aware_key]
                             if entity_aware and "config" in entity_aware:
                                 # Aplica cada campo do preset
                                 for key, value in preset_config.items():
