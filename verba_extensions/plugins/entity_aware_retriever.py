@@ -1927,7 +1927,13 @@ class EntityAwareRetriever(Retriever):
             msg.info(f"  ℹ️ Entidades detectadas mas sem sintaxe explícita, usando apenas para boost: {entity_texts}")
         
         # Query Expansion (Fase 1: Entidades) - antes de detectar entidades
-        enable_query_expansion = self.config.get("Enable Query Expansion", {}).get("value", True)
+        enable_query_expansion_config = self.config.get("Enable Query Expansion", {})
+        if hasattr(enable_query_expansion_config, "value"):
+            enable_query_expansion = enable_query_expansion_config.value
+        elif isinstance(enable_query_expansion_config, dict):
+            enable_query_expansion = enable_query_expansion_config.get("value", True)
+        else:
+            enable_query_expansion = True
         expanded_queries_phase1 = [query]  # Fallback: usar query original
         
         if enable_query_expansion:

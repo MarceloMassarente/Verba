@@ -1121,7 +1121,13 @@ async def query(payload: QueryPayload):
         # do preset ao EntityAware Retriever antes de executar a busca.
         # Isso permite controle stateless de qual preset usar via API.
         # ===================================================================
-        rag_config = payload.RAG
+        # Convert RAGConfig to dict to ensure consistent dictionary access throughout the code
+        # Pydantic v2 uses model_dump(), v1 uses dict(). Supporting both just in case.
+        if hasattr(payload.RAG, "model_dump"):
+            rag_config = payload.RAG.model_dump()
+        else:
+            rag_config = payload.RAG.dict()
+            
         preset_applied = None
         
         if payload.preset:
@@ -1149,21 +1155,24 @@ async def query(payload: QueryPayload):
                             
                         if entity_aware_key:
                             # Muda retriever selecionado para EntityAware
-                            rag_config["Retriever"]["selected"] = entity_aware_key
+                            retriever["selected"] = entity_aware_key
                             
                             entity_aware = components[entity_aware_key]
-                            if entity_aware and "config" in entity_aware:
+                            ea_config = entity_aware.get("config", {})
+                            
+                            if ea_config:
                                 # Aplica cada campo do preset
                                 for key, value in preset_config.items():
                                     if key in ["name", "display_name", "description", 
                                                "latency_estimate", "quality_estimate", "requirements"]:
                                         continue
-                                    
-                                    if key in entity_aware["config"]:
-                                        if isinstance(entity_aware["config"][key], dict):
-                                            entity_aware["config"][key]["value"] = value
+                                        
+                                    if key in ea_config:
+                                        # Handle Component config in dict form
+                                        if isinstance(ea_config[key], dict) and "value" in ea_config[key]:
+                                            ea_config[key]["value"] = value
                                         else:
-                                            entity_aware["config"][key] = value
+                                            ea_config[key] = value
                                 
                                 preset_applied = payload.preset
                                 msg.good(f"✅ Preset '{payload.preset}' aplicado com sucesso")
@@ -1226,11 +1235,14 @@ async def query(payload: QueryPayload):
         else:
             documents, context = result
             # Garantir que documents é uma lista
-            if documents is None:
-                documents = []
             response_content = {"error": "", "documents": documents, "context": context or ""}
             if preset_applied:
                 response_content["preset_applied"] = preset_applied
+            
+            # Temporary Debug for Presets
+            if "preset_debug" in locals():
+                response_content["preset_debug"] = preset_debug
+                
             return JSONResponse(content=response_content)
     except Exception as e:
         msg.fail(f"Query failed: {str(e)}")
