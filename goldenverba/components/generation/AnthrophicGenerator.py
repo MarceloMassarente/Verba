@@ -100,8 +100,10 @@ class AnthropicGenerator(Generator):
         context: str,
         conversation: list[dict] = [],
     ):
-        model = config.get("Model").value
-        system_message = config.get("System Message").value
+        model_config = config.get("Model")
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'claude-3-5-sonnet-20240620') if isinstance(model_config, dict) else model_config)
+        sys_config = config.get("System Message")
+        system_message = sys_config.value if hasattr(sys_config, 'value') else (sys_config.get('value', '') if isinstance(sys_config, dict) else (sys_config or ''))
         antr_key = get_environment(
             config, "API Key", "ANTHROPIC_API_KEY", "No Anthropic API Key found"
         )

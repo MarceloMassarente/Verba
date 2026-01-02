@@ -96,8 +96,10 @@ class OpenAIGenerator(Generator):
         # Atualizar modelos se necessário (quando API key for configurada)
         self.update_models_if_needed(config)
         
-        system_message = config.get("System Message").value
-        model = config.get("Model", {"value": "gpt-3.5-turbo"}).value
+        sys_config = config.get("System Message")
+        system_message = sys_config.value if hasattr(sys_config, 'value') else (sys_config.get('value', '') if isinstance(sys_config, dict) else (sys_config or ''))
+        model_config = config.get("Model", {"value": "gpt-3.5-turbo"})
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'gpt-3.5-turbo') if isinstance(model_config, dict) else model_config)
         openai_key = get_environment(
             config, "API Key", "OPENAI_API_KEY", "No OpenAI API Key found"
         )

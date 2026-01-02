@@ -59,8 +59,10 @@ class UpstageGenerator(Generator):
         context: str,
         conversation: list[dict] = [],
     ):
-        system_message = config.get("System Message").value
-        model = config.get("Model", {"value": self.DEFAULT_MODEL}).value
+        sys_config = config.get("System Message")
+        system_message = sys_config.value if hasattr(sys_config, 'value') else (sys_config.get('value', '') if isinstance(sys_config, dict) else (sys_config or ''))
+        model_config = config.get("Model", {"value": self.DEFAULT_MODEL})
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', self.DEFAULT_MODEL) if isinstance(model_config, dict) else model_config)
         api_key = get_environment(
             config, "API Key", "UPSTAGE_API_KEY", "Upstage API Key not found"
         )

@@ -48,8 +48,10 @@ class NovitaGenerator(Generator):
         context: str,
         conversation: list[dict] = [],
     ):
-        system_message = config.get("System Message").value
-        model = config.get("Model", {"value": "deepseek/deepseek_v3"}).value
+        sys_config = config.get("System Message")
+        system_message = sys_config.value if hasattr(sys_config, 'value') else (sys_config.get('value', '') if isinstance(sys_config, dict) else (sys_config or ''))
+        model_config = config.get("Model", {"value": "deepseek/deepseek_v3"})
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'deepseek/deepseek_v3') if isinstance(model_config, dict) else model_config)
         novita_key = get_environment(
             config, "API Key", "NOVITA_API_KEY", "No Novita API Key found"
         )
