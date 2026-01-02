@@ -69,12 +69,21 @@ class WindowRetriever(Retriever):
                     return 0
             except (ValueError, TypeError):
                 return 0
-        search_mode = config["Search Mode"].value
-        limit_mode = config["Limit Mode"].value
-        limit = int(config["Limit/Sensitivity"].value)
+        # Helper function to safely get config value (supports both InputConfig and dict)
+        def get_config_value(key, default):
+            item = config.get(key, {})
+            if hasattr(item, 'value'):
+                return item.value
+            elif isinstance(item, dict):
+                return item.get('value', default)
+            return default
+        
+        search_mode = get_config_value("Search Mode", "Hybrid Search")
+        limit_mode = get_config_value("Limit Mode", "Autocut")
+        limit = int(get_config_value("Limit/Sensitivity", 1))
 
-        window = max(0, min(10, int(config["Chunk Window"].value)))
-        window_threshold = max(0, min(100, int(config["Threshold"].value)))
+        window = max(0, min(10, int(get_config_value("Chunk Window", 1))))
+        window_threshold = max(0, min(100, int(get_config_value("Threshold", 80))))
         window_threshold /= 100
 
         if search_mode == "Hybrid Search":
