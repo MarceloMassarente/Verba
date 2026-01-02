@@ -1296,10 +1296,19 @@ class WeaviateManager:
             if target_vector:
                 try:
                     hybrid_kwargs["target_vector"] = target_vector
+                    msg.info(f"🔍 [Hybrid] Using target_vector='{target_vector}'")
                 except TypeError:
                     pass
 
+            msg.info(f"🔍 [Hybrid] Executing query: '{query}' with alpha={alpha}")
+            msg.info(f"🔍 [Hybrid] Kwargs keys: {list(hybrid_kwargs.keys())}")
+
             chunks = await embedder_collection.query.hybrid(**hybrid_kwargs)
+
+            if chunks and chunks.objects:
+                msg.good(f"✅ [Hybrid] Found {len(chunks.objects)} objects")
+            else:
+                msg.warn(f"⚠️ [Hybrid] Found 0 objects for query '{query}'")
 
             return chunks.objects
 
@@ -1408,7 +1417,15 @@ class WeaviateManager:
                     pass
             
             # Executa busca híbrida COM os filtros
+            msg.info(f"🔍 [HybridWithFilter] Executing query: '{query}'")
+            msg.info(f"🔍 [HybridWithFilter] Target Vector: {hybrid_kwargs.get('target_vector', 'None')}")
+            
             chunks = await embedder_collection.query.hybrid(**hybrid_kwargs)
+
+            if chunks and chunks.objects:
+                msg.good(f"✅ [HybridWithFilter] Found {len(chunks.objects)} objects")
+            else:
+                msg.warn(f"⚠️ [HybridWithFilter] Found 0 objects")
 
             return chunks.objects
 
