@@ -817,31 +817,31 @@ IMPORTANTE:
 - Se mencionar idioma, use filtro de idioma (chunk_lang)
 - **PROPRIEDADES DE FRAMEWORK (Consultoria):**
   - frameworks: Filtrar por frameworks detectados (SWOT, Porter, BCG, etc.)
-    - Exemplo: "documentos sobre SWOT" → filters: {"frameworks": ["SWOT Analysis"]}
+    - Exemplo: "documentos sobre SWOT" → filters: {{"frameworks": ["SWOT Analysis"]}}
   - companies: Filtrar por empresas mencionadas
-    - Exemplo: "sobre Apple" → filters: {"companies": ["Apple"]}
+    - Exemplo: "sobre Apple" → filters: {{"companies": ["Apple"]}}
   - persons: Filtrar por pessoas mencionadas (executivos, consultores, autores)
-    - Exemplo: "mencionando Steve Jobs" → filters: {"persons": ["Steve Jobs"]}
+    - Exemplo: "mencionando Steve Jobs" → filters: {{"persons": ["Steve Jobs"]}}
   - conceitos_negocio: Filtrar por conceitos de negócio (vantagem competitiva, proposta de valor, etc.)
-    - Exemplo: "sobre vantagem competitiva" → filters: {"conceitos_negocio": ["vantagem competitiva"]}
+    - Exemplo: "sobre vantagem competitiva" → filters: {{"conceitos_negocio": ["vantagem competitiva"]}}
   - tipo_conteudo: Filtrar por tipo de conteúdo (analise, recomendacao, acao, contexto)
-    - Exemplo: "recomendações sobre estratégia" → filters: {"tipo_conteudo": "recomendacao"}
+    - Exemplo: "recomendações sobre estratégia" → filters: {{"tipo_conteudo": "recomendacao"}}
   - sectors: Filtrar por setores/indústrias
-    - Exemplo: "setor de tecnologia" → filters: {"sectors": ["technology", "tecnologia"]}
+    - Exemplo: "setor de tecnologia" → filters: {{"sectors": ["technology", "tecnologia"]}}
 - **PROPRIEDADES V019 (Consulting/Slides):**
   - slide_position: Filtrar por posição no deck (opening, diagnostic, analysis, closing, etc.)
-    - Exemplo: "slides de diagnóstico" → filters: {"slide_position": "diagnostic"}
-    - Exemplo: "abertura da apresentação" → filters: {"slide_position": "opening"}
+    - Exemplo: "slides de diagnóstico" → filters: {{"slide_position": "diagnostic"}}
+    - Exemplo: "abertura da apresentação" → filters: {{"slide_position": "opening"}}
   - slide_type: Filtrar por tipo de slide (complex, simple, metadata)
-    - Exemplo: "slides complexos" → filters: {"slide_type": "complex"}
+    - Exemplo: "slides complexos" → filters: {{"slide_type": "complex"}}
   - pattern_genetics: Filtrar por componentes atômicos identificados (array)
-    - Exemplo: "slides com radial hub" → filters: {"pattern_genetics": ["radial_hub"]}
+    - Exemplo: "slides com radial hub" → filters: {{"pattern_genetics": ["radial_hub"]}}
   - reusability_score: Filtrar por score de reusabilidade (0-100)
-    - Exemplo: "slides reutilizáveis acima de 80" → filters: {"reusability_score": {"min": 80}}
+    - Exemplo: "slides reutilizáveis acima de 80" → filters: {{"reusability_score": {{"min": 80}}}}
   - visual_archetype: Filtrar por arquétipo visual (pyramid, matrix, flow, etc.)
-    - Exemplo: "slides tipo pirâmide" → filters: {"visual_archetype": "pyramid"}
+    - Exemplo: "slides tipo pirâmide" → filters: {{"visual_archetype": "pyramid"}}
   - semantic_bridge_quality: Filtrar por qualidade da ponte semântica (0.0-1.0)
-    - Exemplo: "slides com alta qualidade semântica acima de 0.9" → filters: {"semantic_bridge_quality": {"min": 0.9}}
+    - Exemplo: "slides com alta qualidade semântica acima de 0.9" → filters: {{"semantic_bridge_quality": {{"min": 0.9}}}}
 - **SEMPRE expanda a query semântica** - adicione termos relacionados, sinônimos, conceitos
 - Gere query keyword otimizada para BM25 (termos-chave principais)
 

@@ -30,15 +30,33 @@ class QueryExpanderPlugin:
         self.cache: Dict[str, tuple] = {}  # {query: (variations, timestamp)}
         self._generator = None
     
-    def _get_generator(self):
-        """Lazy load do generator para LLM"""
+    def _get_generator(self, preferred_generator_name: Optional[str] = None):
+        """Lazy load do generator para LLM com fallback inteligente"""
         if self._generator is None:
             try:
                 from goldenverba.components.managers import GeneratorManager
                 generator_manager = GeneratorManager()
-                # Tenta pegar primeiro generator disponível (geralmente OpenAI ou Ollama)
+                
+                # Lista de generators para tentar (em ordem de preferência)
+                generators_to_try = []
+                if preferred_generator_name:
+                    generators_to_try.append(preferred_generator_name)
+                
+                # Preferência para OpenAI (mais estável para expansão)
+                generators_to_try.extend(["OpenAI", "Anthropic", "Cohere", "Ollama"])
+                
+                # Tentar encontrar nos generators carregados
+                for gen_name in generators_to_try:
+                    if gen_name in generator_manager.generators:
+                        self._generator = generator_manager.generators[gen_name]
+                        msg.info(f"QueryExpander: Usando generator '{gen_name}'")
+                        return self._generator
+
+                # Fallback: primeiro generator disponível
                 if generator_manager.generators:
-                    self._generator = list(generator_manager.generators.values())[0]
+                    first_gen_name = list(generator_manager.generators.keys())[0]
+                    self._generator = generator_manager.generators[first_gen_name]
+                    msg.info(f"QueryExpander: Usando primeiro disponível '{first_gen_name}'")
             except Exception as e:
                 msg.debug(f"QueryExpander: Generator não disponível: {str(e)}")
         return self._generator

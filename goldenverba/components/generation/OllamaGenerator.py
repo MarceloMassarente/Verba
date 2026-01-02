@@ -61,6 +61,34 @@ class OllamaGenerator(Generator):
                 f"Unexpected error, make sure to have {model} installed: {str(e)}"
             )
 
+    async def generate(
+        self,
+        messages: List[Dict],
+        config: Dict = None,
+    ) -> str:
+        """Generate a complete response from Ollama (non-streaming)."""
+        if config is None:
+            config = self.config
+
+        model_config = config.get("Model")
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'llama3') if isinstance(model_config, dict) else model_config)
+
+        if not self.url:
+            return "Missing Ollama URL"
+
+        data = {"model": model, "messages": messages, "stream": False}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(urljoin(self.url, "/api/chat"), json=data) as response:
+                    json_data = await response.json()
+                    if "error" in json_data:
+                        return f"Error: {json_data.get('error')}"
+                    return json_data.get("message", {}).get("content", "")
+
+        except Exception as e:
+            return f"Unexpected error, make sure to have {model} installed: {str(e)}"
+
     def _prepare_messages(
         self,
         query: str,

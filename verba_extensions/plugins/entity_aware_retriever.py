@@ -1444,6 +1444,15 @@ class EntityAwareRetriever(Retriever):
         search_mode = get_config_value(config, "Search Mode", "Hybrid Search")
         limit_mode = get_config_value(config, "Limit Mode", "Fixed")
         limit = int(get_config_value(config, "Limit/Sensitivity", 10))
+        # 0. INICIALIZAÇÃO DE VARIÁVEIS (Defesa contra UnboundLocalError)
+        builder_entities = []
+        detected_frameworks = []
+        detected_concepts = []
+        detected_companies = []
+        detected_sectors = []
+        detected_content_type = None
+        final_entity_ids = []
+        
         # Ler reranker_top_k da configuração
         reranker_top_k = int(get_config_value(config, "Reranker Top K", 5))
         
@@ -2059,29 +2068,40 @@ class EntityAwareRetriever(Retriever):
         # Detectar frameworks mencionados na query
         # (variáveis já inicializadas no topo do método)
         
-        try:
-            from verba_extensions.utils.framework_detector import get_framework_detector
-            framework_detector = get_framework_detector()
-            framework_data = await framework_detector.detect_frameworks(
-                query,
-                extract_concepts=True,
-                extract_metrics=False,  # Métricas não usadas no reranking por enquanto
-                classify_content=True
-            )
-            detected_frameworks = framework_data.get("frameworks", [])
-            detected_companies = framework_data.get("companies", [])
-            detected_sectors = framework_data.get("sectors", [])
-            detected_concepts = framework_data.get("conceitos_negocio", [])
-            detected_content_type = framework_data.get("tipo_conteudo")
-            
-            if detected_frameworks:
-                msg.info(f"  🔍 Frameworks detectados na query: {detected_frameworks}")
-            if detected_companies:
-                msg.info(f"  🔍 Empresas detectadas na query: {detected_companies}")
-            if detected_sectors:
-                msg.info(f"  🔍 Setores detectados na query: {detected_sectors}")
-        except Exception as e:
-            msg.debug(f"  Erro ao detectar frameworks na query (não crítico): {str(e)}")
+        # Tentar detectar frameworks apenas se o QueryBuilder não já forneceu filtros detalhados
+        # Priorizar novos plugins (RAG 2.0)
+        if not query_filters_from_builder or not any(query_filters_from_builder.get(k) for k in ["frameworks", "companies", "persons", "sectors"]):
+            try:
+                from verba_extensions.utils.framework_detector import get_framework_detector
+                framework_detector = get_framework_detector()
+                framework_data = await framework_detector.detect_frameworks(
+                    query,
+                    extract_concepts=True,
+                    extract_metrics=False,  # Métricas não usadas no reranking por enquanto
+                    classify_content=True
+                )
+                detected_frameworks = framework_data.get("frameworks", [])
+                detected_companies = framework_data.get("companies", [])
+                detected_sectors = framework_data.get("sectors", [])
+                detected_concepts = framework_data.get("conceitos_negocio", [])
+                detected_content_type = framework_data.get("tipo_conteudo")
+                
+                if detected_frameworks:
+                    msg.info(f"  🔍 Frameworks detectados na query: {detected_frameworks}")
+                if detected_companies:
+                    msg.info(f"  🔍 Empresas detectadas na query: {detected_companies}")
+                if detected_sectors:
+                    msg.info(f"  🔍 Setores detectados na query: {detected_sectors}")
+            except Exception as e:
+                msg.debug(f"  Erro ao detectar frameworks na query (não crítico): {str(e)}")
+        else:
+            # Usar o que veio do QueryBuilder
+            detected_frameworks = query_filters_from_builder.get("frameworks", [])
+            detected_companies = query_filters_from_builder.get("companies", [])
+            detected_sectors = query_filters_from_builder.get("sectors", [])
+            detected_concepts = query_filters_from_builder.get("conceitos_negocio", [])
+            detected_content_type = query_filters_from_builder.get("tipo_conteudo")
+            msg.info("  ℹ️ Usando detecção de frameworks/entidades do QueryBuilder (Novo)")
         
         # Para compatibilidade: entity_ids usado para filtro
         entity_ids = final_entity_ids
@@ -3239,6 +3259,9 @@ class EntityAwareRetriever(Retriever):
                     elif isinstance(reranker_preset_config, str):
                         reranker_preset = reranker_preset_config
                 
+                # Converte chunks Weaviate para Chunk objects para reranking
+                from goldenverba.components.document import Chunk
+                chunk_objects = []
                 if reranker_preset and reranker_preset != "custom":
                     # Se preset é "auto", seleciona baseado na query
                     if reranker_preset == "auto":
@@ -3254,7 +3277,6 @@ class EntityAwareRetriever(Retriever):
                             msg.good(f"  ✅ Preset '{selected_preset}' aplicado ao reranker")
                 
                 # Converte chunks Weaviate para Chunk objects para reranking
-                chunk_objects = []
                 for chunk in chunks:
                     if hasattr(chunk, "properties"):
                         chunk_obj = Chunk(
