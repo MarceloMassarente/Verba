@@ -1293,10 +1293,12 @@ class WeaviateManager:
                 hybrid_kwargs["limit"] = limit
 
             # Add target_vector if specified
-            if target_vector:
+            final_target_vector = target_vector if target_vector else "default"
+            
+            if final_target_vector:
                 try:
-                    hybrid_kwargs["target_vector"] = target_vector
-                    msg.info(f"🔍 [Hybrid] Using target_vector='{target_vector}'")
+                    hybrid_kwargs["target_vector"] = final_target_vector
+                    msg.info(f"🔍 [Hybrid] Using target_vector='{final_target_vector}'")
                 except TypeError:
                     pass
 
@@ -1385,9 +1387,12 @@ class WeaviateManager:
             }
             
             # Adicionar target_vector se especificado (para named vectors)
-            if target_vector:
+            final_target_vector = target_vector if target_vector else "default"
+            
+            if final_target_vector:
                 try:
-                    hybrid_kwargs["target_vector"] = target_vector
+                    hybrid_kwargs["target_vector"] = final_target_vector
+                    # msg.info(f"🔍 [HybridWithFilter] Using target_vector='{final_target_vector}'")
                 except TypeError:
                     # Se target_vector não suportado, ignora
                     pass

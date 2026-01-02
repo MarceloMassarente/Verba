@@ -521,7 +521,7 @@ class EntityAwareRetriever(Retriever):
             )
             
             if not phase1_chunks:
-                msg.warn(f"    Fase 1: Nenhum chunk encontrado com entidades")
+                msg.warn(f"    Fase 1: Nenhum chunk encontrado com entidades (Query: '{search_query}', Labels: {labels})")
                 return []
             
             msg.good(f"    Fase 1: {len(phase1_chunks)} chunks no subespaço")
@@ -687,9 +687,11 @@ class EntityAwareRetriever(Retriever):
             if phase2_chunks:
                 msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados (fallback)")
                 debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
+            if phase2_chunks and len(phase2_chunks) > 0:
+                msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados via Multi-Vector")
                 return phase2_chunks
             else:
-                msg.warn(f"    Fase 2: Nenhum chunk retornado")
+                msg.warn(f"    Fase 2: Nenhum chunk retornado (Multi-Vector retornou vazio)")
                 return []
                 
         except Exception as e:
