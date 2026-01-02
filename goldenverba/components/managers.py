@@ -1317,7 +1317,7 @@ class WeaviateManager:
         alpha: float = 0.5,
         fusion_type: Optional[str] = None,  # "RELATIVE_SCORE" ou None
         query_properties: Optional[list[str]] = None,  # Propriedades para BM25
-        target_vector: Optional[Any] = None,  # Named vector ou TargetVectors (para named vectors)
+        target_vector: str = "default",  # Named vector or "default" (required for named vectors)
     ):
         """
         Hybrid search com filtros entity-aware aplicados PRIMEIRO.
