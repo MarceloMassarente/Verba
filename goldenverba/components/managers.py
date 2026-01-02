@@ -1255,7 +1255,8 @@ class WeaviateManager:
         document_uuids: list[str],
         alpha: float = 0.5,
         fusion_type: Optional[str] = None,  # "RELATIVE_SCORE" ou None (usa padrão Weaviate)
-        query_properties: Optional[list[str]] = None,  # Propriedades para BM25 (ex: ["content", "title^2"])
+        query_properties: Optional[list[str]] = None,  # Propriedades para BM25
+        target_vector: str = "default",  # Default to "default" for named vectors
     ):
         if await self.verify_embedding_collection(client, embedder):
             embedder_collection = client.collections.get(self.embedding_table[embedder])
@@ -1276,25 +1277,29 @@ class WeaviateManager:
                     apply_filters = apply_filters & filter
             else:
                 apply_filters = None
+            
+            # Prepare arguments
+            hybrid_kwargs = {
+                "query": query,
+                "vector": vector,
+                "alpha": alpha,
+                "return_metadata": MetadataQuery(score=True, explain_score=False),
+                "filters": apply_filters,
+            }
 
             if limit_mode == "Autocut":
-                chunks = await embedder_collection.query.hybrid(
-                    query=query,
-                    vector=vector,
-                    alpha=alpha,
-                    auto_limit=limit,
-                    return_metadata=MetadataQuery(score=True, explain_score=False),
-                    filters=apply_filters,
-                )
+                hybrid_kwargs["auto_limit"] = limit
             else:
-                chunks = await embedder_collection.query.hybrid(
-                    query=query,
-                    vector=vector,
-                    alpha=alpha,
-                    limit=limit,
-                    return_metadata=MetadataQuery(score=True, explain_score=False),
-                    filters=apply_filters,
-                )
+                hybrid_kwargs["limit"] = limit
+
+            # Add target_vector if specified
+            if target_vector:
+                try:
+                    hybrid_kwargs["target_vector"] = target_vector
+                except TypeError:
+                    pass
+
+            chunks = await embedder_collection.query.hybrid(**hybrid_kwargs)
 
             return chunks.objects
 
