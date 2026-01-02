@@ -1244,8 +1244,11 @@ class VerbaManager:
         labels: list[str] = [],
         document_uuids: list[str] = [],
     ):
-        retriever = rag_config["Retriever"].selected
-        embedder = rag_config["Embedder"].selected
+        # Support both dict and Pydantic object access
+        retriever_section = rag_config["Retriever"]
+        embedder_section = rag_config["Embedder"]
+        retriever = retriever_section["selected"] if isinstance(retriever_section, dict) else retriever_section.selected
+        embedder = embedder_section["selected"] if isinstance(embedder_section, dict) else embedder_section.selected
 
         await self.weaviate_manager.add_suggestion(client, query)
 
