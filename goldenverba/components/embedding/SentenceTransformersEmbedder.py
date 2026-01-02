@@ -113,7 +113,14 @@ class SentenceTransformersEmbedder(Embedding):
                 except ImportError:
                     pass
             
-            model_name = config.get("Model").value
+            # Handle both InputConfig objects and dict types
+            model_config = config.get("Model")
+            if hasattr(model_config, 'value'):
+                model_name = model_config.value
+            elif isinstance(model_config, dict):
+                model_name = model_config.get('value', 'all-MiniLM-L6-v2')
+            else:
+                model_name = model_config if model_config else 'all-MiniLM-L6-v2'
             
             # Se cache disponível e apenas 1 item (query), usar cache
             if use_cache:

@@ -64,7 +64,8 @@ class OpenAIEmbedder(Embedding):
 
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
         """Vectorize the input content using OpenAI's API with caching."""
-        model = config.get("Model", {"value": "text-embedding-ada-002"}).value
+        model_config = config.get("Model", {"value": "text-embedding-ada-002"})
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'text-embedding-ada-002') if isinstance(model_config, dict) else model_config)
         key_name = (
             "OPENAI_EMBED_API_KEY"
             if get_token("OPENAI_EMBED_API_KEY")

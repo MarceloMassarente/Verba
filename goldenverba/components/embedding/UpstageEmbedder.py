@@ -54,7 +54,8 @@ class UpstageEmbedder(Embedding):
 
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
         """Vectorize the input content using Upstage's API."""
-        model = config.get("Model", {"value": "embedding-query"}).value
+        model_config = config.get("Model", {"value": "embedding-query"})
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'embedding-query') if isinstance(model_config, dict) else model_config)
         api_key = get_environment(
             config, "API Key", "UPSTAGE_API_KEY", "No Upstage API Key found"
         )

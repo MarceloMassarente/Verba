@@ -38,7 +38,8 @@ class CohereEmbedder(Embedding):
             )
 
     async def vectorize(self, config: dict, content: list[str]) -> list[float]:
-        model = config.get("Model", "embed-english-v3.0").value
+        model_config = config.get("Model", "embed-english-v3.0")
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'embed-english-v3.0') if isinstance(model_config, dict) else model_config)
         api_key = get_environment(
             config, "API Key", "COHERE_API_KEY", "No Cohere API Key found"
         )

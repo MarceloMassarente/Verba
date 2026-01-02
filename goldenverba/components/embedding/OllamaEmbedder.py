@@ -29,7 +29,8 @@ class OllamaEmbedder(Embedding):
 
     async def vectorize(self, config: dict, content: list[str]) -> list[float]:
 
-        model = config.get("Model").value
+        model_config = config.get("Model")
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'llama3') if isinstance(model_config, dict) else model_config)
 
         data = {"model": model, "input": content}
 

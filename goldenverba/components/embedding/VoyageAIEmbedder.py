@@ -52,7 +52,8 @@ class VoyageAIEmbedder(Embedding):
 
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
         """Vectorize the input content using VoyageAI's API."""
-        model = config.get("Model").value
+        model_config = config.get("Model")
+        model = model_config.value if hasattr(model_config, 'value') else (model_config.get('value', 'voyage-2') if isinstance(model_config, dict) else model_config)
         api_key = get_environment(
             config, "API Key", "VOYAGE_API_KEY", "No VoyageAI API Key found"
         )
