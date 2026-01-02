@@ -935,14 +935,16 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
                     response_text = response_text[:-3]
                 response_text = response_text.strip()
                 
-                # Remover comentários de linha (//) e de bloco (/* */) do JSON
-                import re
-                # Remove comentários de linha (// ...)
-                response_text = re.sub(r'//.*?$', '', response_text, flags=re.MULTILINE)
-                # Remove comentários de bloco (/* ... */)
-                response_text = re.sub(r'/\*.*?\*/', '', response_text, flags=re.DOTALL)
-                
-                strategy = json.loads(response_text)
+                # Use safe_json_parse for robust parsing
+                try:
+                    from verba_extensions.utils.json_utils import safe_json_parse
+                    strategy = safe_json_parse(response_text, default={}, raise_on_error=True)
+                except ImportError:
+                    # Fallback: manual sanitization
+                    import re
+                    response_text = re.sub(r'//.*?$', '', response_text, flags=re.MULTILINE)
+                    response_text = re.sub(r'/\*.*?\*/', '', response_text, flags=re.DOTALL)
+                    strategy = json.loads(response_text)
             else:
                 raise ValueError("Empty response from LLM")
             
@@ -950,7 +952,7 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
             
         except json.JSONDecodeError as e:
             msg.warn(f"Erro ao decodificar JSON do LLM: {e}")
-            msg.warn(f"Resposta recebida: {response_text[:500]}")
+            msg.warn(f"Resposta recebida: {response_text[:500] if response_text else 'N/A'}")
             raise
         except Exception as e:
             msg.warn(f"Erro ao chamar LLM: {e}")

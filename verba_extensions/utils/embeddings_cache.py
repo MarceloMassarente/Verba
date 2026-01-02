@@ -52,16 +52,22 @@ Documentação completa: GUIA_INTEGRACAO_RAG2_COMPONENTES.md
 from __future__ import annotations
 
 import hashlib
-from typing import Callable, List, Optional
+import time
+from typing import Callable, List, Optional, Dict, Any
 
 
-# Cache global in-memory
-_embeddings_cache: dict[str, List[float]] = {}
+# Cache global in-memory with TTL support
+_embeddings_cache: Dict[str, Dict[str, Any]] = {}  # {key: {"embedding": [...], "timestamp": float}}
 _cache_stats = {
     "hits": 0,
     "misses": 0,
-    "total_size_bytes": 0
+    "total_size_bytes": 0,
+    "evictions": 0
 }
+
+# Cache configuration
+CACHE_TTL_SECONDS = 3600  # 1 hour TTL
+MAX_CACHE_ENTRIES = 10000  # LRU limit
 
 
 def get_cache_key(text: str, doc_uuid: str, parent_type: str = "chunk") -> str:
@@ -81,6 +87,22 @@ def get_cache_key(text: str, doc_uuid: str, parent_type: str = "chunk") -> str:
     return f"{doc_uuid}|{parent_type}|{text_hash}"
 
 
+def _evict_if_needed() -> None:
+    """Evict oldest entries if cache exceeds max size."""
+    global _embeddings_cache, _cache_stats
+    
+    if len(_embeddings_cache) < MAX_CACHE_ENTRIES:
+        return
+    
+    # Sort by timestamp and remove oldest 10%
+    entries = sorted(_embeddings_cache.items(), key=lambda x: x[1].get("timestamp", 0))
+    to_remove = len(entries) // 10 or 1
+    
+    for key, _ in entries[:to_remove]:
+        del _embeddings_cache[key]
+        _cache_stats["evictions"] += 1
+
+
 def get_cached_embedding(
     text: str,
     cache_key: str,
@@ -88,7 +110,7 @@ def get_cached_embedding(
     enable_cache: bool = True
 ) -> tuple[List[float], bool]:
     """
-    Obtém embedding com cache determinístico
+    Obtém embedding com cache determinístico e TTL
     
     Args:
         text: Texto a embeds
@@ -100,17 +122,29 @@ def get_cached_embedding(
         Tupla (embedding, was_cached)
         - was_cached: True se veio do cache, False se gerado novo
     """
+    global _cache_stats
+    
     if not enable_cache:
         return embed_fn(text), False
     
-    # Verifica cache
+    now = time.time()
+    
+    # Verifica cache com TTL
     if cache_key in _embeddings_cache:
-        _cache_stats["hits"] += 1
-        return _embeddings_cache[cache_key], True
+        entry = _embeddings_cache[cache_key]
+        if now - entry.get("timestamp", 0) < CACHE_TTL_SECONDS:
+            _cache_stats["hits"] += 1
+            return entry["embedding"], True
+        else:
+            # Expired - remove
+            del _embeddings_cache[cache_key]
+    
+    # Evict if needed before adding new entry
+    _evict_if_needed()
     
     # Cache miss: gera embedding
     embedding = embed_fn(text)
-    _embeddings_cache[cache_key] = embedding
+    _embeddings_cache[cache_key] = {"embedding": embedding, "timestamp": now}
     _cache_stats["misses"] += 1
     _cache_stats["total_size_bytes"] += len(embedding) * 8  # float64 = 8 bytes
     
@@ -122,7 +156,7 @@ def get_cache_stats() -> dict[str, int | float]:
     Retorna estatísticas do cache
     
     Returns:
-        Dict com hits, misses, total_size_bytes, hit_rate
+        Dict com hits, misses, total_size_bytes, hit_rate, evictions
     """
     hits = _cache_stats["hits"]
     misses = _cache_stats["misses"]
@@ -131,10 +165,13 @@ def get_cache_stats() -> dict[str, int | float]:
     return {
         "hits": hits,
         "misses": misses,
+        "evictions": _cache_stats.get("evictions", 0),
         "hit_rate": (hits / total * 100) if total > 0 else 0.0,
         "total_size_bytes": _cache_stats["total_size_bytes"],
         "cache_size_kb": _cache_stats["total_size_bytes"] / 1024,
-        "cached_embeddings": len(_embeddings_cache)
+        "cached_embeddings": len(_embeddings_cache),
+        "ttl_seconds": CACHE_TTL_SECONDS,
+        "max_entries": MAX_CACHE_ENTRIES
     }
 
 

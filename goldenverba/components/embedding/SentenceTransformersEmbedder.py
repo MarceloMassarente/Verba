@@ -74,6 +74,7 @@ class SentenceTransformersEmbedder(Embedding):
         """
         try:
             import torch
+            from wasabi import msg
             
             # Verificar se CUDA está disponível (mas usar CPU por default)
             if torch.cuda.is_available():
@@ -81,12 +82,17 @@ class SentenceTransformersEmbedder(Embedding):
                 try:
                     # Test CUDA
                     _ = torch.zeros(1).to("cuda")
+                    device_name = torch.cuda.get_device_name(0)
+                    msg.info(f"[SentenceTransformers] Using CUDA: {device_name}")
                     return "cuda"
-                except Exception:
+                except Exception as e:
                     # Fallback para CPU se CUDA falhar
-                    pass
-        except Exception:
-            pass
+                    msg.warn(f"[SentenceTransformers] CUDA available but failed: {e}. Using CPU.")
+        except ImportError:
+            pass  # PyTorch not available
+        except Exception as e:
+            from wasabi import msg
+            msg.warn(f"[SentenceTransformers] Device detection error: {e}. Using CPU.")
         
         return "cpu"
 

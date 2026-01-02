@@ -69,19 +69,16 @@ class UpstageEmbedder(Embedding):
         }
         payload = {"input": content, "model": model}
 
-        # Convert payload to BytesIO object
-        payload_bytes = json.dumps(payload).encode("utf-8")
-        payload_io = io.BytesIO(payload_bytes)
-
         async with aiohttp.ClientSession() as session:
             from verba_extensions.utils.retry import retry_with_backoff
             
             # Função interna para fazer requisição com retry
+            # Note: Using json= instead of data=BytesIO for proper retry support
             async def make_request():
                 async with session.post(
                     f"{base_url}/embeddings",
                     headers=headers,
-                    data=payload_io,
+                    json=payload,  # Uses json= for automatic serialization and retry support
                     timeout=30,
                 ) as response:
                     response.raise_for_status()

@@ -315,8 +315,16 @@ Confie confiança baixa (0.5-0.7) para inferências, alta (0.8-1.0) para mençõ
             Dicionário com metadata validado
         """
         try:
-            # Tenta fazer parse do JSON
-            data = json.loads(response)
+            # Use safe_json_parse for robust parsing
+            try:
+                from verba_extensions.utils.json_utils import safe_json_parse
+                data = safe_json_parse(response, default=None, raise_on_error=True)
+            except ImportError:
+                # Fallback to direct parsing
+                data = json.loads(response)
+            
+            if data is None:
+                raise json.JSONDecodeError("Empty result", response, 0)
             
             # Valida com Pydantic
             enriched = EnrichedMetadata(**data)
