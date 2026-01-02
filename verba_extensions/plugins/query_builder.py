@@ -540,9 +540,17 @@ class QueryBuilderPlugin:
                     from goldenverba.components.managers import GeneratorManager
                     generator_manager = GeneratorManager()
                     
-                    generator_name = rag_config["Generator"].selected
-                    preferred_generator_name = generator_name  # Guardar para fallback
-                    generator_config = rag_config["Generator"].components[generator_name].config
+                    # Support both dict and Pydantic object access
+                    generator_section = rag_config["Generator"]
+                    if isinstance(generator_section, dict):
+                        generator_name = generator_section.get("selected", "")
+                        components = generator_section.get("components", {})
+                        component = components.get(generator_name, {})
+                        generator_config = component.get("config", {}) if isinstance(component, dict) else component.config
+                    else:
+                        generator_name = generator_section.selected
+                        generator_config = generator_section.components[generator_name].config
+                    preferred_generator_name = generator_name
                     
                     if generator_name in generator_manager.generators:
                         generator = generator_manager.generators[generator_name]
