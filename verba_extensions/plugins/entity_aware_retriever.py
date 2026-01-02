@@ -65,6 +65,44 @@ def safe_config_to_dict(config):
         return vars(config) if hasattr(config, '__dict__') else {}
 
 
+def get_config_value(config: dict, key: str, default=None):
+    """
+    Safely extracts a value from config, supporting both InputConfig objects and dicts.
+    
+    Works with:
+    - config[key].value (InputConfig from Pydantic)
+    - config[key]["value"] (dict loaded from database)
+    - config[key] directly (if it's a simple value)
+    
+    Args:
+        config: Configuration dict
+        key: Config key to access
+        default: Default value if key not found or value is None
+        
+    Returns:
+        The extracted value or default
+    """
+    if key not in config:
+        return default
+    
+    item = config[key]
+    
+    # If item is None, return default
+    if item is None:
+        return default
+    
+    # If item has .value attribute (InputConfig or similar Pydantic model)
+    if hasattr(item, 'value'):
+        return item.value if item.value is not None else default
+    
+    # If item is a dict with 'value' key
+    if isinstance(item, dict):
+        return item.get('value', default)
+    
+    # If item is already a simple value (str, int, float, bool)
+    return item
+
+
 # Cache de verificação de schema ETL (evita verificar repetidamente)
 _etl_schema_cache: Dict[str, bool] = {}
 
@@ -1391,16 +1429,12 @@ class EntityAwareRetriever(Retriever):
         # Usar validated_config no resto do método
         config = validated_config
         
-        # CONFIG
-        search_mode = config["Search Mode"].value
-        limit_mode = config["Limit Mode"].value
-        limit = int(config["Limit/Sensitivity"].value)
+        # CONFIG - using get_config_value for safe access (supports both InputConfig and dict)
+        search_mode = get_config_value(config, "Search Mode", "Hybrid Search")
+        limit_mode = get_config_value(config, "Limit Mode", "Fixed")
+        limit = int(get_config_value(config, "Limit/Sensitivity", 10))
         # Ler reranker_top_k da configuração
-        reranker_top_k_config = config.get("Reranker Top K", {})
-        if reranker_top_k_config and hasattr(reranker_top_k_config, 'value'):
-            reranker_top_k = int(reranker_top_k_config.value)
-        else:
-            reranker_top_k = 5  # Default
+        reranker_top_k = int(get_config_value(config, "Reranker Top K", 5))
         
         # Verificar se não está confundindo com Limit/Sensitivity
         if reranker_top_k == limit and limit != 5:
@@ -1415,7 +1449,7 @@ class EntityAwareRetriever(Retriever):
             msg.warn(f"  ⚠️ ATENÇÃO: reranker_top_k={reranker_top_k} está limitando demais! Considere aumentar para 5-10 na interface.")
         elif reranker_top_k < 5:
             msg.warn(f"  ⚠️ reranker_top_k={reranker_top_k} pode ser muito baixo. Recomendado: 5-10")
-        alpha_value = config["Alpha"].value
+        alpha_value = get_config_value(config, "Alpha", "0.6")
         alpha = float(alpha_value) if isinstance(alpha_value, str) else float(alpha_value)
         
         # DEBUG INFO: Coletar informações de debug para exibir ao usuário (DEPOIS de definir alpha)
@@ -1431,14 +1465,15 @@ class EntityAwareRetriever(Retriever):
             "search_mode": None,
             "explanation": None,
         }
-        enable_entity_filter = config.get("Enable Entity Filter", {}).value if isinstance(config.get("Enable Entity Filter"), InputConfig) else True
-        entity_filter_mode = config.get("Entity Filter Mode", {}).value if isinstance(config.get("Entity Filter Mode"), InputConfig) else "adaptive"
-        enable_semantic = config.get("Enable Semantic Search", {}).value if isinstance(config.get("Enable Semantic Search"), InputConfig) else True
-        enable_query_rewriting = config.get("Enable Query Rewriting", {}).value if isinstance(config.get("Enable Query Rewriting"), InputConfig) else False
-        cache_ttl = int(config.get("Query Rewriter Cache TTL", {}).value) if isinstance(config.get("Query Rewriter Cache TTL"), InputConfig) else 3600
-        enable_temporal_filter = config.get("Enable Temporal Filter", {}).value if isinstance(config.get("Enable Temporal Filter"), InputConfig) else True
-        date_field_name = config.get("Date Field Name", {}).value if isinstance(config.get("Date Field Name"), InputConfig) else "chunk_date"
-        enable_aggregation = config.get("Enable Aggregation", {}).value if isinstance(config.get("Enable Aggregation"), InputConfig) else False
+        # Using get_config_value for safe access (supports both InputConfig and dict configs)
+        enable_entity_filter = get_config_value(config, "Enable Entity Filter", True)
+        entity_filter_mode = get_config_value(config, "Entity Filter Mode", "adaptive")
+        enable_semantic = get_config_value(config, "Enable Semantic Search", True)
+        enable_query_rewriting = get_config_value(config, "Enable Query Rewriting", False)
+        cache_ttl = int(get_config_value(config, "Query Rewriter Cache TTL", 3600))
+        enable_temporal_filter = get_config_value(config, "Enable Temporal Filter", True)
+        date_field_name = get_config_value(config, "Date Field Name", "chunk_date")
+        enable_aggregation = get_config_value(config, "Enable Aggregation", False)
         
         # FALLBACK GRACIOSO: Verificar se schema tem propriedades ETL
         # Se não tiver, desabilita entity filtering automaticamente
@@ -1460,15 +1495,15 @@ class EntityAwareRetriever(Retriever):
                 msg.debug(f"  Erro ao verificar ETL schema (não crítico): {str(e)}")
         
         # RAG 2.0: Intelligent Cache
-        enable_intelligent_cache = config.get("Enable Intelligent Cache", {}).value if isinstance(config.get("Enable Intelligent Cache"), InputConfig) else False
-        cache_similarity_threshold_str = config.get("Cache Similarity Threshold", {}).value if isinstance(config.get("Cache Similarity Threshold"), InputConfig) else "0.85"
+        enable_intelligent_cache = get_config_value(config, "Enable Intelligent Cache", False)
+        cache_similarity_threshold_str = get_config_value(config, "Cache Similarity Threshold", "0.85")
         cache_similarity_threshold = float(cache_similarity_threshold_str) if isinstance(cache_similarity_threshold_str, str) else float(cache_similarity_threshold_str)
         
         # RAG 2.0: Dynamic Reranking
-        enable_dynamic_reranking = config.get("Enable Dynamic Reranking", {}).value if isinstance(config.get("Enable Dynamic Reranking"), InputConfig) else False
-        reranking_recency_weight_str = config.get("Reranking Recency Weight", {}).value if isinstance(config.get("Reranking Recency Weight"), InputConfig) else "0.15"
+        enable_dynamic_reranking = get_config_value(config, "Enable Dynamic Reranking", False)
+        reranking_recency_weight_str = get_config_value(config, "Reranking Recency Weight", "0.15")
         reranking_recency_weight = float(reranking_recency_weight_str) if isinstance(reranking_recency_weight_str, str) else float(reranking_recency_weight_str)
-        reranking_entity_weight_str = config.get("Reranking Entity Weight", {}).value if isinstance(config.get("Reranking Entity Weight"), InputConfig) else "0.15"
+        reranking_entity_weight_str = get_config_value(config, "Reranking Entity Weight", "0.15")
         reranking_entity_weight = float(reranking_entity_weight_str) if isinstance(reranking_entity_weight_str, str) else float(reranking_entity_weight_str)
         
         msg.info(f"🎯 Entity Filter Mode: {entity_filter_mode}")
@@ -2115,7 +2150,7 @@ class EntityAwareRetriever(Retriever):
                 msg.good(f"  Aplicando filtro de chunk: {entity_property} = {chunk_level_entities}")
         
         # 2.1. FILTRO DE IDIOMA (Bilingual Filter)
-        enable_lang_filter = config.get("Enable Language Filter", {}).value if isinstance(config.get("Enable Language Filter"), InputConfig) else True
+        enable_lang_filter = get_config_value(config, "Enable Language Filter", True)
         lang_filter = None
         
         # Se QueryBuilder forneceu language, usar ele
@@ -2535,7 +2570,7 @@ class EntityAwareRetriever(Retriever):
         expanded_query_normal = search_query
         
         # 3.5. VERIFICAR SE DEVE USAR MULTI-VECTOR SEARCH
-        enable_multi_vector = config.get("Enable Multi-Vector Search", {}).value if isinstance(config.get("Enable Multi-Vector Search"), InputConfig) else False
+        enable_multi_vector = get_config_value(config, "Enable Multi-Vector Search", False)
         use_multi_vector = False
         vectors_to_search = []
         
