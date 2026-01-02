@@ -98,6 +98,8 @@ class VerbaManager:
                 if os.getenv("WEAVIATE_URL_VERBA")
                 else ""
             ),
+            # DEBUG: Log detected deployment vars
+            "DEBUG_URL_SEEN": os.getenv("WEAVIATE_URL_VERBA", "NOT_SET"),
             "WEAVIATE_API_KEY_VERBA": (
                 os.getenv("WEAVIATE_API_KEY_VERBA")
                 if os.getenv("WEAVIATE_API_KEY_VERBA")
@@ -1428,6 +1430,11 @@ class ClientManager:
 
         if not _credentials.url and not _credentials.key:
             _credentials.url = os.environ.get("WEAVIATE_URL_VERBA", "")
+            
+            # DEBUG: Log the environment variable state
+            msg.info(f"🔍 [DEBUG] connect() called. Deployment: {_credentials.deployment}")
+            msg.info(f"🔍 [DEBUG] os.getenv('WEAVIATE_URL_VERBA') = '{os.getenv('WEAVIATE_URL_VERBA')}'")
+            
             _credentials.key = os.environ.get("WEAVIATE_API_KEY_VERBA", "")
 
         cred_hash = self.hash_credentials(_credentials)

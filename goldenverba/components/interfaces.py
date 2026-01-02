@@ -28,7 +28,12 @@ class VerbaComponent:
     def get_meta(self, envs, libs) -> dict:
 
         if len(self.config) > 0:
-            config = {_c: self.config[_c].model_dump() for _c in self.config}
+            config = {}
+            for _c in self.config:
+                if hasattr(self.config[_c], "model_dump"):
+                    config[_c] = self.config[_c].model_dump()
+                else:
+                    config[_c] = self.config[_c]
         else:
             config = {}
 

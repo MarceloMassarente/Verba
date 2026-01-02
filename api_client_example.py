@@ -27,9 +27,9 @@ HEADERS = {
 
 # Credenciais - 'Local' usa as env vars do Railway
 CREDENTIALS = {
-    "deployment": "Local",
-    "url": "",
-    "key": ""
+    "deployment": "Weaviate",
+    "url": "http://weaviate.railway.internal:8080",
+    "key": ""  # Leave empty if no auth is configured on internal network
 }
 
 
