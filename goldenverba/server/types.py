@@ -226,6 +226,28 @@ class ApplyRerankerPresetPayload(BaseModel):
     credentials: Credentials
 
 
+class ExternalQueryPayload(BaseModel):
+    """
+    Payload simplificado para endpoint /api/external/query.
+    
+    Este endpoint carrega automaticamente o RAG config do servidor,
+    mantendo todas as capacidades avançadas de retrieval e reranking.
+    
+    Attributes:
+        query: Texto da busca
+        preset: (Optional) Preset a aplicar: speed, balanced, max_quality,
+                consulting_frameworks, company_research, sector_analysis
+        labels: (Optional) Labels para filtrar documentos
+        documentFilter: (Optional) Filtros de documentos específicos
+        credentials: Credenciais de conexão Weaviate
+    """
+    query: str
+    preset: Optional[str] = None
+    labels: Optional[list[str]] = None
+    documentFilter: Optional[list[DocumentFilter]] = None
+    credentials: Credentials
+
+
 class SetUserConfigPayload(BaseModel):
     user_config: dict
     credentials: Credentials

@@ -64,6 +64,7 @@ from goldenverba.server.types import (
     GetRerankerPresetsPayload,
     ApplyRerankerPresetPayload,
     GetPresetConfigPayload,
+    ExternalQueryPayload,
 )
 
 load_dotenv()
@@ -1252,6 +1253,151 @@ async def query(payload: QueryPayload):
         import traceback
         msg.fail(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
+            content={"error": str(e), "documents": [], "context": ""}
+        )
+
+
+# =============================================================================
+# EXTERNAL API ENDPOINT - Full functionality for external system integration
+# =============================================================================
+
+@app.post("/api/external/query")
+async def external_query(payload: ExternalQueryPayload):
+    """
+    Endpoint para acesso externo completo à API de busca.
+    
+    Este endpoint carrega automaticamente o RAG config do servidor,
+    mantendo todas as capacidades avançadas de retrieval e reranking
+    do EntityAware Retriever.
+    
+    Args:
+        query: Texto da busca
+        preset: (Optional) speed, balanced, max_quality,
+                consulting_frameworks, company_research, sector_analysis
+        labels: (Optional) Labels para filtrar documentos
+        documentFilter: (Optional) Filtros de documentos específicos
+        credentials: Credenciais de conexão
+    
+    Returns:
+        documents: Lista de documentos/chunks encontrados
+        context: Contexto agregado para RAG
+        preset_applied: Nome do preset aplicado (se houver)
+    """
+    msg.good(f"[EXTERNAL] Received query: {payload.query}")
+    try:
+        # Validação básica
+        if not payload.query or not payload.query.strip():
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "Query cannot be empty",
+                    "documents": [],
+                    "context": ""
+                }
+            )
+        
+        # Conectar ao Weaviate
+        client = await client_manager.connect(payload.credentials)
+        
+        # IMPORTANTE: Carregar RAG config do servidor
+        # Isso garante que temos a estrutura completa com todos os campos obrigatórios
+        rag_config = await manager.load_rag_config(client)
+        
+        if not rag_config:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Failed to load RAG configuration from server",
+                    "documents": [],
+                    "context": ""
+                }
+            )
+        
+        msg.info(f"[EXTERNAL] Loaded RAG config with components: {list(rag_config.keys())}")
+        
+        # Processar filtros
+        documents_uuid = []
+        if payload.documentFilter:
+            documents_uuid = [doc.uuid for doc in payload.documentFilter]
+        
+        labels = payload.labels or []
+        
+        # Aplicar preset se especificado
+        preset_applied = None
+        if payload.preset:
+            msg.info(f"[EXTERNAL] Applying preset: {payload.preset}")
+            try:
+                from verba_extensions.plugins.reranker import RerankerPresets
+                presets = RerankerPresets.get_all_presets()
+                
+                preset_config = presets.get(payload.preset)
+                if not preset_config:
+                    # Tenta buscar pelo nome normalizado
+                    preset_config = presets.get(payload.preset.replace("-", "_").lower())
+                
+                if preset_config:
+                    if "Retriever" in rag_config:
+                        retriever = rag_config["Retriever"]
+                        components = retriever.get("components", {})
+                        
+                        # Encontrar EntityAwareRetriever
+                        entity_aware_key = None
+                        for key in components:
+                            if "EntityAware" in key or "entity_aware" in key.lower():
+                                entity_aware_key = key
+                                break
+                        
+                        if entity_aware_key:
+                            entity_config = components[entity_aware_key].get("config", {})
+                            
+                            # Aplicar configurações do preset
+                            preset_settings = preset_config.get("settings", {})
+                            for setting_name, setting_value in preset_settings.items():
+                                if setting_name in entity_config:
+                                    entity_config[setting_name]["value"] = setting_value
+                            
+                            preset_applied = payload.preset
+                            msg.good(f"[EXTERNAL] Preset '{payload.preset}' applied successfully")
+                else:
+                    msg.warn(f"[EXTERNAL] Preset '{payload.preset}' not found")
+                    
+            except Exception as preset_error:
+                msg.warn(f"[EXTERNAL] Failed to apply preset: {str(preset_error)}")
+        
+        # Executar busca com todas as capacidades avançadas
+        result = await manager.retrieve_chunks(
+            client, payload.query, rag_config, labels, documents_uuid
+        )
+        
+        # Processar resultado (compatível com 2 ou 3 elementos)
+        if len(result) == 3:
+            documents, context, debug_info = result
+            response_content = {
+                "error": "",
+                "documents": documents or [],
+                "context": context or "",
+                "debug_info": debug_info
+            }
+        else:
+            documents, context = result
+            response_content = {
+                "error": "",
+                "documents": documents or [],
+                "context": context or ""
+            }
+        
+        if preset_applied:
+            response_content["preset_applied"] = preset_applied
+        
+        msg.good(f"[EXTERNAL] Query completed: {len(response_content.get('documents', []))} documents found")
+        return JSONResponse(content=response_content)
+        
+    except Exception as e:
+        msg.fail(f"[EXTERNAL] Query failed: {str(e)}")
+        import traceback
+        msg.fail(f"[EXTERNAL] Traceback: {traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
             content={"error": str(e), "documents": [], "context": ""}
         )
 
