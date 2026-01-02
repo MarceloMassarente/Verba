@@ -548,13 +548,20 @@ class EntitySemanticChunker(Chunker):
         embedder: Embedding | None = None,
         embedder_config: Dict | None = None,
     ) -> List[Document]:
-        # Lê configs
-        breakpoint_percentile_threshold = int(
-            config["Breakpoint Percentile Threshold"].value
-        )
-        max_sentences_per_chunk = int(config["Max Sentences Per Chunk"].value)
-        min_chunk_chars = int(config.get("Min Chunk Chars", {}).value if hasattr(config.get("Min Chunk Chars", {}), "value") else 200)
-        overlap_sentences = int(config.get("Overlap", {}).value if hasattr(config.get("Overlap", {}), "value") else 0)
+        # Helper function to safely get config value (supports both InputConfig and dict)
+        def get_cfg(key, default):
+            item = config.get(key, {})
+            if hasattr(item, 'value'):
+                return item.value
+            elif isinstance(item, dict):
+                return item.get('value', default)
+            return default
+        
+        # Lê configs usando helper seguro
+        breakpoint_percentile_threshold = int(get_cfg("Breakpoint Percentile Threshold", 95))
+        max_sentences_per_chunk = int(get_cfg("Max Sentences Per Chunk", 30))
+        min_chunk_chars = int(get_cfg("Min Chunk Chars", 200))
+        overlap_sentences = int(get_cfg("Overlap", 0))
         
         # Constante: tamanho mínimo de sentença para não ser descartada
         MIN_SENTENCE_CHARS = 10

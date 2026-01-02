@@ -39,8 +39,17 @@ class TokenChunker(Chunker):
         embedder_config: dict | None = None,
     ) -> list[Document]:
 
-        units = int(config["Tokens"].value)
-        overlap = int(config["Overlap"].value)
+        # Helper function to safely get config value (supports both InputConfig and dict)
+        def get_cfg(key, default):
+            item = config.get(key, {})
+            if hasattr(item, 'value'):
+                return item.value
+            elif isinstance(item, dict):
+                return item.get('value', default)
+            return default
+
+        units = int(get_cfg("Tokens", 250))
+        overlap = int(get_cfg("Overlap", 50))
 
         for document in documents:
 

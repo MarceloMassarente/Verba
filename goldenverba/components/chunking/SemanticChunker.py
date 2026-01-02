@@ -49,11 +49,17 @@ class SemanticChunker(Chunker):
         embedder_config: dict | None = None,
     ) -> list[Document]:
         
+        # Helper function to safely get config value (supports both InputConfig and dict)
+        def get_cfg(key, default):
+            item = config.get(key, {})
+            if hasattr(item, 'value'):
+                return item.value
+            elif isinstance(item, dict):
+                return item.get('value', default)
+            return default
 
-        breakpoint_percentile_threshold = int(
-            config["Breakpoint Percentile Threshold"].value
-        )
-        max_sentences = int(config["Max Sentences Per Chunk"].value)
+        breakpoint_percentile_threshold = int(get_cfg("Breakpoint Percentile Threshold", 80))
+        max_sentences = int(get_cfg("Max Sentences Per Chunk", 20))
 
         for document in documents:
 
