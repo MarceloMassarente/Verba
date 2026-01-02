@@ -1389,13 +1389,22 @@ class EntityAwareRetriever(Retriever):
         client,
         query: str,
         vector: List[float],
-        config: Dict,
+        config: Dict[str, Any],
         weaviate_manager,
         embedder: str,
         labels: List[str],
         document_uuids: List[str],
-        rag_config: Optional[Dict[str, Any]] = None,  # RAG config completo (para Query Builder usar generator)
-    ):
+        rag_config: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Any], str]:
+        """Executa busca entity-aware."""
+        
+        # Inicializar variáveis para evitar NameError/UnboundLocalError
+        builder_entities = []
+        detected_frameworks = []
+        detected_concepts = []
+        detected_companies = []
+        detected_sectors = []
+        detected_content_type = ""
         """
         Retrieval com filtros entity-aware + busca semântica
         
@@ -2048,9 +2057,7 @@ class EntityAwareRetriever(Retriever):
         msg.info(f"  🔍 Conceitos semânticos: {semantic_terms}")
         
         # Detectar frameworks mencionados na query
-        detected_frameworks = []
-        detected_companies = []
-        detected_sectors = []
+        # (variáveis já inicializadas no topo do método)
         
         try:
             from verba_extensions.utils.framework_detector import get_framework_detector
@@ -3199,7 +3206,15 @@ class EntityAwareRetriever(Retriever):
         
         # 5. PROCESSA CHUNKS (aplicar window)
         chunks, message = await self._process_chunks(
-            client, chunks, weaviate_manager, embedder, config
+            client,
+            chunks,
+            weaviate_manager,
+            embedder,
+            config,
+            detected_frameworks=detected_frameworks,
+            detected_concepts=detected_concepts,
+            detected_companies=detected_companies,
+            detected_content_type=detected_content_type,
         )
         
         # 6. ✨ RERANKING (se disponível)
@@ -3667,7 +3682,18 @@ class EntityAwareRetriever(Retriever):
         # Retornar documents atualizados (com chunks filtrados)
         return final_response
     
-    async def _process_chunks(self, client, chunks, weaviate_manager, embedder, config):
+    async def _process_chunks(
+        self,
+        client,
+        chunks,
+        weaviate_manager,
+        embedder,
+        config,
+        detected_frameworks: List[str] = None,
+        detected_concepts: List[str] = None,
+        detected_companies: List[str] = None,
+        detected_content_type: str = "",
+    ):
         """Processa chunks aplicando window technique"""
         
         chunk_window_config = config.get("Chunk Window", {})
