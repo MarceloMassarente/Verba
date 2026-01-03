@@ -64,7 +64,7 @@ class UnifiedConsultingIngestor(Reader):
                 values=[]
             ),
             "Visual API Provider": InputConfig(
-                type="text",
+                type="dropdown",
                 value="Contextual.AI",
                 description="Provider de análise visual (apenas se Enable Visual Analysis = True)",
                 values=["Contextual.AI", "Docling", "GPT-4V", "Claude Vision"]
@@ -282,14 +282,65 @@ class UnifiedConsultingIngestor(Reader):
                 paragraphs = full_md.split('\n\n')
                 
             except ImportError:
-                msg.warn("[Unified-Ingestor] Docling library not found. Using basic text extraction fallback.")
-                # Basic Fallback
-                content = fileConfig.content
-                paragraphs = content.decode('utf-8').split('\n\n') if isinstance(content, bytes) else content.split('\n\n')
-            except Exception as e:
-                msg.warn(f"[Unified-Ingestor] Docling processing error: {e}. Using basic fallback.")
-                content = fileConfig.content
-                paragraphs = content.decode('utf-8').split('\n\n') if isinstance(content, bytes) else content.split('\n\n')
+                msg.warn("[Unified-Ingestor] Docling library not found. Trying python-pptx fallback...")
+                # Try python-pptx for PPTX files
+                try:
+                    from pptx import Presentation
+                    import io
+                    
+                    pptx_bytes = io.BytesIO(base64.b64decode(fileConfig.content) if isinstance(fileConfig.content, str) else fileConfig.content)
+                    prs = Presentation(pptx_bytes)
+                    
+                    slides = []
+                    for slide_num, slide in enumerate(prs.slides, 1):
+                        slide_texts = []
+                        
+                        for shape in slide.shapes:
+                            if hasattr(shape, "text") and shape.text.strip():
+                                slide_texts.append(shape.text.strip())
+                            # Extract table text if present
+                            try:
+                                if shape.has_table:
+                                    table = shape.table
+                                    for row in table.rows:
+                                        row_text = []
+                                        for cell in row.cells:
+                                            if cell.text.strip():
+                                                row_text.append(cell.text.strip())
+                                        if row_text:
+                                            slide_texts.append(" | ".join(row_text))
+                            except Exception:
+                                pass
+                        
+                        if slide_texts:
+                            title = slide_texts[0] if slide_texts else f"Slide {slide_num}"
+                            content = "\n".join(slide_texts[1:]) if len(slide_texts) > 1 else "\n".join(slide_texts)
+                            
+                            slides.append({
+                                "number": slide_num,
+                                "title": title[:200] + "..." if len(title) > 200 else title,
+                                "content": content,
+                                "frameworks": [],
+                                "companies": [],
+                                "position": self._infer_position(slide_num, len(prs.slides))
+                            })
+                    
+                    if slides:
+                        msg.good(f"[Unified-Ingestor] python-pptx extracted {len(slides)} slides")
+                        return {"slides": slides}
+                    else:
+                        msg.warn("[Unified-Ingestor] python-pptx found no text content")
+                        return None
+                        
+                except ImportError:
+                    msg.warn("[Unified-Ingestor] python-pptx not installed. Falling back to basic text extraction.")
+                    # Basic Fallback for text files only
+                    content = fileConfig.content
+                    paragraphs = content.decode('utf-8').split('\n\n') if isinstance(content, bytes) else content.split('\n\n')
+                except Exception as e:
+                    msg.warn(f"[Unified-Ingestor] python-pptx error: {e}. Falling back to basic extraction.")
+                    content = fileConfig.content
+                    paragraphs = content.decode('utf-8').split('\n\n') if isinstance(content, bytes) else content.split('\n\n')
 
             slides = []
             for i, para in enumerate(paragraphs, 1):
