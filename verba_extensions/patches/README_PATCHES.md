@@ -1503,3 +1503,45 @@ print(f'✅ Rerankou {len(reranked)} chunks')
 
 ---
 
+
+---
+
+### 9. **Config Merge Fix (Dropdown Lists Update)** ⭐ CRÍTICO - CORE FIX
+
+**Arquivo:** `goldenverba/verba_manager.py` (modificação no core do Verba)
+
+**Status:** ✅ Implementado e testado (Jan 2026)
+
+**Problema:**
+- O Verba original não atualizava listas de valores (`values`) em configurações dropdown quando mesclava configurações antigas com novas
+- Isso impedia que novos modelos (ex: Voyage novos) ou novas opções (ex: Unified Ingestor visual modes) aparecessem no UI se o usuário já tivesse uma config salva
+
+**O que faz:**
+- Modifica `merge_config` para detectar mudanças em `values`
+- Atualiza a lista de opções mantendo a seleção do usuário (se válida)
+- Garante que novas features apareçam sem necessidade de `verba reset`
+
+**Como verificar após upgrade:**
+- Verifique se `merge_config` contém lógica `if sorted(new_values) != sorted(existing_values):`
+
+---
+
+### 10. **Consulting RAG Features (Unified Ingestor + Voyage)** ⭐ NOVO
+
+**Arquivos:**
+- `verba_extensions/readers/unified_consulting_ingestor.py`
+- `verba_extensions/embedders/hybrid_embedder.py`
+
+**O que faz:**
+- **Unified Ingestor:** Reader universal para PPTX/PDF com 3 modos (Visual API, Docling API, Local)
+- **Voyage Contextual:** Embedder que usa `voyage-context-3` para vetores conscientes do contexto do documento
+
+**Integração:**
+- São plugins padrão (Reader/Embedder) carregados automaticamente
+- Não requerem monkey-patching complexo, apenas funcionam "out of the box"
+- Dependem do **Config Merge Fix** (acima) para que suas opções apareçam no UI após updates
+
+**Referência:**
+- Documentação completa: `docs/MANUAL_CONSULTING_RAG.md`
+
+---
