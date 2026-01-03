@@ -1215,22 +1215,25 @@ async def query(payload: QueryPayload):
             if embedder:
                 from goldenverba.components.managers import WeaviateManager
                 weaviate_manager = WeaviateManager()
-                normalized = weaviate_manager._normalize_embedder_name(embedder)
-                collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
                 
+                # FIX: Use verify_embedding_collection to properly populate the embedding_table
+                # This ensures the collection name mapping is set up correctly before we try to access it
                 if await weaviate_manager.verify_embedding_collection(client, embedder):
-                    embedder_collection = client.collections.get(collection_name)
-                    # Verifica se há chunks na collection
-                    total_count = await embedder_collection.aggregate.over_all(total_count=True)
-                    if total_count.total_count == 0:
-                        msg.warn("No chunks available in database - cannot process query")
-                        return JSONResponse(
-                            content={
-                                "error": "No documents or chunks available in the database. Please import documents first.",
-                                "documents": [],
-                                "context": ""
-                            }
-                        )
+                    # Now embedding_table[embedder] has the correct collection name
+                    collection_name = weaviate_manager.embedding_table.get(embedder)
+                    if collection_name:
+                        embedder_collection = client.collections.get(collection_name)
+                        # Verifica se há chunks na collection
+                        total_count = await embedder_collection.aggregate.over_all(total_count=True)
+                        if total_count.total_count == 0:
+                            msg.warn("No chunks available in database - cannot process query")
+                            return JSONResponse(
+                                content={
+                                    "error": "No documents or chunks available in the database. Please import documents first.",
+                                    "documents": [],
+                                    "context": ""
+                                }
+                            )
         except Exception as check_error:
             # Não falha a query se a verificação der erro, apenas loga
             msg.warn(f"Could not verify chunks availability: {str(check_error)}")
