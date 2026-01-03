@@ -86,6 +86,35 @@ class ExtensionLoader:
             traceback.print_exc()
             return False
     
+    # Arquivos auxiliares que NÃO são plugins Verba (não possuem register())
+    # São scripts de suporte, classes utilitárias, ou testes
+    EXCLUDED_FILES = {
+        # Scripts de autenticação/configuração
+        "google_drive_auth.py",       # Script para autenticação OAuth
+        
+        # Classes utilitárias (usadas por outros plugins, não são plugins)
+        "query_expander.py",          # Classe QueryExpanderPlugin (usado pelo orchestrator)
+        "query_rewriter.py",          # Classe QueryRewriter
+        "query_builder.py",           # Classe QueryBuilder
+        "multi_vector_searcher.py",   # Classe MultiVectorSearcher
+        "dynamic_reranker.py",        # Classe DynamicReranker
+        "reranker.py",                # Classe Reranker (usado pelo retriever)
+        "bilingual_filter.py",        # Filtro bilíngue
+        "temporal_filter.py",         # Filtro temporal
+        "alpha_optimizer.py",         # Otimizador de alpha
+        "adaptive_entropy.py",        # Sistema de entropia adaptativa
+        "intelligent_cache.py",       # Sistema de cache
+        "iterative_search.py",        # Busca iterativa
+        "llm_metadata_extractor.py",  # Extrator de metadados
+        "chunk_processor.py",         # Processador de chunks (sistema diferente)
+        "plugin_manager.py",          # Manager de plugins (sistema diferente)
+        
+        # Testes e validação
+        "test_hierarchical_chunking.py",  # Teste
+        "validar_correcoes.py",           # Script de validação
+        "analise_otimizacao.py",          # Script de análise
+    }
+    
     def load_plugins_from_dir(self, plugins_dir: str = "verba_extensions/plugins"):
         """Carrega todos os plugins de um diretório"""
         plugins_path = Path(plugins_dir)
@@ -95,14 +124,23 @@ class ExtensionLoader:
         
         msg.info(f"Carregando plugins de: {plugins_dir}")
         loaded_count = 0
+        skipped_count = 0
         for plugin_file in plugins_path.glob("*.py"):
+            # Pula __init__ e arquivos privados
             if plugin_file.name.startswith("_") or plugin_file.name == "__init__.py":
                 continue
+            
+            # Pula arquivos auxiliares conhecidos (não são plugins Verba)
+            if plugin_file.name in self.EXCLUDED_FILES:
+                msg.debug(f"Pulando arquivo auxiliar: {plugin_file.name}")
+                skipped_count += 1
+                continue
+                
             msg.debug(f"Tentando carregar plugin: {plugin_file.name}")
             if self.load_plugin(str(plugin_file)):
                 loaded_count += 1
         
-        msg.info(f"Total de plugins carregados: {loaded_count}")
+        msg.info(f"Total de plugins carregados: {loaded_count} (pulados: {skipped_count})")
     
     def apply_hooks(self):
         """Aplica hooks para injetar extensões no Verba sem modificar código core"""
