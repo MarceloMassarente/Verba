@@ -496,7 +496,7 @@ You can learn more about Verba's architecture and implementation in its [technic
 
 - **Does Verba offer a API endpoint to use externally?**
 
-  - No, right now Verba does not offer any useful API endpoints to interact with the application. The current FastAPI setup is optimized for the internal communication between the frontend and backend. It is not recommended to use it as a API endpoint. There are plans to add user-friendly
+  - Yes! Verba provides a full external API for queries. See the [External API Guide](#external-api-guide) section below for complete documentation and examples.
 
 - **How to connect to your custom OpenAI Server?**
 
@@ -505,3 +505,136 @@ You can learn more about Verba's architecture and implementation in its [technic
 
 - **How to upload custom JSON files to Verba?**
   - Right now Verba does not support custom JSON structure. Instead the whole JSON will simply be dumped into the content field of the Verba document. You can read more about the Verba JSON Structure in the Technical Documentation [here](./TECHNICAL.md).
+
+## 🎯 Named Vectors (Multi-Vector Support)
+
+Verba fully supports Weaviate's **multi-vector (named vectors)** feature, allowing multiple embeddings per object for specialized semantic search across different aspects of your data.
+
+### What are Named Vectors?
+
+Named vectors enable you to have multiple embeddings for the same document chunk, each optimized for different semantic spaces:
+
+- **`default`**: Primary vector for general semantic search ✅ (automatically used)
+- **`company_vec`**: Specialized vector for company/organization names
+- **`concept_vec`**: Specialized vector for business concepts
+- **`sector_vec`**: Specialized vector for industry sectors
+
+### How It Works
+
+Verba **automatically uses** the `default` target vector for all queries - you don't need to configure anything! The system includes:
+
+- ✅ **Auto-fallback**: Automatically finds embedding collections with data
+- ✅ **Smart collection discovery**: Locates the correct collection even if embedder changes
+- ✅ **44 ETL-aware fields**: Rich schema supporting entities, frameworks, companies, sectors
+- ✅ **Seamless compatibility**: Works with both single-vector and multi-vector collections
+
+### Schema Fields
+
+Multi-vector collections include advanced fields for entity-aware retrieval:
+
+**Core Fields**:
+- `content`, `title`, `doc_uuid`, `chunk_id`
+- `frameworks[]`, `companies[]`, `sectors[]`
+
+**Named Vector Text**:
+- `concept_text`, `sector_text`, `company_text`
+
+**Entity Tracking**:
+- `entities_local_ids[]`, `parent_entities[]`, `primary_entity_id`
+
+**Section Context**:
+- `section_title`, `section_path[]`, `section_level`
+
+For a complete list of schema fields and their usage, see `docs/README_EXTENSOES.md`.
+
+## 🌐 External API Guide
+
+Verba provides a complete external API for programmatic access to all RAG functionality.
+
+### Quick Start
+
+```python
+import requests
+
+BASE_URL = "https://your-verba-instance.com"  # or localhost:8000
+
+headers = {
+    "Content-Type": "application/json",
+    "Origin": BASE_URL,
+    "Referer": f"{BASE_URL}/"
+}
+
+# 1. Get RAG configuration
+config_resp = requests.post(
+    f"{BASE_URL}/api/get_rag_config",
+    headers=headers,
+    json={"deployment": "Custom", "url": "weaviate-url", "key": ""}
+)
+rag_config = config_resp.json()["rag_config"]
+
+# 2. Fix Advanced structure (required for external API calls)
+if "Advanced" in rag_config:
+    adv = rag_config["Advanced"]
+    rag_config["Advanced"] = {
+        "selected": "Default",
+        "components": {
+            "Default": {
+                "name": "Default",
+                "variables": [],
+                "library": [],
+                "description": "Default Advanced Settings",
+                "config": adv,
+                "type": "",
+                "available": True
+            }
+        }
+    }
+
+# 3. Execute query
+result = requests.post(
+    f"{BASE_URL}/api/query",
+    headers=headers,
+    json={
+        "query": "your search query",
+        "labels": [],
+        "documentFilter": [],
+        "credentials": {
+            "deployment": "Custom",
+            "url": "weaviate-url",
+            "key": ""
+        },
+        "RAG": rag_config
+    }
+)
+
+# 4. Process results
+documents = result.json().get("documents", [])
+for doc in documents:
+    print(f"Score: {doc['score']} - {doc.get('doc_name', 'N/A')}")
+```
+
+### Complete API Documentation
+
+For comprehensive API documentation including:
+- Detailed endpoint descriptions
+- Payload structure requirements
+- Practical examples with filters
+- Troubleshooting common errors
+- Named vectors usage
+
+See the complete guide in [`docs/API_GUIDE.md`](https://github.com/weaviate/Verba/blob/main/docs/API_GUIDE.md) or check the artifacts directory after debugging sessions.
+
+### API Endpoints
+
+- **`POST /api/get_rag_config`**: Retrieve current RAG configuration
+- **`POST /api/query`**: Execute semantic search with RAG
+- **`POST /api/import`**: Import documents programmatically
+
+### Important Notes
+
+⚠️ **External API Requirement**: When calling the API externally, you must transform the `Advanced` component structure to include all required fields (`library`, `description`, `config`, `type`, `available`). The code example above shows how to do this.
+
+✅ **Auto-Fallback**: If your embedder configuration differs from the data ingestion embedder, Verba automatically finds and uses the collection with actual data.
+
+✅ **Multi-Vector**: All queries automatically use `targetVector: 'default'` - no additional configuration needed.
+

@@ -1058,16 +1058,7 @@ class RerankerPresets:
     @classmethod
     def get_preset(cls, preset_name: str) -> Optional[Dict[str, Any]]:
         """Retorna preset por nome."""
-        presets = {
-            "consulting_frameworks": cls.CONSULTING_FRAMEWORKS,
-            "company_research": cls.COMPANY_RESEARCH,
-            "sector_analysis": cls.SECTOR_ANALYSIS,
-            "speed": cls.SPEED_MODE,
-            "max_quality": cls.MAX_QUALITY,
-            "balanced": cls.BALANCED,
-            "offline": cls.OFFLINE
-        }
-        return presets.get(preset_name.lower())
+        return cls.get_all_presets().get(preset_name.lower())
     
     @classmethod
     def get_all_presets(cls) -> Dict[str, Dict[str, Any]]:
@@ -1079,8 +1070,74 @@ class RerankerPresets:
             "speed": cls.SPEED_MODE,
             "max_quality": cls.MAX_QUALITY,
             "balanced": cls.BALANCED,
-            "offline": cls.OFFLINE
+            "offline": cls.OFFLINE,
+            "cascade": cls.CASCADE,
+            "cascade_premium": cls.CASCADE_PREMIUM
         }
+    
+    # Preset: Cascade (Fast Recall + MiniLM)
+    CASCADE = {
+        "name": "cascade",
+        "display_name": "🌊 Cascade (Fast)",
+        "description": "Recuperação rápida (MiniLM) com reranking local leve. Ótimo custo-benefício.",
+        
+        # Arquitetura
+        "Two-Phase Search Mode": "auto",
+        "Two-Phase Search Filter Level": "document",
+        "Enable Multi-Vector Search": True,
+        
+        # Busca
+        "Alpha": 0.5,
+        "Limit/Sensitivity": 2,
+        "Reranker Top K": 5,
+        
+        # Otimizações
+        "Enable Query Expansion": True,
+        "Enable Dynamic Alpha": True,
+        "Chunk Window": 1,
+        
+        # Reranker
+        "Reranker Provider": "Haystack",
+        "Haystack Model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "Reranker Mode": "Cascade",
+        
+        "latency_estimate": "~400ms",
+        "quality_estimate": "Alta",
+        "requirements": ["haystack-ai"]
+    }
+
+    # Preset: Cascade Premium (Voyage Reranker)
+    CASCADE_PREMIUM = {
+        "name": "cascade_premium",
+        "display_name": "💎 Cascade Premium",
+        "description": "Recuperação profunda + Voyage AI Reranker. Máxima precisão para consultoria.",
+        
+        # Arquitetura
+        "Two-Phase Search Mode": "auto",
+        "Two-Phase Search Filter Level": "document",
+        "Enable Multi-Vector Search": True,
+        
+        # Busca
+        "Alpha": 0.6,
+        "Limit/Sensitivity": 3,
+        "Reranker Top K": 10,
+        
+        # Otimizações
+        "Enable Query Expansion": True,
+        "Enable Dynamic Alpha": True,
+        "Enable Relative Score Fusion": True,
+        "Chunk Window": 2,
+        
+        # Reranker Frameworks
+        "Reranker Provider": "VoyageAI", 
+        "Enable VoyageAI Reranker": True,
+        "Reranker Mode": "Cascade",
+        "Reranker Top K": 10,
+        
+        "latency_estimate": "~1.2s",
+        "quality_estimate": "Estado da Arte",
+        "requirements": ["VOYAGE_API_KEY"]
+    }
     
     @classmethod
     def check_preset_availability(cls, preset_name: str, reranker_plugin: 'RerankerPlugin') -> Dict[str, Any]:
@@ -1985,9 +2042,9 @@ class RerankerPlugin:
         availability = RerankerPresets.check_preset_availability(preset_name, self)
         if not availability["available"]:
             logger.warning(f"Preset '{preset_name}' não disponível: {availability['reason']}")
-            # Tenta fallback para produção
-            if preset_name != "production":
-                return self.apply_preset("production")
+            # Tenta fallback para balanced
+            if preset_name != "balanced":
+                return self.apply_preset("balanced")
         
         # Aplica configurações do preset ao self.config
         applied_config = {}

@@ -159,11 +159,32 @@ class ExtensionLoader:
         # Hook 4: Adiciona novos chunkers
         self._hook_chunkers()
         
-        # Hook 5: Modifica managers para incluir plugins
+        # Hook 5: Adiciona novos embedders
+        self._hook_embedders()
+
+        # Hook 6: Modifica managers para incluir plugins
         self._hook_managers()
         
         self.hooks_applied = True
         msg.good("Hooks aplicados com sucesso")
+    
+    def _hook_embedders(self):
+        """Adiciona embedders customizados aos managers"""
+        try:
+            from goldenverba.components import managers
+            
+            original_embedders = managers.embedders.copy()
+            
+            for plugin_name, plugin_data in self.plugins.items():
+                if 'embedders' in plugin_data['info']:
+                    for embedder in plugin_data['info']['embedders']:
+                        if embedder not in original_embedders:
+                            original_embedders.append(embedder)
+                            msg.info(f"Embedder adicionado: {embedder.name}")
+            
+            managers.embedders = original_embedders
+        except Exception as e:
+            msg.warn(f"Erro ao aplicar hook de embedders: {str(e)}")
     
     def _hook_retrievers(self):
         """Adiciona retrievers customizados aos managers"""

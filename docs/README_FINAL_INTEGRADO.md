@@ -144,4 +144,98 @@ Hook dispara ETL automaticamente (background)
 - `GUIA_UPGRADE_AUTOMATICO.md` - Como fazer upgrades
 - `GUIA_COMPARACAO.md` - Separado vs Integrado
 - `RESUMO_REFATORACAO.md` - O que mudou
+- **`API_GUIDE.md`** - Guia completo de uso da API externa ✨ **NOVO**
+
+## 🎯 Named Vectors (Multi-Vector)
+
+O sistema suporta **múltiplos vetores** por chunk no Weaviate:
+
+- **`default`**: Vetor principal para busca semântica geral ✅ (automático)
+- **`company_vec`**: Vetor especializado para empresas
+- **`concept_vec`**: Vetor para conceitos de negócio
+- **`sector_vec`**: Vetor para setores/indústrias
+
+### Como Funciona
+
+✅ **Automático** - O código já usa `targetVector: "default"` por padrão  
+✅ **Auto-fallback** - Encontra collection com dados automaticamente  
+✅ **Schema Rico** - 44 campos ETL-aware incluindo entities, frameworks, companies, sectors
+
+Veja detalhes completos em [`API_GUIDE.md`](../API_GUIDE.md).
+
+## 🌐 API Externa
+
+### Quick Start
+
+```python
+import requests
+
+BASE_URL = "https://verba-production.railway.app"
+
+# 1. Get config
+config = requests.post(
+    f"{BASE_URL}/api/get_rag_config",
+    headers={"Content-Type": "application/json", "Origin": BASE_URL},
+    json={"deployment": "Custom", "url": "weaviate.railway.internal", "key": ""}
+).json()["rag_config"]
+
+# 2. Fix Advanced (obrigatório!)
+if "Advanced" in config:
+    adv = config["Advanced"]
+    config["Advanced"] = {
+        "selected": "Default",
+        "components": {
+            "Default": {
+                "name": "Default",
+                "variables": [],
+                "library": [],
+                "description": "Default Advanced Settings",
+                "config": adv,
+                "type": "",
+                "available": True
+            }
+        }
+    }
+
+# 3. Query
+result = requests.post(
+    f"{BASE_URL}/api/query",
+    headers={"Content-Type": "application/json", "Origin": BASE_URL},
+    json={
+        "query": "sua busca",
+        "labels": [],
+        "documentFilter": [],
+        "credentials": {"deployment": "Custom", "url": "weaviate-url", "key": ""},
+        "RAG": config
+    }
+).json()
+
+print(f"Chunks encontrados: {len(result['documents'])}")
+```
+
+### Documentação Completa
+
+Veja [`API_GUIDE.md`](../API_GUIDE.md) para:
+- Estrutura completa de payload
+- Exemplos com filtros
+- Troubleshooting de erros 422/403/502
+- Named vectors em detalhe
+- Scripts funcionais
+
+## ✨ Melhorias Recentes (2026-01-03)
+
+### Auto-Fallback Inteligente
+- ✅ Busca automaticamente collections com dados
+- ✅ Funciona mesmo se embedder configurado diferir do usado na ingestão
+- ✅ Logs detalhados mostram qual collection está sendo usada
+
+### Multi-Vector Support
+- ✅ Suporte completo a named vectors do Weaviate
+- ✅ Usa `targetVector: 'default'` automaticamente
+- ✅ Schema com 44 campos ETL-aware
+
+### API Externa Funcional
+- ✅ Endpoints documentados
+- ✅ Exemplos práticos
+- ✅ Guia de troubleshooting completo
 

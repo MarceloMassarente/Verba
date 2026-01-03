@@ -520,15 +520,26 @@ def patch_weaviate_manager():
                                         "default": chunk.vector  # Vetor padrão já existe
                                     }
                                     
+                                    # Verifica se o embedder suporta vectorize_named (Hybrid Embedder)
+                                    has_vectorize_named = hasattr(embedder_instance, 'vectorize_named')
+                                    
                                     # Gera embedding para concept_vec
                                     # Sempre cria named vector (usa default se texto vazio)
                                     if texts["concept_text"]:
                                         try:
-                                            # Usa vectorize (não embed) - método correto da interface Embedding
-                                            concept_embeddings = await embedder_instance.vectorize(
-                                                config,
-                                                [texts["concept_text"]]
-                                            )
+                                            # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
+                                            if has_vectorize_named:
+                                                concept_embeddings = await embedder_instance.vectorize_named(
+                                                    config,
+                                                    [texts["concept_text"]],
+                                                    vector_name="concept_vec"
+                                                )
+                                            else:
+                                                # Usa vectorize padrão
+                                                concept_embeddings = await embedder_instance.vectorize(
+                                                    config,
+                                                    [texts["concept_text"]]
+                                                )
                                             named_vectors["concept_vec"] = concept_embeddings[0]
                                         except Exception as e:
                                             msg.debug(f"[Named-Vectors] Erro ao gerar concept_vec para chunk {chunk_idx}: {str(e)}")
@@ -542,11 +553,19 @@ def patch_weaviate_manager():
                                     # Sempre cria named vector (usa default se texto vazio)
                                     if texts["sector_text"]:
                                         try:
-                                            # Usa vectorize (não embed) - método correto da interface Embedding
-                                            sector_embeddings = await embedder_instance.vectorize(
-                                                config,
-                                                [texts["sector_text"]]
-                                            )
+                                            # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
+                                            if has_vectorize_named:
+                                                sector_embeddings = await embedder_instance.vectorize_named(
+                                                    config,
+                                                    [texts["sector_text"]],
+                                                    vector_name="sector_vec"
+                                                )
+                                            else:
+                                                # Usa vectorize padrão
+                                                sector_embeddings = await embedder_instance.vectorize(
+                                                    config,
+                                                    [texts["sector_text"]]
+                                                )
                                             named_vectors["sector_vec"] = sector_embeddings[0]
                                         except Exception as e:
                                             msg.debug(f"[Named-Vectors] Erro ao gerar sector_vec para chunk {chunk_idx}: {str(e)}")
@@ -560,11 +579,19 @@ def patch_weaviate_manager():
                                     # Sempre cria named vector (usa default se texto vazio)
                                     if texts["company_text"]:
                                         try:
-                                            # Usa vectorize (não embed) - método correto da interface Embedding
-                                            company_embeddings = await embedder_instance.vectorize(
-                                                config,
-                                                [texts["company_text"]]
-                                            )
+                                            # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
+                                            if has_vectorize_named:
+                                                company_embeddings = await embedder_instance.vectorize_named(
+                                                    config,
+                                                    [texts["company_text"]],
+                                                    vector_name="company_vec"
+                                                )
+                                            else:
+                                                # Usa vectorize padrão
+                                                company_embeddings = await embedder_instance.vectorize(
+                                                    config,
+                                                    [texts["company_text"]]
+                                                )
                                             named_vectors["company_vec"] = company_embeddings[0]
                                         except Exception as e:
                                             msg.debug(f"[Named-Vectors] Erro ao gerar company_vec para chunk {chunk_idx}: {str(e)}")

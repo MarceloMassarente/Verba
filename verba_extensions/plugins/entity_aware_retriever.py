@@ -650,6 +650,26 @@ class EntityAwareRetriever(Retriever):
                             if phase2_objects and hasattr(phase2_objects, 'objects'):
                                 phase2_chunks = phase2_objects.objects
                                 msg.good(f"    Fase 2: {len(phase2_chunks)} chunks retornados")
+                                
+                                # FASE 3: Cascade Reranking (Premium)
+                                if self.config.get("Reranker Preset", {}).get("value") == "consulting_frameworks":
+                                    try:
+                                        from verba_extensions.utils.reranker import CascadeReranker
+                                        
+                                        rerank_top_k = self.config.get("Reranker Top K", {}).get("value", 5)
+                                        if rerank_top_k > 0:
+                                            msg.info(f"  💎 Fase 3: Reranking Top-{rerank_top_k} results via Voyage...")
+                                            reranker = CascadeReranker()
+                                            phase2_chunks = await reranker.rerank(
+                                                query=phase2_query,
+                                                chunks=phase2_chunks,
+                                                top_k=rerank_top_k
+                                            )
+                                    except ImportError:
+                                        msg.warn("    Fase 3: Reranker module not found")
+                                    except Exception as e:
+                                        msg.warn(f"    Fase 3: Reranking failed ({str(e)}), returning original order")
+
                                 debug_info["two_phase_search"]["phase2_results"] = len(phase2_chunks)
                                 debug_info["two_phase_search"]["fusion_type"] = fusion_type
                                 
