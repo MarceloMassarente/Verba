@@ -48,7 +48,8 @@ export default function Home() {
   });
   const [selectedTheme, setSelectedTheme] = useState<Theme>(themes["Weaviate"]);
 
-  const fontKey = selectedTheme.font.value as FontKey; // Safely cast if you're sure, or use a check
+  // Safely get font key with fallback
+  const fontKey = (selectedTheme?.font?.value ?? "Plus_Jakarta_Sans") as FontKey;
   const fontClassName = fontKey ? fonts[fontKey]?.className || "" : "";
 
   // Login States
@@ -203,9 +204,8 @@ export default function Home() {
 
       {isLoggedIn && isHealthy && (
         <div
-          className={`transition-opacity duration-1000 ${
-            isLoaded ? "opacity-100" : "opacity-0"
-          } flex flex-col gap-2 p-5`}
+          className={`transition-opacity duration-1000 ${isLoaded ? "opacity-100" : "opacity-0"
+            } flex flex-col gap-2 p-5`}
         >
           <GettingStartedComponent addStatusMessage={addStatusMessage} />
 
@@ -246,9 +246,8 @@ export default function Home() {
             )}
 
             <div
-              className={`${
-                currentPage === "ADD" && production != "Demo" ? "" : "hidden"
-              }`}
+              className={`${currentPage === "ADD" && production != "Demo" ? "" : "hidden"
+                }`}
             >
               <IngestionView
                 RAGConfig={RAGConfig}
@@ -259,11 +258,10 @@ export default function Home() {
             </div>
 
             <div
-              className={`${
-                currentPage === "SETTINGS" && production != "Demo"
+              className={`${currentPage === "SETTINGS" && production != "Demo"
                   ? ""
                   : "hidden"
-              }`}
+                }`}
             >
               <SettingsView
                 credentials={credentials}
