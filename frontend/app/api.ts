@@ -25,29 +25,73 @@ import {
   Themes,
 } from "./types";
 
-const checkUrl = async (url: string): Promise<boolean> => {
+const checkUrl = async (url: string, timeout = 5000): Promise<boolean> => {
   try {
-    const response = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
     return response.ok;
   } catch (error) {
-    console.error(`Failed to fetch from ${url}:`, error);
+    // Only log if not aborted
+    if (error instanceof Error && error.name !== 'AbortError') {
+      console.warn(`Failed to fetch from ${url}:`, error.message);
+    }
     return false;
   }
 };
 
+// Cache the detected host to avoid repeated checks
+let cachedHost: string | null = null;
+
 export const detectHost = async (): Promise<string> => {
+  // Return cached host if available
+  if (cachedHost) {
+    return cachedHost;
+  }
+
   const localUrl = "http://localhost:8000/api/health";
   const rootUrl = "/api/health";
 
-  const isLocalHealthy = await checkUrl(localUrl);
-  if (isLocalHealthy) {
-    return "http://localhost:8000";
+  // Check if we're in a production environment (not localhost)
+  const isProduction = typeof window !== 'undefined' &&
+    !window.location.hostname.includes('localhost') &&
+    !window.location.hostname.includes('127.0.0.1');
+
+  // In production (Railway, etc.), try relative URL first (faster, no CORS issues)
+  if (isProduction) {
+    const isRootHealthy = await checkUrl(rootUrl);
+    if (isRootHealthy) {
+      cachedHost = window.location.origin;
+      return cachedHost;
+    }
+
+    // Retry once with a longer timeout
+    const isRootHealthyRetry = await checkUrl(rootUrl, 10000);
+    if (isRootHealthyRetry) {
+      cachedHost = window.location.origin;
+      return cachedHost;
+    }
+  } else {
+    // In development, try localhost first
+    const isLocalHealthy = await checkUrl(localUrl);
+    if (isLocalHealthy) {
+      cachedHost = "http://localhost:8000";
+      return cachedHost;
+    }
+
+    const isRootHealthy = await checkUrl(rootUrl);
+    if (isRootHealthy) {
+      cachedHost = window.location.origin;
+      return cachedHost;
+    }
   }
 
-  const isRootHealthy = await checkUrl(rootUrl);
-  if (isRootHealthy) {
-    const root = window.location.origin;
-    return root;
+  // If both fail in production, use origin anyway (the server might just be starting)
+  if (isProduction) {
+    console.warn("Health checks failed, using window.location.origin as fallback");
+    cachedHost = window.location.origin;
+    return cachedHost;
   }
 
   throw new Error("Both health checks failed, please check the Verba Server");
