@@ -8,52 +8,68 @@ from goldenverba.components.types import InputConfig
 from goldenverba.components.chunk import Chunk
 from goldenverba.components.document import Document
 
-# Limites de contexto
-MAX_VOYAGE_TOKENS = 31_000  # Voyage 3.5 limit: 32k, margem de segurança
-MAX_MINILM_TOKENS = 512     # MiniLM limit (automático)
+# Limites de contexto para Voyage Context-3
+# O modelo processa o documento inteiro (até 32k tokens) para gerar embeddings contextuais
+MAX_VOYAGE_DOC_TOKENS = 32_000       # Limite por documento (32k tokens)
+MAX_VOYAGE_BATCH_TOKENS = 120_000    # Total para batch
+MAX_VOYAGE_BATCH_CHUNKS = 16_000     # Máximo de chunks por batch
+MAX_VOYAGE_BATCH_DOCS = 1_000        # Máximo de documentos por batch
+MAX_MINILM_TOKENS = 512              # MiniLM limit (automático)
+
+# Estimativa: 1 token ≈ 4 caracteres
+CHARS_PER_TOKEN = 4
 
 
 class HybridConsultingEmbedder(Embedding):
     """
     Embedder híbrido otimizado para consultoria.
     
-    Modo BYOV (Bring Your Own Vectors):
-    - Verba gera todos os embeddings
-    - Weaviate apenas armazena
-    - Permite usar embedders diferentes por named vector
+    Arquitetura:
+    - DEFAULT VECTOR: Voyage Context-3 (contextual embeddings)
+      - Usa contextualized_embed() para embeddings com contexto do documento
+      - Chunks do mesmo documento são processados juntos
+      - Dimensões: 1024 (configurável: 256, 512, 2048)
+    
+    - NAMED VECTORS: MiniLM (local, leve)
+      - concept_vec: frameworks/metodologias (384 dims)
+      - company_vec: empresas/stakeholders (384 dims)
+      - sector_vec: setores/indústrias (384 dims)
+    
+    Economia: ~75% vs usar Voyage para todos os vetores
     """
     
     def __init__(self):
         super().__init__()
         self.name = "HybridConsultingEmbedder"
         self.description = (
-            "Embedder híbrido lean para consultoria. "
-            "Voyage 3.5 (premium API) para default, MiniLM (local) para 3 named vectors. "
-            "Economia de 75% + apenas 300MB RAM."
+            "Embedder híbrido para consultoria. "
+            "Voyage Context-3 (contextual, premium) para vetor principal, "
+            "MiniLM (local, grátis) para named vectors. Economia de 75%."
         )
+        
         # Configuração
         self.config = {
             "Voyage Model": InputConfig(
                 type="dropdown",
-                value="voyage-3.5",
-                description="Selecione o modelo Voyage para o vetor default",
+                value="voyage-context-3",
+                description="Modelo Voyage. 'voyage-context-3' usa API contextual otimizada para RAG.",
                 values=[
-                    "voyage-3.5",
-                    "voyage-3.5-lite",
-                    "voyage-3",
-                    "voyage-3-lite",
-                    "voyage-3-large",
-                    "voyage-code-3",
-                    "voyage-2",
-                    "voyage-large-2",
-                    "voyage-finance-2",
-                    "voyage-multilingual-2"
+                    "voyage-context-3",      # Contextual API (recomendado para RAG)
+                    "voyage-3.5",            # Embed API - Alta qualidade geral
+                    "voyage-3.5-lite",       # Embed API - Mais rápido
+                    "voyage-multilingual-2"  # Embed API - Para docs multilíngue
                 ]
+            ),
+            "Output Dimension": InputConfig(
+                type="dropdown",
+                value="1024",
+                description="Dimensões do embedding Voyage (menor = mais rápido, maior = mais preciso)",
+                values=["256", "512", "1024", "2048"]
             ),
             "Enable Named Vectors": InputConfig(
                 type="bool",
                 value=True,
-                description="Habilitar named vectors especializados",
+                description="Habilitar named vectors especializados (concept, company, sector)",
                 values=[]
             ),
             "Voyage API Key": InputConfig(
@@ -82,26 +98,77 @@ class HybridConsultingEmbedder(Embedding):
         Usado pelo Retriever para buscar em concept_vec, company_vec, etc.
         """
         if not self.minilm:
-            # Fallback se não carregou
             return []
         
         try:
-            # Gera embedding usando MiniLM (384d)
-            embedding = self.minilm.encode(query)
+            # Normalização é importante para cosine similarity
+            embedding = self.minilm.encode(query, normalize_embeddings=True)
             return embedding.tolist()
         except Exception as e:
             msg.warn(f"Erro ao gerar named query vector: {e}")
             return []
     
+    def vectorize_query(self, query: str, config: dict = None) -> List[float]:
+        """
+        Gera embedding para query usando Voyage Context-3.
+        Para queries, usamos input_type="query".
+        """
+        if not self.voyage_client:
+            msg.warn("Voyage client não disponível para query")
+            return self.vectorize_named_query(query)  # Fallback para MiniLM
+        
+        # Merge config: argumento tem prioridade sobre self.config
+        effective_config = self.config.copy()
+        if config:
+            effective_config.update(config)
+
+        try:
+            model = self._get_config_value(effective_config, "Voyage Model", "voyage-context-3")
+            output_dim = int(self._get_config_value(effective_config, "Output Dimension", "1024"))
+            
+            if model == "voyage-context-3":
+                # Contextual API para queries
+                # input_type="query" é CRUCIAL para queries
+                result = self.voyage_client.contextualized_embed(
+                    inputs=[[query]],  # [[query]] (lista de listas obrigatória)
+                    model="voyage-context-3",
+                    input_type="query",
+                    output_dimension=output_dim
+                )
+                
+                # Parse robusto unificado
+                extracted = self._extract_embeddings(result)
+                if extracted and extracted[0] and extracted[0][0]:
+                     return extracted[0][0]
+                else:
+                     raise ValueError(f"Retorno vazio do Voyage para query: {result}")
+
+            else:
+                # Embed API padrão para outros modelos
+                result = self.voyage_client.embed(
+                    texts=[query],
+                    model=model,
+                    input_type="query",
+                    output_dimension=output_dim if model in ["voyage-3.5", "voyage-3.5-lite"] else None,
+                    truncation=True
+                )
+                return result.embeddings[0]
+                
+        except Exception as e:
+            msg.fail(f"Erro CRÍTICO ao gerar query embedding Voyage: {e}")
+            # Strict mode: Não fazer fallback silencioso para MiniLM se Voyage foi explicitamente solicitado
+            # Retorna vetor vazio ou propaga erro
+            return []
+    
     def _initialize_embedders(self):
         """Inicializa embedders (lazy loading)"""
-        # Voyage 3.5 (premium, para default vector)
+        # Voyage Context-3 (premium, contextual para default vector)
         try:
             import voyageai
             api_key = os.getenv("VOYAGE_API_KEY", "")
             if api_key:
                 self.voyage_client = voyageai.Client(api_key=api_key)
-                msg.good("✅ Voyage 3.5 inicializado (default vector)")
+                msg.good("✅ Voyage Context-3 inicializado (default vector - contextual)")
             else:
                 msg.warn("⚠️ VOYAGE_API_KEY não configurada - default vector não disponível")
         except ImportError:
@@ -110,15 +177,14 @@ class HybridConsultingEmbedder(Embedding):
         # MiniLM-L12 (local, universal para concept/company/sector)
         try:
             from sentence_transformers import SentenceTransformer
-            # Use helper to get config value safely
             use_gpu = self._get_config_value(self.config, "Use GPU", False)
             device = 'cuda' if use_gpu else 'cpu'
             self.minilm = SentenceTransformer(
                 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                 device=device
             )
-            msg.good(f"✅ MiniLM-L12 inicializado em {device} (concept/company/sector)")
-            msg.info("   RAM: ~300 MB | Dimensões: 384 | Uso: Universal (3 named vectors)")
+            msg.good(f"✅ MiniLM-L12 inicializado em {device} (named vectors)")
+            msg.info("   RAM: ~300 MB | Dimensões: 384 | Uso: concept/company/sector vectors")
         except ImportError:
             msg.warn("⚠️ sentence-transformers não instalado - pip install sentence-transformers")
         except Exception as e:
@@ -126,65 +192,99 @@ class HybridConsultingEmbedder(Embedding):
     
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
         """
-        Vectorize usando Voyage 3.5 com proteção contra overflow.
+        Vectorize usando Voyage (contextual ou embed API dependendo do modelo).
         
-        Voyage 3.5 limite: 32,000 tokens
-        Estratégia:
-        - Se chunk < 31k tokens: processa normalmente
-        - Se chunk > 31k tokens: trunca mantendo início + fim
-        
-        Alternativa: Use auto-chunking para zero perda (ver ANALISE_LIMITES_CONTEXTO.md)
+        Para voyage-context-3: Usa contextualized_embed() com formato [[chunk1, chunk2, ...]]
+        Para outros modelos: Usa embed() padrão
         """
         if not self.voyage_client:
             msg.fail("[Hybrid-Embedder] Voyage client não inicializado")
             return []
         
-        # Processa content com truncation protection
-        processed_content = []
-        truncated_count = 0
+        model = self._get_config_value(config, "Voyage Model", "voyage-context-3")
+        output_dim = int(self._get_config_value(config, "Output Dimension", "1024"))
         
-        for i, text in enumerate(content):
-            # Estima tokens (aproximação: 1 token ≈ 4 chars)
-            token_estimate = len(text) // 4
-            
-            if token_estimate > MAX_VOYAGE_TOKENS:
-                truncated_count += 1
-                msg.warn(
-                    f"[Hybrid-Embedder] ⚠️ Chunk {i} tem ~{token_estimate:,} tokens "
-                    f"(limite: {MAX_VOYAGE_TOKENS:,}). Truncando início+fim..."
-                )
-                
-                # Truncate inteligente: mantém início + fim (perde meio)
-                # Rationale: Início tem contexto, fim tem conclusões
-                chars_limit = MAX_VOYAGE_TOKENS * 4
-                half_limit = chars_limit // 2
-                
-                truncated = (
-                    text[:half_limit] + 
-                    "\n\n[... CONTEÚDO TRUNCADO ...]\n\n" + 
-                    text[-half_limit:]
-                )
-                processed_content.append(truncated)
-            else:
-                processed_content.append(text)
+        if model == "voyage-context-3":
+            # ============================================
+            # CONTEXTUAL API - voyage-context-3
+            # ============================================
+            # Formato: inputs = [[chunk1, chunk2, ...]] onde cada inner list é um documento
+            # Para vectorize() simples, tratamos como um único documento
+            return await self._embed_voyage_contextual(content, output_dim)
+        else:
+            # ============================================
+            # EMBED API PADRÃO - outros modelos
+            # ============================================
+            return await self._embed_voyage_standard(content, model, output_dim)
+    
+    async def _embed_voyage_contextual(
+        self, 
+        chunks: List[str], 
+        output_dim: int = 1024
+    ) -> List[List[float]]:
+        """
+        Embedding contextual usando voyage-context-3.
         
-        if truncated_count > 0:
-            msg.info(
-                f"[Hybrid-Embedder] 💡 {truncated_count} chunk(s) truncado(s). "
-                f"Considere re-chunking para evitar perda de dados."
-            )
+        Formato de input: [[chunk1, chunk2, chunk3, ...]]
+        - Cada inner list representa chunks de UM documento
+        - O modelo entende o contexto entre chunks do mesmo doc
+        """
+        if not chunks:
+            return []
+        
+        msg.info(f"[Hybrid-Embedder] 🧠 Contextual embedding: {len(chunks)} chunks")
         
         try:
-            result = self.voyage_client.embed(
-                texts=processed_content,
-                model="voyage-3.5",
+            # Para vectorize() simples, todos os chunks são do mesmo documento
+            # Então enviamos como uma única inner list
+            result = self.voyage_client.contextualized_embed(
+                inputs=[chunks],  # [[chunk1, chunk2, ...]]
+                model="voyage-context-3",
                 input_type="document",
-                truncation=True  # ✅ Fallback adicional (Voyage internal truncation)
+                output_dimension=output_dim
             )
-            return result.embeddings
-        
+            
+            # Resultado: embeddings[0] = lista de embeddings para o primeiro documento
+            embeddings = result.embeddings[0]
+            
+            msg.good(f"[Hybrid-Embedder] ✅ Contextual: {len(embeddings)} embeddings ({output_dim}d)")
+            return embeddings
+            
         except Exception as e:
-            msg.fail(f"[Hybrid-Embedder] Erro no Voyage: {str(e)}")
+            msg.fail(f"[Hybrid-Embedder] Erro no Voyage Contextual: {str(e)}")
+            return []
+    
+    async def _embed_voyage_standard(
+        self, 
+        texts: List[str], 
+        model: str,
+        output_dim: int = 1024
+    ) -> List[List[float]]:
+        """
+        Embedding padrão usando embed() API (voyage-3.5, voyage-3.5-lite, etc).
+        """
+        if not texts:
+            return []
+        
+        msg.info(f"[Hybrid-Embedder] 📄 Standard embedding ({model}): {len(texts)} texts")
+        
+        try:
+            # Suporte a output_dimension apenas para modelos 3.5
+            supports_dim = model in ["voyage-3.5", "voyage-3.5-lite"]
+            
+            result = self.voyage_client.embed(
+                texts=texts,
+                model=model,
+                input_type="document",
+                output_dimension=output_dim if supports_dim else None,
+                truncation=True
+            )
+            
+            msg.good(f"[Hybrid-Embedder] ✅ Standard: {len(result.embeddings)} embeddings")
+            return result.embeddings
+            
+        except Exception as e:
+            msg.fail(f"[Hybrid-Embedder] Erro no Voyage Standard: {str(e)}")
             return []
     
     async def vectorize_named(
@@ -194,27 +294,12 @@ class HybridConsultingEmbedder(Embedding):
         vector_name: str = "default"
     ) -> List[List[float]]:
         """
-        Embeddings para um named vector específico (Smart Import Hook).
+        Embeddings para um named vector específico.
         
-        Interface para import_hook.py que sabe qual vetor está gerando.
-        Implementa a spec do Hybrid Multi-Embedder Design.
-        
-        Args:
-            config: Configuração do embedder
-            content: Lista de textos para embedar
-            vector_name: Nome do vetor ("default", "concept_vec", "company_vec", "sector_vec")
-        
-        Returns:
-            Lista de embeddings (dimensões dependem do vector_name)
-            - default: 1024 dims (Voyage)
-            - concept/company/sector: 384 dims (MiniLM)
-        
-        Example:
-            # Smart Import Hook chama:
-            vec = await embedder.vectorize_named(config, ["text"], vector_name="company_vec")
+        - default: Voyage Context-3 (1024 dims)
+        - concept/company/sector: MiniLM (384 dims)
         """
         if vector_name == "default":
-            # Voyage 3.5 (premium, 1024 dims)
             if self.voyage_client:
                 return await self.vectorize(config, content)
             else:
@@ -222,21 +307,14 @@ class HybridConsultingEmbedder(Embedding):
                 return self._embed_minilm(content)
         
         elif vector_name in ["concept_vec", "company_vec", "sector_vec"]:
-            # MiniLM (local, 384 dims) - universal para todos os 3
             if self.minilm:
                 return self._embed_minilm(content)
             else:
-                msg.warn(f"⚠️ MiniLM não disponível para {vector_name}, usando Voyage")
-                # Fallback to vectorize (creates 1024 dims, which might fail insert if schema expects 384)
-                # But it's better than nothing.
-                try:
-                    return await self.vectorize(config, content)
-                except:
-                    # Return empty vectors if dimension mismatch expected
-                    return [[0.0] * 384 for _ in content]
+                msg.warn(f"⚠️ MiniLM não disponível para {vector_name}")
+                return [[0.0] * 384 for _ in content]
         
         else:
-            msg.warn(f"⚠️ Vector name desconhecido: {vector_name}, usando default")
+            msg.warn(f"⚠️ Vector name desconhecido: {vector_name}")
             return await self.vectorize_named(config, content, "default")
     
     async def vectorize_with_named_vectors(
@@ -247,16 +325,21 @@ class HybridConsultingEmbedder(Embedding):
         """
         Gera embeddings para todos os named vectors.
         
+        Arquitetura:
+        - default: Voyage Context-3 (contextual, por documento)
+        - concept/company/sector: MiniLM (local, leve)
+        
         Returns:
             {
-                "default": [[1024 floats], ...],      # Voyage 3.5
-                "concept_vec": [[1024 floats], ...],  # BGE-M3/MiniLM
+                "default": [[1024 floats], ...],      # Voyage Context-3
+                "concept_vec": [[384 floats], ...],   # MiniLM
                 "company_vec": [[384 floats], ...],   # MiniLM
                 "sector_vec": [[384 floats], ...]     # MiniLM
             }
         """
-        enable_named_config = self.config.get("Enable Named Vectors", {})
-        enable_named = enable_named_config.get("value", True) if isinstance(enable_named_config, dict) else True
+        enable_named = self._get_config_value(self.config, "Enable Named Vectors", True)
+        output_dim = int(self._get_config_value(self.config, "Output Dimension", "1024"))
+        model = self._get_config_value(self.config, "Voyage Model", "voyage-context-3")
         
         if not enable_named:
             # Apenas default vector
@@ -264,180 +347,299 @@ class HybridConsultingEmbedder(Embedding):
             default_embeddings = await self.vectorize(self.config, default_texts)
             return {"default": default_embeddings}
         
-        msg.info("[Hybrid-Embedder] 🎯 Gerando embeddings com named vectors...")
+        msg.info("[Hybrid-Embedder] 🎯 Gerando embeddings híbridos...")
         
-        # Agrupa chunks por documento para contexto hierárquico
+        # Agrupa chunks por documento para contexto
         chunks_by_doc = self._group_by_document(chunks, documents)
         
-        named_embeddings = {
-            "default": [],
-            "concept_vec": [],
-            "company_vec": [],
-            "sector_vec": []
-        }
+        # Inicializa resultados com List Comprehension para evitar referência duplicada
+        results_default = [None for _ in range(len(chunks))]
+        results_concept = [None for _ in range(len(chunks))]
+        results_company = [None for _ in range(len(chunks))]
+        results_sector = [None for _ in range(len(chunks))]
         
-        # Maintain order of chunks for result alignment
-        # We process by doc, but results need to match original chunks order?
-        # Actually verify_import/ingest sends a list of chunks, usually from same doc or batch.
-        # But to be safe, we should respect input order. 
-        # The simplest way is to process by doc, then construct a map {chunk_id: embeddings} and reconstruct list.
-        # But chunks are objects, not easily hashable.
-        # Assuming chunks list is processed sequentially.
-        # Let's verify input. Chunks are usually from one document in load().
-        # But chunk() might batch.
-        
-        # However, for simplicity and performance we process by doc.
-        # To handle ordering:
-        
-        # 1. Map chunks to their original index
+        # Map chunk -> índice original
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
         
-        # Initialize results list with empty placeholders
-        results_default = [None] * len(chunks)
-        results_concept = [None] * len(chunks)
-        results_company = [None] * len(chunks)
-        results_sector = [None] * len(chunks)
-        
         for doc_uuid, doc_chunks in chunks_by_doc.items():
+            # ORDENAÇÃO É IMPORTANTE para contexto!
+            # Ordena por chunk_id (float) ou start_i
+            doc_chunks.sort(key=lambda c: (getattr(c, 'chunk_id', 0) or 0)) 
+
             document = self._get_document(doc_uuid, documents)
             if not document:
-                 # Fallback if doc not found (shouldn't happen)
-                 document = Document(text="", title="Unknown", type="text")
-
+                document = Document(text="", name="Unknown", type="text")
             
-            # Constrói contextos hierárquicos
+            # Índices dos chunks deste documento
+            current_indices = [chunk_indices[id(c)] for c in doc_chunks]
+            
+            # ============================================
+            # 1. DEFAULT VECTOR: Voyage Context-3 (Contextual Batching)
+            # ============================================
+            # Apenas prepara os dados aqui - o processamento real em batch acontece depois
+            if self.voyage_client and model == "voyage-context-3":
+                 # Acumula para batch processing global
+                 # Precisamos de uma lista global de documentos para enviar em batches eficientes
+                 pass 
+            elif self.voyage_client:
+                # Outros modelos Voyage (standard)
+                doc_texts = [c.content for c in doc_chunks]
+                emb_default = await self._embed_voyage_standard(doc_texts, model, output_dim)
+            else:
+                # Fallback: MiniLM
+                doc_texts = [c.content for c in doc_chunks]
+                emb_default = self._embed_minilm(doc_texts)
+            
+            # ============================================
+            # 2-4. NAMED VECTORS: MiniLM (Local, Leve)
+            # ============================================
             global_context = self._build_global_context(document, doc_chunks)
-            concept_context = self._build_concept_context(global_context)
-            company_context = self._build_company_context(global_context)
-            sector_context = self._build_sector_context(global_context)
             
-            # Prepara textos para cada named vector
-            texts_default = []
             texts_concept = []
             texts_company = []
             texts_sector = []
             
-            current_doc_indices = []
-            
             for chunk in doc_chunks:
-                # Store index to put result back in correct place
-                current_doc_indices.append(chunk_indices[id(chunk)])
-                
-                # Default: contexto completo (Voyage contextual)
-                texts_default.append(
-                    self._build_default_text(global_context, chunk)
-                )
-                
-                # Concept: foco em frameworks e metodologias
-                texts_concept.append(
-                    self._build_concept_text(concept_context, chunk)
-                )
-                
-                # Company: foco em empresas mencionadas
-                texts_company.append(
-                    self._build_company_text(company_context, chunk)
-                )
-                
-                # Sector: foco em setores/indústrias
-                texts_sector.append(
-                    self._build_sector_text(sector_context, chunk)
-                )
+                texts_concept.append(self._build_concept_text(global_context, chunk))
+                texts_company.append(self._build_company_text(global_context, chunk))
+                texts_sector.append(self._build_sector_text(global_context, chunk))
             
-            # === EMBEDDING COM MODELO UNIVERSAL ===
-            
-            msg.info(f"   Doc {str(doc_uuid)[:8]}: hybrid embedding ({len(doc_chunks)} chunks)...")
-            
-            # 1. DEFAULT: Voyage 3.5 (premium, contextual)
-            if self.voyage_client:
-                # msg.info(f"      [Voyage] default_vec ({len(texts_default)} chunks)...")
-                emb_default = await self._embed_voyage_batch(texts_default)
-            else:
-                emb_default = self._embed_minilm(texts_default) # Fallback
-
-            # 2-4. SECUNDÁRIOS: MiniLM (local, universal para todos)
             if self.minilm:
-                # msg.info(f"      [MiniLM] concept_vec ({len(texts_concept)} chunks)...")
                 emb_concept = self._embed_minilm(texts_concept)
-                
-                # msg.info(f"      [MiniLM] company_vec ({len(texts_company)} chunks)...")
                 emb_company = self._embed_minilm(texts_company)
-                
-                # msg.info(f"      [MiniLM] sector_vec ({len(texts_sector)} chunks)...")
                 emb_sector = self._embed_minilm(texts_sector)
             else:
-                 # Fallback if local model fails (shouldn't happen if initialized)
-                 emb_concept = [[0.0]*384] * len(texts_concept)
-                 emb_company = [[0.0]*384] * len(texts_company)
-                 emb_sector = [[0.0]*384] * len(texts_sector)
-
+                # Inicialização correta sem referências compartilhadas
+                emb_concept = [[0.0] * 384 for _ in range(len(texts_concept))]
+                emb_company = [[0.0] * 384 for _ in range(len(texts_company))]
+                emb_sector = [[0.0] * 384 for _ in range(len(texts_sector))]
             
-            # Place results in correct positions
-            for i, idx in enumerate(current_doc_indices):
-                results_default[idx] = emb_default[i]
+            # Coloca resultados nas posições corretas (exceto default contextual, que faremos em batch)
+            original_indices = [chunk_indices[id(c)] for c in doc_chunks]
+            
+            for i, idx in enumerate(original_indices):
+                if not (self.voyage_client and model == "voyage-context-3"):
+                     results_default[idx] = emb_default[i] if i < len(emb_default) else [0.0] * output_dim
+                
                 results_concept[idx] = emb_concept[i]
                 results_company[idx] = emb_company[i]
                 results_sector[idx] = emb_sector[i]
+                
+        # ============================================
+        # PROCESSAMENTO EM BATCH (Voyage Contextual)
+        # ============================================
+        if self.voyage_client and model == "voyage-context-3":
+             msg.info("[Hybrid-Embedder] 🚀 Iniciando processamento em batch contextual...")
+             
+             # Prepara documentos para batching
+             # Lista de (doc_chunks, original_indices_for_these_chunks)
+             docs_to_process = []
+             
+             for doc_uuid, doc_chunks in chunks_by_doc.items():
+                 # Já foram ordenados acima
+                 original_indices = [chunk_indices[id(c)] for c in doc_chunks]
+                 docs_to_process.append((doc_chunks, original_indices))
+             
+             # Processa com batching inteligente
+             batch_results = await self._embed_voyage_contextual_batch(docs_to_process, output_dim)
+             
+             # Desempacota resultados
+             for i, embedding in batch_results.items():
+                 # i key is the original index
+                 results_default[i] = embedding
         
-        # Verify complete
-        named_embeddings["default"] = results_default
-        named_embeddings["concept_vec"] = results_concept
-        named_embeddings["company_vec"] = results_company
-        named_embeddings["sector_vec"] = results_sector
+        # Robustez final: Preencher Nones restantes com zeros
+        # (Isso garante que nunca retornamos None para o banco vetorial)
+        none_indices = [i for i, x in enumerate(results_default) if x is None]
+        if none_indices:
+             msg.warn(f"[Hybrid-Embedder] ⚠️ Preenchendo {len(none_indices)} chunks com vetores vazios (falha upstream).")
+             zero_vec = [0.0] * output_dim
+             for i in none_indices:
+                 results_default[i] = zero_vec
+                  
+        msg.good("✅ Embedding híbrido completo:")
+        msg.info(f"   Default (Voyage): {len([r for r in results_default if r])} chunks ({output_dim}d)")
+        msg.info(f"   Named (MiniLM): {len([r for r in results_concept if r])} chunks x3 (384d)")
         
-        msg.good("✅ Hybrid embedding completo:")
-        msg.info(f"   Voyage calls: {len(results_default)} chunks")
-        msg.info(f"   Local embeddings: {len(results_company) * 3} chunks")
-        
-        return named_embeddings
+        return {
+            "default": results_default,
+            "concept_vec": results_concept,
+            "company_vec": results_company,
+            "sector_vec": results_sector
+        }
     
-    async def _embed_voyage_batch(self, texts: List[str]) -> List[List[float]]:
+    async def _embed_voyage_contextual_batch(
+        self,
+        docs_with_indices: List[tuple],
+        output_dim: int
+    ) -> Dict[int, List[float]]:
         """
-        Embedding com Voyage em batches com proteção contra overflow.
+        Processa múltiplos documentos em batches respeitando limites da API.
         
-        Aplica mesma lógica de truncation do vectorize().
+        Retorna: Dict {original_index: embedding}
         """
-        # Pre-processa textos com truncation
-        processed_texts = []
-        for text in texts:
-            token_estimate = len(text) // 4
-            
-            if token_estimate > MAX_VOYAGE_TOKENS:
-                # Trunca
-                chars_limit = MAX_VOYAGE_TOKENS * 4
-                half = chars_limit // 2
-                truncated = (
-                    text[:half] + 
-                    "\n\n[...TRUNCATED...]\n\n" + 
-                    text[-half:]
-                )
-                processed_texts.append(truncated)
-            else:
-                processed_texts.append(text)
+        final_results = {}
         
-        # Batch processing
-        batch_size = 128
-        all_embeddings = []
+        # Buffer para o batch atual
+        current_batch_inputs = []      # List[List[str]]
+        current_batch_indices = []     # List[List[int]] (indices originais correspondentes)
         
-        for i in range(0, len(processed_texts), batch_size):
-            batch = processed_texts[i:i+batch_size]
+        current_tokens = 0
+        current_chunks = 0
+        
+        for doc_chunks, original_indices in docs_with_indices:
+            # 1. NÍVEL 1: Validação e Split de Documento (Limite 32k)
+            # Garante que nenhum documento individual exceda o limite de contexto
+            sub_docs = self._ensure_document_limits(doc_chunks, original_indices)
             
-            model = self._get_config_value(self.config, "Voyage Model", "voyage-3.5")
+            for sub_doc_texts, sub_doc_indices in sub_docs:
+                doc_tokens = sum(len(t)//CHARS_PER_TOKEN for t in sub_doc_texts)
+                doc_n_chunks = len(sub_doc_texts)
+                
+                # 2. NÍVEL 2: Verificação de Limite do Batch (Limite 120k / 16k chunks / 1k docs)
+                # Se adicionar este doc estourar o batch, despacha o atual e começa novo
+                if (current_tokens + doc_tokens > MAX_VOYAGE_BATCH_TOKENS or
+                    current_chunks + doc_n_chunks > MAX_VOYAGE_BATCH_CHUNKS or
+                    len(current_batch_inputs) >= MAX_VOYAGE_BATCH_DOCS):
+                    
+                    # Despacha batch atual
+                    await self._dispatch_batch(current_batch_inputs, current_batch_indices, output_dim, final_results)
+                    
+                    # Reset batch
+                    current_batch_inputs = []
+                    current_batch_indices = []
+                    current_tokens = 0
+                    current_chunks = 0
+                
+                # Adiciona ao batch atual
+                current_batch_inputs.append(sub_doc_texts)
+                current_batch_indices.append(sub_doc_indices)
+                current_tokens += doc_tokens
+                current_chunks += doc_n_chunks
+        
+        # Despacha o último batch remanescente
+        if current_batch_inputs:
+            await self._dispatch_batch(current_batch_inputs, current_batch_indices, output_dim, final_results)
             
-            result = self.voyage_client.embed(
-                texts=batch,
-                model=model,
+        return final_results
+
+    def _ensure_document_limits(self, chunks: List[Chunk], indices: List[int]) -> List[tuple]:
+        """
+        NÍVEL 1: Garante que um documento respeite o limite de 32k tokens de contexto.
+        Se exceder, divide em sub-documentos lógicos.
+        """
+        texts = [c.content for c in chunks]
+        total_tokens = sum(len(t)//CHARS_PER_TOKEN for t in texts)
+        
+        if total_tokens <= MAX_VOYAGE_DOC_TOKENS:
+            return [(texts, indices)]
+        
+        # Documento excede 32k tokens - Strategy: Split Simples (mantém ordem)
+        msg.warn(f"[Hybrid-Embedder] ⚠️ Documento excede limite de contexto ({total_tokens} > {MAX_VOYAGE_DOC_TOKENS}). Dividindo em sub-contextos.")
+        
+        sub_docs = []
+        current_sub_texts = []
+        current_sub_indices = []
+        current_sub_tokens = 0
+        
+        for i, text in enumerate(texts):
+            chunk_tokens = len(text)//CHARS_PER_TOKEN
+            
+            # Se um único chunk for maior que o limite (caso extremo), trunca ou falha
+            if chunk_tokens > MAX_VOYAGE_DOC_TOKENS:
+                # Falha explícita para forçar chunking correto upstream
+                msg.fail(f"[Hybrid-Embedder] ❌ Chunk {i} excede limite de contexto ({chunk_tokens} > {MAX_VOYAGE_DOC_TOKENS}).")
+                # Se for crítico para operação, poderiamos tentar truncar aqui, mas better fail loud
+                raise ValueError(f"Chunk excede limite de tokens do Voyage ({chunk_tokens} > {MAX_VOYAGE_DOC_TOKENS}). Reduza tamanho dos chunks na ingestão.") 
+            
+            # Check de limite de CHUNKS no documento (além de tokens)
+            # Se acumulamos chunks demais num único sub-doc, Voyage pode rejeitar
+            # MAX_VOYAGE_BATCH_CHUNKS divide entre docs, mas um único doc também não pode exceder
+            if len(current_sub_texts) >= MAX_VOYAGE_BATCH_CHUNKS: # Limite seguro
+                 # Fecha sub-doc atual
+                 sub_docs.append((current_sub_texts, current_sub_indices))
+                 current_sub_texts = []
+                 current_sub_indices = []
+                 current_sub_tokens = 0
+            
+            if current_sub_tokens + chunk_tokens > MAX_VOYAGE_DOC_TOKENS:
+                # Fecha sub-documento atual
+                if current_sub_texts:
+                    sub_docs.append((current_sub_texts, current_sub_indices))
+                
+                # Começa novo
+                current_sub_texts = []
+                current_sub_indices = []
+                current_sub_tokens = 0
+            
+            current_sub_texts.append(text)
+            current_sub_indices.append(indices[i])
+            current_sub_tokens += chunk_tokens
+            
+        if current_sub_texts:
+             sub_docs.append((current_sub_texts, current_sub_indices))
+             
+        return sub_docs
+
+    async def _dispatch_batch(
+        self, 
+        inputs: List[List[str]], 
+        indices_list: List[List[int]], 
+        output_dim: int,
+        results_map: Dict
+    ):
+        """Helper para enviar batch e mapear resultados"""
+        if not inputs:
+            return
+
+        msg.info(f"[Hybrid-Embedder] 📡 Despachando batch: {len(inputs)} docs, {sum(len(x) for x in inputs)} chunks")
+        
+        try:
+            result = self.voyage_client.contextualized_embed(
+                inputs=inputs,
+                model="voyage-context-3",
                 input_type="document",
-                truncation=True  # ✅ Fallback
+                output_dimension=output_dim
             )
             
-            all_embeddings.extend(result.embeddings)
-        
-        return all_embeddings
+            # Parse robusto usando helper
+            all_embeddings = self._extract_embeddings(result)
+            
+            if len(all_embeddings) != len(inputs):
+                 msg.warn(f"[Hybrid-Embedder] ⚠️ Mismatch Docs: Enviei {len(inputs)}, recebi {len(all_embeddings)}. Tentando alinhar...")
+                 # Se houver mismatch de docs, é catastrófico. Mas tentamos zipar.
+
+            for doc_idx, doc_embeddings in enumerate(all_embeddings):
+                if doc_idx >= len(indices_list):
+                    break # Recebemos mais docs do que enviamos??
+                    
+                original_indices = indices_list[doc_idx]
+                
+                if len(doc_embeddings) != len(original_indices):
+                    msg.warn(f"Mismatch Chunks (Doc {doc_idx}): enviei {len(original_indices)}, recebi {len(doc_embeddings)}. Preenchendo zeros.")
+                    # Preenche o que der, completa o resto com zeros
+                    for i, idx in enumerate(original_indices):
+                        if i < len(doc_embeddings):
+                            results_map[idx] = doc_embeddings[i]
+                        else:
+                            results_map[idx] = [0.0] * output_dim
+                else:
+                    for chuck_idx, embedding in enumerate(doc_embeddings):
+                        final_idx = original_indices[chuck_idx]
+                        results_map[final_idx] = embedding
+                    
+        except Exception as e:
+            msg.fail(f"[Hybrid-Embedder] ❌ Erro no batch Voyage: {str(e)}")
+            # Fallback seguro: preencher com zeros
+            for doc_idx, indices in enumerate(indices_list):
+                 for idx in indices:
+                     results_map[idx] = [0.0] * output_dim
     
     def _embed_minilm(self, texts: List[str]) -> List[List[float]]:
-        """
-        Embedding com MiniLM (local, universal).
-        """
+        """Embedding com MiniLM (local, 384 dims)."""
+        if not self.minilm:
+            return [[0.0] * 384 for _ in texts]
+        
         embeddings = self.minilm.encode(
             texts,
             batch_size=64,
@@ -447,7 +649,7 @@ class HybridConsultingEmbedder(Embedding):
         return embeddings.tolist()
     
     # ========================================================================
-    # CONSTRUÇÃO DE CONTEXTOS HIERÁRQUICOS
+    # CONSTRUÇÃO DE CONTEXTOS PARA NAMED VECTORS
     # ========================================================================
     
     def _build_global_context(self, document: Document, chunks: List[Chunk]) -> Dict:
@@ -459,7 +661,6 @@ class HybridConsultingEmbedder(Embedding):
         for chunk in chunks:
             if hasattr(chunk, 'meta') and chunk.meta:
                 meta = chunk.meta
-                # Handle potential string vs list issues
                 if isinstance(meta.get("frameworks"), list):
                     frameworks_all.update(meta.get("frameworks"))
                 if isinstance(meta.get("companies"), list):
@@ -468,116 +669,48 @@ class HybridConsultingEmbedder(Embedding):
                     sectors_all.update(meta.get("sectors"))
         
         return {
-            "title": document.title or "Documento de Consultoria",
+            "title": getattr(document, 'name', None) or getattr(document, 'title', None) or "Documento",
             "frameworks": list(frameworks_all),
             "companies": list(companies_all),
             "sectors": list(sectors_all)
         }
     
-    def _build_concept_context(self, global_context: Dict) -> str:
-        """Contexto para concept_vec (frameworks/metodologias)"""
-        frameworks = global_context.get("frameworks", [])
-        if frameworks:
-            return f"Frameworks: {', '.join(frameworks)}"
-        return "Análise de negócios"
-    
-    def _build_company_context(self, global_context: Dict) -> str:
-        """Contexto para company_vec (empresas)"""
-        companies = global_context.get("companies", [])
-        if companies:
-            return f"Empresas: {', '.join(companies[:5])}"
-        return "Stakeholders corporativos"
-    
-    def _build_sector_context(self, global_context: Dict) -> str:
-        """Contexto para sector_vec (setores)"""
-        sectors = global_context.get("sectors", [])
-        if sectors:
-            return f"Setores: {', '.join(sectors)}"
-        return "Contexto industrial"
-    
-    def _build_default_text(self, global_context: Dict, chunk: Chunk) -> str:
-        """
-        Texto completo para default vector (Voyage contextual) com contexto adaptativo.
-        """
-        # Estima tamanho do chunk
-        chunk_tokens = len(chunk.content) // 4
-        
-        # Decide nível de contexto baseado em tamanho
-        if chunk_tokens > 25_000:
-            # CONTEXTO MÍNIMO (~50 tokens)
-            context_prefix = f"Documento: {global_context.get('title', 'Unknown')}\n\n"
-            
-            msg.info(
-                f"[Hybrid-Embedder] Chunk grande (~{chunk_tokens:,} tokens), "
-                "usando contexto mínimo"
-            )
-        
-        elif chunk_tokens > 20_000:
-            # CONTEXTO REDUZIDO (~200-500 tokens)
-            context_prefix = f"Documento: {global_context.get('title', 'Unknown')}\n"
-            
-            chunk_frameworks = chunk.meta.get("frameworks", [])[:5] if hasattr(chunk, 'meta') and chunk.meta else []
-            if chunk_frameworks:
-                context_prefix += f"Frameworks: {', '.join(chunk_frameworks)}\n"
-            
-            chunk_companies = chunk.meta.get("companies", [])[:5] if hasattr(chunk, 'meta') and chunk.meta else []
-            if chunk_companies:
-                context_prefix += f"Empresas: {', '.join(chunk_companies)}\n"
-            
-            context_prefix += "\n"
-            
-            msg.info(
-                f"[Hybrid-Embedder] Chunk médio (~{chunk_tokens:,} tokens), "
-                "usando contexto reduzido"
-            )
-        
-        else:
-            # CONTEXTO COMPLETO (~2k-5k tokens)
-            context_prefix = f"Documento: {global_context['title']}\n"
-            
-            if global_context.get('frameworks'):
-                context_prefix += f"Frameworks: {', '.join(global_context['frameworks'][:10])}\n"
-            
-            if global_context.get('companies'):
-                context_prefix += f"Empresas: {', '.join(global_context['companies'][:10])}\n"
-            
-            if global_context.get('sectors'):
-                context_prefix += f"Setores: {', '.join(global_context['sectors'][:5])}\n"
-            
-            context_prefix += "\n"
-        
-        return context_prefix + chunk.content
-    
-    def _build_concept_text(self, concept_context: str, chunk: Chunk) -> str:
-        """Texto para concept_vec (foco em frameworks) - MiniLM"""
+    def _build_concept_text(self, global_context: Dict, chunk: Chunk) -> str:
+        """Texto para concept_vec (foco em frameworks)"""
         chunk_frameworks = chunk.meta.get("frameworks", []) if hasattr(chunk, 'meta') and chunk.meta else []
         
         if chunk_frameworks:
             prefix = f"Frameworks: {', '.join(chunk_frameworks)}\n"
+        elif global_context.get("frameworks"):
+            prefix = f"Frameworks: {', '.join(global_context['frameworks'][:5])}\n"
         else:
-            prefix = f"{concept_context}\n"
+            prefix = "Análise de negócios\n"
         
         return prefix + chunk.content
     
-    def _build_company_text(self, company_context: str, chunk: Chunk) -> str:
+    def _build_company_text(self, global_context: Dict, chunk: Chunk) -> str:
         """Texto para company_vec (foco em empresas)"""
         chunk_companies = chunk.meta.get("companies", []) if hasattr(chunk, 'meta') and chunk.meta else []
         
         if chunk_companies:
             prefix = f"Empresas: {', '.join(chunk_companies)}\n"
+        elif global_context.get("companies"):
+            prefix = f"Empresas: {', '.join(global_context['companies'][:5])}\n"
         else:
-            prefix = f"{company_context}\n"
+            prefix = "Stakeholders corporativos\n"
         
         return prefix + chunk.content
     
-    def _build_sector_text(self, sector_context: str, chunk: Chunk) -> str:
+    def _build_sector_text(self, global_context: Dict, chunk: Chunk) -> str:
         """Texto para sector_vec (foco em setores)"""
         chunk_sectors = chunk.meta.get("sectors", []) if hasattr(chunk, 'meta') and chunk.meta else []
         
         if chunk_sectors:
             prefix = f"Setores: {', '.join(chunk_sectors)}\n"
+        elif global_context.get("sectors"):
+            prefix = f"Setores: {', '.join(global_context['sectors'][:5])}\n"
         else:
-            prefix = f"{sector_context}\n"
+            prefix = "Contexto industrial\n"
         
         return prefix + chunk.content
     
@@ -595,7 +728,6 @@ class HybridConsultingEmbedder(Embedding):
                     grouped[doc_uuid] = []
                 grouped[doc_uuid].append(chunk)
             else:
-                # Handle chunks without doc_uuid (rare)
                 if "unknown" not in grouped:
                     grouped["unknown"] = []
                 grouped["unknown"].append(chunk)
@@ -615,5 +747,39 @@ class HybridConsultingEmbedder(Embedding):
             return config_item.get("value", default)
         elif hasattr(config_item, 'value'):
             return config_item.value
+        elif isinstance(config_item, (str, int, float, bool)):
+             return config_item
         else:
             return default
+
+    def _extract_embeddings(self, result) -> List[List[List[float]]]:
+        """
+        Helper unificado para extrair embeddings da resposta da API Voyage.
+        Normaliza para List[List[List[float]]] (Batch -> Doc -> Vectors).
+        """
+        # Padrão Voyage Contextual: result.results[i].embeddings
+        if hasattr(result, 'results'):
+            return [r.embeddings for r in result.results]
+        
+        # Padrão Legacy/Flat ou Embed Standard: result.embeddings
+        if hasattr(result, 'embeddings'):
+            # Se for flat list of floats (1 doc, 1 vector? Não, input é chunks)
+            # Se input=flat list, output=list of list (vectors)
+            # Se input=nested list, output=?
+            # Assumindo que result.embeddings pode ser a lista direta
+            embeds = result.embeddings
+            if not embeds:
+                return []
+            
+            # Heurística: se primeiro elem é float, é um único vetor -> wrap
+            if isinstance(embeds[0], float):
+                return [[embeds]] # Batch=1, Doc=1, Vec=embedding
+            
+            # Se primeiro elem é lista de floats (vetor) -> é lista de vetores (1 doc)
+            if isinstance(embeds[0], list) and isinstance(embeds[0][0], float):
+                return [embeds] # Batch=1, Doc=inputs, Vecs=embeddings
+            
+            # Se já é lista de lista de vetores
+            return embeds
+            
+        return []
