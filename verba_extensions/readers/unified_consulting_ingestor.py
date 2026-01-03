@@ -72,7 +72,7 @@ class UnifiedConsultingIngestor(Reader):
             "API URL": InputConfig(
                 type="text",
                 value=os.getenv("CONTEXTUAL_API_URL", "https://api.contextual.ai/v1/documents"),
-                description="URL da API visual (se habilitada)",
+                description="URL da API (Contextual.AI, Docling Remoto, etc.)",
                 values=[]
             ),
             "API Key": InputConfig(
@@ -180,8 +180,11 @@ class UnifiedConsultingIngestor(Reader):
              msg.info("[Unified-Ingestor] API visual falhou ou não configurada. Gerando Mock.")
              visual_result = self._generate_mock_visual_result(fileConfig)
 
-        # 2. Gera markdown V019
-        markdown = self._generate_v019_markdown(visual_result)
+        # 2. Gera markdown V019 (ou usa direto se a API retornar markdown)
+        if "markdown" in visual_result:
+            markdown = visual_result["markdown"]
+        else:
+            markdown = self._generate_v019_markdown(visual_result)
         
         # 3. Parse → Document
         document = self._parse_markdown_to_document(markdown, fileConfig, config)
@@ -453,9 +456,59 @@ class UnifiedConsultingIngestor(Reader):
         extract_visual: bool
     ) -> Optional[Dict[str, Any]]:
         """
-        Matches user implementation for calling external API.
+        Calls external Visual API (Contextual.AI, Docling Remote, etc.)
         """
-        return None # Simplified for safety/billing - use mock for now or real if user wants.
+        if not api_url:
+            msg.warn(f"[Unified-Ingestor] API URL não fornecida para provider: {provider}")
+            return None
+
+        # Dados para envio
+        filename = fileConfig.filename
+        content = fileConfig.content
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                data = aiohttp.FormData()
+                
+                # Se content for string (base64 ou texto), converte para bytes
+                if isinstance(content, str):
+                    if ";base64," in content:
+                        content = base64.b64decode(content.split(";base64,")[1])
+                    else:
+                        content = content.encode('utf-8')
+                
+                data.add_field('file', content, filename=filename)
+                data.add_field('language', language)
+                if extract_visual:
+                    data.add_field('extract_visual', 'true')
+                
+                headers = {}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                
+                msg.info(f"[Unified-Ingestor] Enviando {filename} para {api_url} ({provider})")
+                
+                async with session.post(api_url, data=data, headers=headers, timeout=120) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        msg.fail(f"[Unified-Ingestor] Erro na API {provider} ({response.status}): {error_text}")
+                        return None
+                    
+                    result = await response.json()
+                    
+                    # Normalização básica dependendo do provider
+                    if "slides" in result:
+                        return result
+                    elif "markdown" in result:
+                        # Se retornar só markdown, tenta fazer parse interno
+                        return {"markdown": result["markdown"]}
+                    else:
+                        # Fallback: assume que o resultado já está no formato correto ou precisa de parse
+                        return result
+                        
+        except Exception as e:
+            msg.fail(f"[Unified-Ingestor] Falha na chamada da API {provider}: {str(e)}")
+            return None
     
     def _generate_mock_visual_result(self, fileConfig: FileConfig):
         """Helper to generate mock data for testing"""
