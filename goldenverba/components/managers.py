@@ -733,6 +733,9 @@ class WeaviateManager:
         CRITICAL FIX: This function now searches for existing collections in Weaviate
         before creating new ones. This prevents creating empty collections when data
         already exists in a collection with the expected name.
+        
+        SMART FALLBACK: If the expected collection exists but is empty, this will
+        search for other embedding collections that have data and use them instead.
         """
         if embedder not in self.embedding_table:
             normalized = self._normalize_embedder_name(embedder)
@@ -747,10 +750,48 @@ class WeaviateManager:
             # This prevents creating a new empty collection when data already exists
             try:
                 existing_collections = await client.collections.list_all()
+                
                 if collection_name in existing_collections:
                     msg.info(f"✅ Found existing collection: {collection_name}")
-                    self.embedding_table[embedder] = collection_name
-                    return True
+                    
+                    # SMART FALLBACK: Check if this collection has data
+                    try:
+                        collection_obj = client.collections.get(collection_name)
+                        agg_result = await collection_obj.aggregate.over_all(total_count=True)
+                        count = agg_result.total_count if agg_result else 0
+                        
+                        if count > 0:
+                            msg.info(f"✅ Collection {collection_name} has {count} objects")
+                            self.embedding_table[embedder] = collection_name
+                            return True
+                        else:
+                            msg.warn(f"⚠️ Collection {collection_name} is EMPTY! Searching for collections with data...")
+                            
+                            # Search for other embedding collections with data
+                            for coll_name in existing_collections:
+                                if coll_name.startswith("VERBA_Embedding_") and coll_name != collection_name:
+                                    try:
+                                        fallback_coll = client.collections.get(coll_name)
+                                        fallback_agg = await fallback_coll.aggregate.over_all(total_count=True)
+                                        fallback_count = fallback_agg.total_count if fallback_agg else 0
+                                        
+                                        if fallback_count > 0:
+                                            msg.info(f"🎯 AUTO-FALLBACK: Using {coll_name} with {fallback_count} objects")
+                                            self.embedding_table[embedder] = coll_name
+                                            return True
+                                    except Exception as e:
+                                        msg.warn(f"Error checking {coll_name}: {str(e)[:50]}")
+                                        continue
+                            
+                            # No collections with data found - use the original empty one
+                            msg.warn(f"⚠️ No embedding collections with data found! Using {collection_name}")
+                            self.embedding_table[embedder] = collection_name
+                            return True
+                            
+                    except Exception as e:
+                        msg.warn(f"Error checking collection count: {str(e)[:100]}")
+                        self.embedding_table[embedder] = collection_name
+                        return True
                 else:
                     # Collection doesn't exist, create it
                     msg.info(f"Creating new collection: {collection_name}")
