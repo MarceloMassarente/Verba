@@ -95,7 +95,7 @@ export const MultiInput: React.FC<{
               <FaTrash size={12} />
             </button>
           </div>
-        })}
+        ))}
       </div>
     </div>
   );
@@ -153,26 +153,28 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         </li>
       ));
   }
-  const config = rag_config[component_name].components[
-    rag_config[component_name].selected
-  ]?.config?.[configKey];
+  function renderConfigOptions(rag_config: RAGConfig, configKey: string) {
+    const config = rag_config[component_name].components[
+      rag_config[component_name].selected
+    ]?.config?.[configKey];
 
-  if (!config || !config.values) return null;
+    if (!config || !config.values) return null;
 
-  return config.values.map((configValue) => (
-    <li
-      key={"ConfigValue" + configValue}
-      className="text-sm"
-      onClick={() => {
-        if (!blocked) {
-          updateConfig(component_name, configKey, configValue);
-          closeOnClick();
-        }
-      }}
-    >
-      <a>{configValue}</a>
-    </li>
-  ));
+    return config.values.map((configValue) => (
+      <li
+        key={"ConfigValue" + configValue}
+        className="text-sm"
+        onClick={() => {
+          if (!blocked) {
+            updateConfig(component_name, configKey, configValue);
+            closeOnClick();
+          }
+        }}
+      >
+        <a>{configValue}</a>
+      </li>
+    ));
+  }
 
   if (
     Object.entries(
