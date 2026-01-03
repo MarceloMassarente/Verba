@@ -850,11 +850,22 @@ class VerbaManager:
                         default_value = new_config_setting.get('value', 'N/A') if isinstance(new_config_setting, dict) else getattr(new_config_setting, 'value', 'N/A')
                         msg.info(f"Adding missing config field '{config_key}' to {component_key}.{component_name} with default value: {default_value}")
                         merged_component_config[config_key] = new_config_setting
-                    # Preserva "Reranker Preset" se já existe (não sobrescreve com default)
-                    elif config_key == "Reranker Preset" and config_key in merged_component_config:
-                        # Mantém valor existente, apenas atualiza estrutura se necessário
-                        if isinstance(merged_component_config[config_key], str):
-                            # Se é string simples, converte para formato InputConfig
+                    else:
+                        # Field exists - check if 'values' list needs updating (e.g., new Voyage models)
+                        existing_setting = merged_component_config[config_key]
+                        new_values = new_config_setting.get("values", []) if isinstance(new_config_setting, dict) else getattr(new_config_setting, 'values', [])
+                        existing_values = existing_setting.get("values", []) if isinstance(existing_setting, dict) else getattr(existing_setting, 'values', [])
+                        
+                        if sorted(new_values) != sorted(existing_values):
+                            # Values list changed - update it while preserving user's selected value
+                            msg.info(f"Updating 'values' list for {component_key}.{component_name}.{config_key}")
+                            if isinstance(existing_setting, dict):
+                                existing_setting["values"] = new_values
+                            else:
+                                existing_setting.values = new_values
+                        
+                        # Special case: Preserva "Reranker Preset" se já existe
+                        if config_key == "Reranker Preset" and isinstance(merged_component_config[config_key], str):
                             merged_component_config[config_key] = new_config_setting
         
         return merged_config
