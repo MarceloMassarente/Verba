@@ -183,6 +183,39 @@ Reranking Entity Weight: 0.10
 
 ---
 
+### 1.6 Preset: Busca Cascade (Recall + Rerank)
+
+**Caso de uso:** Máxima precisão com custo otimizado. Fase 1 de alto recall (busca ampla e barata) seguida de Fase 2 de reranking premium (Cohere/ContextualAI).
+
+```yaml
+# Cascade Mode (Novo)
+Cascade Mode: true
+Cascade Phase 1 Limit: 50  # Busca 50 candidatos para o reranker
+
+# Busca Fundamental
+Search Mode: Hybrid Search
+Alpha: 0.5
+Limit Mode: Fixed
+Reranker Top K: 5  # Entrega apenas os 5 melhores após reranking
+
+# Filtros
+Enable Entity Filter: true
+Entity Filter Mode: adaptive
+
+# Query Processing
+Enable Query Rewriting: true
+Enable Query Builder: true
+```
+
+**Benefícios:**
+- ✅ Melhor de dois mundos: recall de 50 chunks, custo de processamento de apenas 5
+- ✅ Compatível com RerankerPlugin (Cohere, Jina, ContextualAI)
+- ✅ Ideal para bases de conhecimento grandes
+- ⚠️ Latência ligeiramente maior devido à chamada de reranking externa
+
+
+---
+
 ## 2. Presets de Reranking (RerankerPlugin)
 
 ### 2.1 Preset: production

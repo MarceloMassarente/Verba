@@ -59,6 +59,23 @@ class HybridConsultingEmbedder(Embedding):
         self.minilm = None
         
         self._initialize_embedders()
+
+    def vectorize_named_query(self, query: str) -> List[float]:
+        """
+        Gera embedding para named vector (MiniLM) para uma query.
+        Usado pelo Retriever para buscar em concept_vec, company_vec, etc.
+        """
+        if not self.minilm:
+            # Fallback se não carregou
+            return []
+        
+        try:
+            # Gera embedding usando MiniLM (384d)
+            embedding = self.minilm.encode(query)
+            return embedding.tolist()
+        except Exception as e:
+            msg.warn(f"Erro ao gerar named query vector: {e}")
+            return []
     
     def _initialize_embedders(self):
         """Inicializa embedders (lazy loading)"""

@@ -298,6 +298,21 @@ class EntityAwareRetriever(Retriever):
             values=["chunk", "document"],
             block="search_mode",
         )
+        self.config["Cascade Mode"] = InputConfig(
+            type="bool",
+            value=False,
+            description="Enable Cascade Mode (Fast Recall with Voyage/MiniLM -> Premium Rerank with Cohere)",
+            values=[],
+            block="search_mode",
+            warning="Overwrites Reranker Top K to deliver precise results.",
+        )
+        self.config["Cascade Phase 1 Limit"] = InputConfig(
+            type="number",
+            value=50,
+            description="Number of chunks to retrieve in Phase 1 (Recall Phase) for Cascade Mode",
+            values=[],
+            block="search_mode",
+        )
         self.config["Enable Multi-Vector Search"] = InputConfig(
             type="bool",
             value=True,
@@ -429,6 +444,147 @@ class EntityAwareRetriever(Retriever):
             msg.warn(f"Erro ao adicionar configurações do reranker: {str(e)}")
             import traceback
             traceback.print_exc()
+
+    async def _execute_cascade_search(self, chunks: List[Any], query: str, config: Dict[str, Any]) -> List[Any]:
+        """
+        Executa a Fase 2 do Cascade Mode (Premium Reranking).
+        
+        Args:
+            chunks: Candidatos da Fase 1 (Fast Recall) - Weaviate objects
+            query: Query original
+            config: Configuração do retriever (contendo config do reranker)
+            
+        Returns:
+            Chunks reordenados e cortados pelo Reranker Top K (Wrapped to look like Weaviate objects)
+        """
+        try:
+            from verba_extensions.plugins.reranker import RerankerPlugin
+            from goldenverba.components.chunk import Chunk
+            import json
+            
+            reranker = RerankerPlugin()
+            
+            # Atualizar config do reranker com os valores atuais do retriever
+            reranker_config = {}
+            for key, value in config.items():
+                reranker_config[key] = value
+            
+            # Definir top_k final (default 5 ou configurado)
+            final_top_k = int(get_config_value(config, "Reranker Top K", 5))
+            if final_top_k <= 0:
+                final_top_k = 5 # Safety fallback
+                
+            msg.info(f"  🌊 Cascade Phase 2: Reranking {len(chunks)} chunks -> Top {final_top_k}...")
+            
+            # 1. Converter Weaviate objects para Chunk objects
+            chunk_objects = []
+            for c in chunks:
+                # Weaviate objects usually have properties attribute
+                if hasattr(c, "properties"):
+                    props = c.properties
+                    content = props.get("content", "")
+                    doc_uuid = props.get("doc_uuid", "")
+                    chunk_id = props.get("chunk_id", 0)
+                    
+                    # Tentar extrair meta
+                    meta = {}
+                    if "meta" in props:
+                        try:
+                            meta = json.loads(props["meta"]) if isinstance(props["meta"], str) else props["meta"]
+                        except:
+                            pass
+                            
+                    # Criar Chunk object
+                    chunk_obj = Chunk(
+                        content=content,
+                        chunk_id=chunk_id,
+                        content_without_overlap=content # Assume full content for simplicity
+                    )
+                    chunk_obj.doc_uuid = doc_uuid
+                    chunk_obj.uuid = str(c.uuid) if hasattr(c, "uuid") else None
+                    chunk_obj.meta = meta
+                    
+                    # Adicionar metadados adicionais ao meta se disponível
+                    if "chunk_lang" in props:
+                        chunk_obj.chunk_lang = props["chunk_lang"]
+                    if "chunk_date" in props:
+                        chunk_obj.chunk_date = props["chunk_date"]
+                    
+                    chunk_objects.append(chunk_obj)
+                else:
+                    # Já é Chunk object ou incompatível
+                    if isinstance(c, Chunk):
+                        chunk_objects.append(c)
+            
+            if not chunk_objects:
+                msg.warn("  ⚠️ Cascade Phase 2: Nenhum chunk válido para rerank.")
+                return chunks
+            
+            # Executar reranking
+            reranked_chunks = await reranker.rerank(
+                chunks=chunk_objects,
+                query=query,
+                config=reranker_config
+            )
+            
+            # Cortar para top K
+            reranked_chunks = reranked_chunks[:final_top_k]
+            
+            # 2. Converter de volta para formato compatível com EntityAwareRetriever (Weaviate-like wrapper)
+            # EntityAwareRetriever espera objetos com .properties e .metadata.score
+            
+            class WeaviateChunkWrapper:
+                def __init__(self, chunk, score):
+                    self.uuid = chunk.uuid
+                    self.properties = {
+                        "content": chunk.content,
+                        "doc_uuid": chunk.doc_uuid,
+                        "chunk_id": chunk.chunk_id,
+                        "meta": json.dumps(chunk.meta) if isinstance(chunk.meta, dict) else chunk.meta
+                    }
+                    if chunk.chunk_lang:
+                        self.properties["chunk_lang"] = chunk.chunk_lang
+                    if chunk.chunk_date:
+                        self.properties["chunk_date"] = chunk.chunk_date
+
+                    # Adicionar properties que estavam no meta de volta ao properties
+                    # (Importante para filtros downstream que olham properties)
+                    if chunk.meta:
+                         for k, v in chunk.meta.items():
+                             if k not in self.properties:
+                                 self.properties[k] = v
+
+                    # Metadata wrapper for score
+                    class MetaWrapper:
+                        def __init__(self, s):
+                            self.score = s
+                    
+                    self.metadata = MetaWrapper(score)
+            
+            final_results = []
+            for i, rc in enumerate(reranked_chunks):
+                # Score: tentar pegar do meta ou usar sintético
+                score = 0.99 - (i * 0.01) 
+                if rc.meta and "score" in rc.meta:
+                    try:
+                        score = float(rc.meta["score"])
+                    except:
+                        pass
+                
+                final_results.append(WeaviateChunkWrapper(rc, score))
+            
+            msg.good(f"  ✅ Cascade Phase 2 concluída: {len(final_results)} chunks retornados")
+            return final_results
+            
+        except ImportError as e:
+            msg.warn(f"RerankerPlugin não encontrado ou erro: {e}. Pulando Cascade Phase 2.")
+            return chunks
+        except Exception as e:
+            msg.warn(f"Erro no Cascade Reranking: {e}")
+            import traceback
+            traceback.print_exc()
+            return chunks
+        
     
     async def _execute_two_phase_search(
         self,
@@ -618,8 +774,23 @@ class EntityAwareRetriever(Retriever):
                 
                 # Configurar query_properties para BM25 boosting
                 query_properties = ["content", "title^2"]  # Boost de título
-                        
-                # Executar multi-vector search
+
+                # Validar e gerar vetores especializados (384d vs 1024d)
+                query_vectors = {}
+                try:
+                    if embedder in embedding_manager.embedders:
+                        emb_obj = embedding_manager.embedders[embedder]
+                        # Se for HybridConsultingEmbedder ou similar com suporte a named vectors
+                        if hasattr(emb_obj, 'vectorize_named_query'):
+                            msg.info("    Gerando vetores especializados (MiniLM)...")
+                            minilm_vec = emb_obj.vectorize_named_query(phase2_query)
+                            if minilm_vec:
+                                for v_name in ["concept_vec", "sector_vec", "company_vec"]:
+                                    query_vectors[v_name] = minilm_vec
+                                msg.info(f"    Vetores especializados gerados ({len(minilm_vec)}d)")
+                except Exception as e_named:
+                    msg.warn(f"Erro ao gerar vetores named: {e_named}")
+                        # Executar multi-vector search
                 try:
                     multi_vector_searcher = MultiVectorSearcher()
                     result = await multi_vector_searcher.search_multi_vector(
@@ -628,6 +799,7 @@ class EntityAwareRetriever(Retriever):
                         query=phase2_query,
                         query_vector=query_vector_phase2,
                         vectors=vectors_to_search,
+                        query_vectors=query_vectors,
                         filters=phase2_filter,
                         limit=limit,
                         alpha=rewritten_alpha,
@@ -1464,6 +1636,18 @@ class EntityAwareRetriever(Retriever):
         search_mode = get_config_value(config, "Search Mode", "Hybrid Search")
         limit_mode = get_config_value(config, "Limit Mode", "Fixed")
         limit = int(get_config_value(config, "Limit/Sensitivity", 10))
+        
+        # Configuração de Cascade Mode
+        enable_cascade_mode = get_config_value(config, "Cascade Mode", False)
+        
+        if enable_cascade_mode:
+            # Em Cascade Mode, o limite da Fase 1 deve ser alto (Recall Phase)
+            phase1_limit = int(get_config_value(config, "Cascade Phase 1 Limit", 50))
+            limit = phase1_limit
+            msg.info(f"  🌊 Cascade Mode ATIVADO: Fase 1 (Recall) buscando {limit} chunks")
+            
+            # Forçar Limit Mode para Fixed para garantir recall quantitativo
+            limit_mode = "Fixed"
         # 0. INICIALIZAÇÃO DE VARIÁVEIS (Defesa contra UnboundLocalError)
         builder_entities = []
         detected_frameworks = []
@@ -3444,6 +3628,18 @@ class EntityAwareRetriever(Retriever):
             except Exception as e:
                 msg.debug(f"  Chunk Window expansion falhou (não crítico): {str(e)}")
         
+        # 6.8. CASCADE MODE PHASE 2 (Premium Reranking)
+        # Executado após Window Expansion para garantir que temos o melhor contexto possível antes de rerankear
+        try:
+            if enable_cascade_mode and chunks:
+                chunks = await self._execute_cascade_search(
+                    chunks=chunks,
+                    query=query,
+                    config=config
+                )
+        except Exception as e:
+            msg.warn(f"Erro inesperado no Cascade Phase 2: {str(e)}")
+            
         # 7. CONVERTE CHUNKS PARA FORMATO ESPERADO (dicionários serializáveis)
         # Similar ao WindowRetriever, precisa converter objetos Weaviate para dicionários
         documents = []

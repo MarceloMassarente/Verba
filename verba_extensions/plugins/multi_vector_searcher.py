@@ -51,14 +51,15 @@ class MultiVectorSearcher:
         client,
         collection_name: str,
         query: str,
-        query_vector: List[float],  # Embedding pré-calculado da query
+        query_vector: List[float],  # Embedding pré-calculado da query (DEFAULT)
         vectors: List[str],  # ["concept_vec", "sector_vec"]
         filters: Optional[Any] = None,  # Weaviate Filter
         limit: int = 50,
         vector_weights: Optional[Dict[str, float]] = None,
         alpha: float = 0.5,
         fusion_type: str = "RRF",  # "RRF" (manual) ou "RELATIVE_SCORE" (nativo Weaviate)
-        query_properties: Optional[List[str]] = None  # Propriedades para BM25 (ex: ["content", "title^2"])
+        query_properties: Optional[List[str]] = None,  # Propriedades para BM25 (ex: ["content", "title^2"])
+        query_vectors: Optional[Dict[str, List[float]]] = None  # Embeddings específicos por vetor
     ) -> Dict[str, Any]:
         """
         Executa busca em múltiplos named vectors em paralelo e combina resultados.
@@ -102,13 +103,18 @@ class MultiVectorSearcher:
         
         # Executar buscas em paralelo
         try:
-            search_tasks = [
-                self._search_single_vector(
-                    client, collection_name, query, query_vector, vector_name,
-                    filters, limit, alpha, query_properties
+            search_tasks = []
+            for vector_name in vectors:
+                # Selecionar vetor correto: específico > default
+                specific_vector = query_vectors.get(vector_name) if query_vectors else None
+                vector_to_use = specific_vector if specific_vector else query_vector
+                
+                search_tasks.append(
+                    self._search_single_vector(
+                        client, collection_name, query, vector_to_use, vector_name,
+                        filters, limit, alpha, query_properties
+                    )
                 )
-                for vector_name in vectors
-            ]
             
             vector_results = await asyncio.gather(*search_tasks, return_exceptions=True)
             
