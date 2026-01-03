@@ -176,11 +176,14 @@ const ComponentView: React.FC<ComponentViewProps> = ({
     ));
   }
 
+  // Early return if selected component doesn't exist
+  const selectedComponent = RAGConfig?.[component_name]?.components?.[RAGConfig?.[component_name]?.selected];
+  if (!selectedComponent) {
+    return <></>;
+  }
+
   if (
-    Object.entries(
-      RAGConfig[component_name].components[RAGConfig[component_name].selected]
-        .config
-    ).length == 0 &&
+    Object.entries(selectedComponent?.config ?? {}).length == 0 &&
     skip_component
   ) {
     return <></>;

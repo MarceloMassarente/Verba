@@ -96,9 +96,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isComposing, setIsComposing] = useState(false);
 
   const currentEmbedding = RAGConfig
-    ? (RAGConfig["Embedder"].components[RAGConfig["Embedder"].selected].config[
+    ? ((RAGConfig?.["Embedder"]?.components?.[RAGConfig?.["Embedder"]?.selected]?.config?.[
       "Model"
-    ].value as string)
+    ]?.value as string) ?? "No Embedder")
     : "No Config found";
 
   const retrieveDatacount = useCallback(async () => {
@@ -133,19 +133,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [RAGConfig, retrieveDatacount]);
 
+  const introMessage = selectedTheme?.intro_message?.text ?? "Welcome to Verba!";
+
   useEffect(() => {
     setMessages((prev) => {
       if (prev.length === 0) {
         return [
           {
             type: "system",
-            content: selectedTheme.intro_message.text,
+            content: introMessage,
           },
         ];
       }
       return prev;
     });
-  }, [selectedTheme.intro_message.text]);
+  }, [introMessage]);
 
   // Setup WebSocket and messages to /ws/generate_stream
   useEffect(() => {
@@ -375,9 +377,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleSuggestions = async () => {
     if (
       RAGConfig &&
-      RAGConfig["Retriever"].components[RAGConfig["Retriever"].selected].config[
+      RAGConfig?.["Retriever"]?.components?.[RAGConfig?.["Retriever"]?.selected]?.config?.[
         "Suggestion"
-      ].value
+      ]?.value
     ) {
       const suggestions = await fetchSuggestions(userInput, 3, credentials);
       if (suggestions) {
@@ -669,7 +671,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   setMessages([
                     {
                       type: "system",
-                      content: selectedTheme.intro_message.text,
+                      content: introMessage,
                     },
                   ]);
                 }}
