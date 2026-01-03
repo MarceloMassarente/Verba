@@ -3502,7 +3502,7 @@ class EntityAwareRetriever(Retriever):
                 "content": chunk_props.get("content", ""),
                 "meta": json.dumps(chunk_meta),
             })
-            doc_map[doc_uuid]["score"] += chunk_score
+            doc_map[doc_uuid]["score"] += (chunk_score if chunk_score is not None else 0.0)
         
         # Converter doc_map para lista de documentos e gerar contexto
         documents = []
