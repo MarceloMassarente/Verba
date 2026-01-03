@@ -727,6 +727,13 @@ class WeaviateManager:
         return normalized if normalized else "unknown"
 
     async def verify_embedding_collection(self, client: WeaviateAsyncClient, embedder):
+        """
+        Verify or create embedding collection for the given embedder.
+        
+        CRITICAL FIX: This function now searches for existing collections in Weaviate
+        before creating new ones. This prevents creating empty collections when data
+        already exists in a collection with the expected name.
+        """
         if embedder not in self.embedding_table:
             normalized = self._normalize_embedder_name(embedder)
             collection_name = "VERBA_Embedding_" + normalized
@@ -736,8 +743,24 @@ class WeaviateManager:
                 msg.warn(f"⚠️ Invalid collection name gerado: {collection_name}, usando fallback")
                 collection_name = "VERBA_Embedding_default"
             
-            self.embedding_table[embedder] = collection_name
-            return await self.verify_collection(client, collection_name)
+            # FIX: Check if this collection already exists in Weaviate
+            # This prevents creating a new empty collection when data already exists
+            try:
+                existing_collections = await client.collections.list_all()
+                if collection_name in existing_collections:
+                    msg.info(f"✅ Found existing collection: {collection_name}")
+                    self.embedding_table[embedder] = collection_name
+                    return True
+                else:
+                    # Collection doesn't exist, create it
+                    msg.info(f"Creating new collection: {collection_name}")
+                    self.embedding_table[embedder] = collection_name
+                    return await self.verify_collection(client, collection_name)
+            except Exception as e:
+                msg.warn(f"Error checking existing collections: {str(e)}")
+                # Fallback to old behavior
+                self.embedding_table[embedder] = collection_name
+                return await self.verify_collection(client, collection_name)
         else:
             # Validação extra: verifica se collection_name ainda é válida
             collection_name = self.embedding_table[embedder]
