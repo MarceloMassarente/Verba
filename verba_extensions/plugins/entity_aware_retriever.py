@@ -912,7 +912,7 @@ class EntityAwareRetriever(Retriever):
                         query_vector_phase2 = query_embeddings[0]
                     
                     # Configurar fusion type
-                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
                     
                     # Configurar query_properties para BM25 boosting
@@ -1839,7 +1839,7 @@ class EntityAwareRetriever(Retriever):
                     msg.info(f"  Query rewriting: intent={intent}")
                     
                     # Alpha Dinâmico (sobrescreve se habilitado)
-                    enable_dynamic_alpha = self.config.get("Enable Dynamic Alpha", {}).get("value", True)
+                    enable_dynamic_alpha = get_config_value(self.config, "Enable Dynamic Alpha", True)
                     if enable_dynamic_alpha:
                         try:
                             from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
@@ -2865,7 +2865,7 @@ class EntityAwareRetriever(Retriever):
                         if query_vector:
                             
                             # Obter configuração de Relative Score Fusion
-                            enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                            enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                             fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
                             
                             # Configurar query_properties para BM25 boosting
@@ -2929,7 +2929,7 @@ class EntityAwareRetriever(Retriever):
                 # Se multi-vector não foi usado, usar busca normal
                 if not use_multi_vector:
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting
@@ -2961,7 +2961,7 @@ class EntityAwareRetriever(Retriever):
                         entity_property = "section_entity_ids"
                     
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting
@@ -3047,7 +3047,7 @@ class EntityAwareRetriever(Retriever):
                                     combined_fallback_filter = Filter.all_of(fallback_filters_list)
                                 
                                 # Obter configuração de Relative Score Fusion para fallback
-                                enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                                enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                                 fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                                 query_properties = ["content", "title^2"]
                                 
@@ -3079,7 +3079,7 @@ class EntityAwareRetriever(Retriever):
                             msg.info(f"  💡 Tentando modo BOOST (sem filtro, apenas boost semântico)")
                             
                             # Obter configuração de Relative Score Fusion para fallback
-                            enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                            enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                             fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                             query_properties = ["content", "title^2"]
                             
@@ -3107,7 +3107,7 @@ class EntityAwareRetriever(Retriever):
                     msg.info(f"  Executando: Hybrid search sem filtros")
                     
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = self.config.get("Enable Relative Score Fusion", {}).get("value", True)
+                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting

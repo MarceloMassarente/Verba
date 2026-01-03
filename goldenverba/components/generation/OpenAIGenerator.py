@@ -144,6 +144,72 @@ class OpenAIGenerator(Generator):
                                 "finish_reason": choice["finish_reason"],
                             }
 
+    async def generate(
+        self,
+        messages: list[dict],
+        config: dict = None,
+    ) -> str:
+        """
+        Non-streaming generate method for synchronous use cases.
+        
+        Used by QueryExpander and LLMMetadataExtractor for quick LLM calls.
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            config: Optional config dict (uses self.config if not provided)
+        
+        Returns:
+            Generated response text as string
+        """
+        if config is None:
+            config = {k: v for k, v in self.config.items()}
+        
+        # Atualizar modelos se necessário
+        self.update_models_if_needed(config)
+        
+        model_config = config.get("Model", {})
+        if hasattr(model_config, 'value'):
+            model = model_config.value
+        elif isinstance(model_config, dict):
+            model = model_config.get('value', 'gpt-4o-mini')
+        else:
+            model = str(model_config) if model_config else 'gpt-4o-mini'
+        
+        openai_key = get_environment(
+            config, "API Key", "OPENAI_API_KEY", None
+        )
+        if not openai_key:
+            raise ValueError("No OpenAI API Key found")
+        
+        openai_url = get_environment(
+            config, "URL", "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        )
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {openai_key}",
+        }
+        data = {
+            "messages": messages,
+            "model": model,
+            "stream": False,
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{openai_url}/chat/completions",
+                json=data,
+                headers=headers,
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            if "choices" in result and len(result["choices"]) > 0:
+                return result["choices"][0]["message"]["content"]
+            
+            return ""
+
     def prepare_messages(
         self, query: str, context: str, conversation: list[dict], system_message: str
     ) -> list[dict]:
