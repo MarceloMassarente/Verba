@@ -112,6 +112,12 @@ class VoyageAIEmbedder(Embedding):
     def get_models(token: str, url: str) -> List[str]:
         """Fetch available embedding models from VoyageAI API."""
         return [
+            "voyage-3-large",
+            "voyage-3",
+            "voyage-3-lite",
+            "voyage-3.5",
+            "voyage-3.5-lite",
+            "voyage-code-3",
             "voyage-2",
             "voyage-large-2",
             "voyage-finance-2",

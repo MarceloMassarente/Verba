@@ -31,9 +31,25 @@ class HybridConsultingEmbedder(Embedding):
             "Voyage 3.5 (premium API) para default, MiniLM (local) para 3 named vectors. "
             "Economia de 75% + apenas 300MB RAM."
         )
-        
         # Configuração
         self.config = {
+            "Voyage Model": InputConfig(
+                type="dropdown",
+                value="voyage-3.5",
+                description="Selecione o modelo Voyage para o vetor default",
+                values=[
+                    "voyage-3.5",
+                    "voyage-3.5-lite",
+                    "voyage-3",
+                    "voyage-3-lite",
+                    "voyage-3-large",
+                    "voyage-code-3",
+                    "voyage-2",
+                    "voyage-large-2",
+                    "voyage-finance-2",
+                    "voyage-multilingual-2"
+                ]
+            ),
             "Enable Named Vectors": InputConfig(
                 type="bool",
                 value=True,
@@ -405,9 +421,11 @@ class HybridConsultingEmbedder(Embedding):
         for i in range(0, len(processed_texts), batch_size):
             batch = processed_texts[i:i+batch_size]
             
+            model = self._get_config_value(self.config, "Voyage Model", "voyage-3.5")
+            
             result = self.voyage_client.embed(
                 texts=batch,
-                model="voyage-3.5",
+                model=model,
                 input_type="document",
                 truncation=True  # ✅ Fallback
             )
