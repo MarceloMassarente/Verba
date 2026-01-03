@@ -60,35 +60,47 @@ class UnifiedConsultingIngestor(Reader):
             "Enable Visual Analysis": InputConfig(
                 type="bool",
                 value=False,  # Default: OFF (economia)
-                description="Habilitar análise visual via API (Contextual.AI/GPT-4V/etc.). Se OFF, usa Docling text-only.",
+                description="Habilitar análise visual premium (Contextual.AI/GPT-4V). Se OFF, usa Docling API ou python-pptx local.",
                 values=[]
             ),
             "Visual API Provider": InputConfig(
                 type="dropdown",
                 value="Contextual.AI",
-                description="Provider de análise visual (apenas se Enable Visual Analysis = True)",
-                values=["Contextual.AI", "Docling", "GPT-4V", "Claude Vision"]
+                description="Provider de análise visual (apenas se Enable Visual Analysis = ON)",
+                values=["Contextual.AI", "GPT-4V", "Claude Vision"]
             ),
-            "API URL": InputConfig(
+            "Visual API URL": InputConfig(
                 type="text",
                 value=os.getenv("CONTEXTUAL_API_URL", "https://api.contextual.ai/v1/documents"),
-                description="URL da API (Contextual.AI, Docling Remoto, etc.)",
+                description="URL da API visual (Contextual.AI, GPT-4V, etc.)",
                 values=[]
             ),
-            "API Key": InputConfig(
+            "Visual API Key": InputConfig(
                 type="password",
                 value=os.getenv("CONTEXTUAL_API_KEY", ""),
-                description="API Key visual (se habilitada)",
+                description="API Key visual (se Enable Visual Analysis = ON)",
+                values=[]
+            ),
+            "Use Docling API": InputConfig(
+                type="bool",
+                value=False,
+                description="Usar Docling como API remota (quando Visual Analysis = OFF). Se OFF, usa python-pptx local.",
+                values=[]
+            ),
+            "Docling API URL": InputConfig(
+                type="text",
+                value=os.getenv("DOCLING_API_URL", ""),
+                description="URL da API Docling (ex: http://localhost:5000). Deixe vazio para usar python-pptx local.",
                 values=[]
             ),
             "Framework Detection Method": InputConfig(
-                type="text",
+                type="dropdown",
                 value="Auto",
-                description="Método de detecção de frameworks (Auto, GLiNER, Regex, Visual API)",
-                values=["Auto", "GLiNER", "Regex", "Visual API"]
+                description="Método de detecção de frameworks (Auto, GLiNER, Regex)",
+                values=["Auto", "GLiNER", "Regex"]
             ),
             "Language": InputConfig(
-                type="text",
+                type="dropdown",
                 value="pt",
                 description="Idioma do documento",
                 values=["pt", "en", "es"]
@@ -134,21 +146,32 @@ class UnifiedConsultingIngestor(Reader):
         fileConfig: FileConfig
     ) -> List[Document]:
         """
-        Pipeline: PPTX/PDF → Docling/API Visual → Markdown → Document
+        Pipeline: PPTX/PDF → API Visual ou Docling API ou python-pptx → Markdown → Document
         
-        Dois caminhos:
-        1. Visual Analysis ON: API visual completa (gráficos, semântica)
-        2. Visual Analysis OFF: Docling text-only (economia)
+        Três caminhos:
+        1. Visual Analysis ON: API visual premium (Contextual.AI, GPT-4V)
+        2. Visual Analysis OFF + Use Docling API: Docling API remota
+        3. Visual Analysis OFF + Use Docling API OFF: python-pptx local
         """
         enable_visual = self._get_config_value(config, "Enable Visual Analysis", False)
+        use_docling_api = self._get_config_value(config, "Use Docling API", False)
         
         if enable_visual:
-            # Caminho 1: Visual API completa
+            # Caminho 1: Visual API premium
             return await self._process_with_visual_api(config, fileConfig)
+        elif use_docling_api:
+            # Caminho 2: Docling API remota
+            docling_url = self._get_config_value(config, "Docling API URL", "")
+            if docling_url:
+                msg.info(f"[Unified-Ingestor] Modo: Docling API ({docling_url})")
+                return await self._process_with_docling_api(config, fileConfig, docling_url)
+            else:
+                msg.warn("[Unified-Ingestor] Docling API habilitada mas URL vazia. Usando fallback local.")
+                return await self._process_with_local_extraction(config, fileConfig)
         else:
-            # Caminho 2: Docling text-only (economia)
-            msg.info("[Unified-Ingestor] Modo: Docling text-only (Visual Analysis OFF)")
-            return await self._process_with_docling_text_only(config, fileConfig)
+            # Caminho 3: python-pptx local / Docling local
+            msg.info("[Unified-Ingestor] Modo: Extração local (python-pptx/pypdf)")
+            return await self._process_with_local_extraction(config, fileConfig)
     
     async def _process_with_visual_api(
         self,
@@ -159,9 +182,8 @@ class UnifiedConsultingIngestor(Reader):
         Caminho 1: API Visual completa (análise semântica visual).
         """
         provider = self._get_config_value(config, "Visual API Provider", "Contextual.AI")
-        api_url = self._get_config_value(config, "API URL", "")
-        # Try to get API key from config, fallback to env var logic in a real scenario
-        api_key = self._get_config_value(config, "API Key", "") 
+        api_url = self._get_config_value(config, "Visual API URL", "")
+        api_key = self._get_config_value(config, "Visual API Key", "") 
         language = self._get_config_value(config, "Language", "pt")
         
         if not api_key:
@@ -193,25 +215,76 @@ class UnifiedConsultingIngestor(Reader):
         
         return [document]
     
-    async def _process_with_docling_text_only(
+    async def _process_with_docling_api(
+        self,
+        config: dict,
+        fileConfig: FileConfig,
+        docling_url: str
+    ) -> List[Document]:
+        """
+        Caminho 2: Docling API remota.
+        """
+        language = self._get_config_value(config, "Language", "pt")
+        framework_method = self._get_config_value(config, "Framework Detection Method", "Auto")
+        
+        msg.info(f"[Unified-Ingestor] Chamando Docling API: {docling_url}")
+        
+        try:
+            # Prepara o payload para Docling API
+            content = fileConfig.content
+            if isinstance(content, str):
+                content = base64.b64decode(content)
+            
+            async with aiohttp.ClientSession() as session:
+                # Docling API espera multipart/form-data com o arquivo
+                data = aiohttp.FormData()
+                data.add_field('file', content, filename=fileConfig.filename, content_type='application/octet-stream')
+                
+                async with session.post(f"{docling_url}/convert", data=data) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        # Docling retorna markdown ou estrutura de slides
+                        if "markdown" in result:
+                            markdown = result["markdown"]
+                        elif "slides" in result:
+                            markdown = self._generate_v019_markdown(result)
+                        else:
+                            # Tenta pegar texto direto
+                            markdown = result.get("text", "")
+                        
+                        document = self._parse_markdown_to_document(markdown, fileConfig, config)
+                        msg.good(f"[Unified-Ingestor] ✅ Docling API: {document.meta.get('slide_count', 0)} slides")
+                        return [document]
+                    else:
+                        error_text = await response.text()
+                        msg.fail(f"[Unified-Ingestor] Docling API erro {response.status}: {error_text[:200]}")
+                        # Fallback para extração local
+                        msg.info("[Unified-Ingestor] Tentando fallback com extração local...")
+                        return await self._process_with_local_extraction(config, fileConfig)
+        except Exception as e:
+            msg.fail(f"[Unified-Ingestor] Erro na Docling API: {str(e)}")
+            msg.info("[Unified-Ingestor] Tentando fallback com extração local...")
+            return await self._process_with_local_extraction(config, fileConfig)
+    
+    async def _process_with_local_extraction(
         self,
         config: dict,
         fileConfig: FileConfig
     ) -> List[Document]:
         """
-        Caminho 2: Docling text-only (sem análise visual).
+        Caminho 3: Extração local usando python-pptx/pypdf (sem API externa).
         """
         language = self._get_config_value(config, "Language", "pt")
         framework_method = self._get_config_value(config, "Framework Detection Method", "Auto")
         
-        msg.info("[Unified-Ingestor] Processando com Docling text-only...")
+        msg.info("[Unified-Ingestor] Processando com extração local (python-pptx/pypdf)...")
         
         try:
-            # 1. Extrai texto via Docling
-            docling_result = await self._extract_text_with_docling(fileConfig, language)
+            # 1. Extrai texto localmente (python-pptx prioritário para PPTX)
+            extraction_result = await self._extract_text_locally(fileConfig, language)
             
-            if not docling_result:
-                msg.fail("[Unified-Ingestor] Falha no Docling")
+            if not extraction_result:
+                msg.fail("[Unified-Ingestor] Falha na extração local")
                 return []
             
             # 2. Detecta frameworks (GLiNER ou regex)
@@ -219,18 +292,18 @@ class UnifiedConsultingIngestor(Reader):
                 framework_method = "GLiNER" if self._is_gliner_available() else "Regex"
             
             msg.info(f"[Unified-Ingestor] Detectando frameworks via: {framework_method}")
-            docling_result = self._detect_frameworks_text_based(docling_result, framework_method)
+            extraction_result = self._detect_frameworks_text_based(extraction_result, framework_method)
             
             # 3. Detecta stakeholders via NER simples
-            docling_result = self._detect_stakeholders_text_based(docling_result, language)
+            extraction_result = self._detect_stakeholders_text_based(extraction_result, language)
             
             # 4. Gera markdown V019
-            markdown = self._generate_v019_markdown(docling_result)
+            markdown = self._generate_v019_markdown(extraction_result)
             
             # 5. Parse → Document
             document = self._parse_markdown_to_document(markdown, fileConfig, config)
             
-            msg.good(f"[Unified-Ingestor] ✅ Docling text-only: {document.meta['slide_count']} slides")
+            msg.good(f"[Unified-Ingestor] ✅ Extração local: {document.meta.get('slide_count', 0)} slides")
             if 'all_frameworks' in document.meta:
                  msg.info(f"[Unified-Ingestor]    Frameworks: {len(document.meta.get('all_frameworks', []))}")
             if 'all_companies' in document.meta:
@@ -239,18 +312,18 @@ class UnifiedConsultingIngestor(Reader):
             return [document]
         
         except Exception as e:
-            msg.fail(f"[Unified-Ingestor] Erro no Docling: {str(e)}")
+            msg.fail(f"[Unified-Ingestor] Erro na extração local: {str(e)}")
             import traceback
             msg.debug(traceback.format_exc())
             return []
     
-    async def _extract_text_with_docling(
+    async def _extract_text_locally(
         self,
         fileConfig: FileConfig,
         language: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Extrai texto estruturado via Docling.
+        Extrai texto localmente usando python-pptx (PPTX), pypdf (PDF), ou Docling se instalado.
         """
         try:
             # TODO: Integrar Docling real imports dentro do metodo para evitar erro de load se nao instalado
