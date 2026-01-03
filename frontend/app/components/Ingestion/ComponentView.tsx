@@ -372,7 +372,8 @@ const ComponentView: React.FC<ComponentViewProps> = ({
               </div>
             )}
           </div>
-        })}
+        );
+      })}
     </div>
   );
 };
