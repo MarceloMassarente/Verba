@@ -1147,43 +1147,53 @@ async def query(payload: QueryPayload):
                 
                 if preset_config:
                     if "Retriever" in rag_config:
-                        retriever = rag_config["Retriever"]
-                        components = retriever.get("components", {})
-                        
-                        # Detecta nome correto do componente (com ou sem hífen)
-                        entity_aware_key = None
-                        if "EntityAware" in components:
-                            entity_aware_key = "EntityAware"
-                        elif "Entity-Aware" in components:
-                            entity_aware_key = "Entity-Aware"
+                        # Safe retrieval of Retriever component
+                        retriever = rag_config.get("Retriever") if isinstance(rag_config, dict) else getattr(rag_config, "Retriever", None)
+
+                        if retriever:
+                            # Safe retrieval of components
+                            components = retriever.get("components", {}) if isinstance(retriever, dict) else getattr(retriever, "components", {})
                             
-                        if entity_aware_key:
-                            # Muda retriever selecionado para EntityAware
-                            retriever["selected"] = entity_aware_key
-                            
-                            entity_aware = components[entity_aware_key]
-                            ea_config = entity_aware.get("config", {})
-                            
-                            if ea_config:
-                                # Aplica cada campo do preset
-                                for key, value in preset_config.items():
-                                    if key in ["name", "display_name", "description", 
-                                               "latency_estimate", "quality_estimate", "requirements"]:
-                                        continue
-                                        
-                                    if key in ea_config:
-                                        # Handle Component config in dict form
-                                        if isinstance(ea_config[key], dict) and "value" in ea_config[key]:
-                                            ea_config[key]["value"] = value
-                                        else:
-                                            ea_config[key] = value
+                            # Detecta nome correto do componente (com ou sem hífen)
+                            entity_aware_key = None
+                            if "EntityAware" in components:
+                                entity_aware_key = "EntityAware"
+                            elif "Entity-Aware" in components:
+                                entity_aware_key = "Entity-Aware"
                                 
-                                preset_applied = payload.preset
-                                msg.good(f"✅ Preset '{payload.preset}' aplicado com sucesso")
+                            if entity_aware_key:
+                                # Muda retriever selecionado para EntityAware
+                                if isinstance(retriever, dict):
+                                    retriever["selected"] = entity_aware_key
+                                else:
+                                    setattr(retriever, "selected", entity_aware_key)
+                                
+                                entity_aware = components[entity_aware_key]
+                                ea_config = entity_aware.get("config", {}) if isinstance(entity_aware, dict) else getattr(entity_aware, "config", {})
+                                
+                                if ea_config:
+                                    # Aplica cada campo do preset
+                                    for key, value in preset_config.items():
+                                        if key in ["name", "display_name", "description", 
+                                                   "latency_estimate", "quality_estimate", "requirements"]:
+                                            continue
+                                            
+                                        if key in ea_config:
+                                            item = ea_config[key]
+                                            # Handle InputConfig object (Pydantic) or dict with 'value' key
+                                            if hasattr(item, "value"):
+                                                item.value = value
+                                            elif isinstance(item, dict) and "value" in item:
+                                                item["value"] = value
+                                            else:
+                                                ea_config[key] = value
+                                    
+                                    preset_applied = payload.preset
+                                    msg.good(f"✅ Preset '{payload.preset}' aplicado com sucesso")
+                            else:
+                                msg.warn(f"⚠️ EntityAware não disponível no RAG config, preset ignorado")
                         else:
-                            msg.warn(f"⚠️ EntityAware não disponível no RAG config, preset ignorado")
-                    else:
-                        msg.warn(f"⚠️ Retriever não encontrado no RAG config, preset ignorado")
+                            msg.warn(f"⚠️ Retriever não encontrado no RAG config, preset ignorado")
                 else:
                     msg.warn(f"⚠️ Preset '{payload.preset}' não encontrado. Presets disponíveis: {list(presets.keys())}")
             except Exception as preset_error:
