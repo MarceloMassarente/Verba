@@ -221,8 +221,10 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const [loadingPresets, setLoadingPresets] = useState(false);
   const [presetsError, setPresetsError] = useState<string | null>(null);
 
-  // Debug log para presets
-  console.log(`🔧 RetrieverConfigBlocks: selected="${RAGConfig.Retriever.selected}", presets=${rerankerPresets.length}, showPresets=${RAGConfig.Retriever.selected === "EntityAware"}`);
+  // Debug log para presets (only if RAGConfig is available)
+  if (RAGConfig?.Retriever?.selected) {
+    console.log(`🔧 RetrieverConfigBlocks: selected="${RAGConfig.Retriever.selected}", presets=${rerankerPresets.length}, showPresets=${RAGConfig.Retriever.selected === "EntityAware"}`);
+  }
 
 
   // Estado para collapse de blocos
@@ -390,8 +392,9 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   };
 
   const renderConfigOptions = (configKey: string) => {
-    const selected = RAGConfig.Retriever.selected;
-    const component = RAGConfig.Retriever.components[selected];
+    const selected = RAGConfig?.Retriever?.selected;
+    if (!selected) return null;
+    const component = RAGConfig?.Retriever?.components?.[selected];
     if (!component?.config?.[configKey]) return null;
 
     return component.config[configKey].values?.map((configValue) => (
@@ -416,10 +419,12 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
     // Mensagem de ajuda para campos desabilitados
     const getDisabledMessage = () => {
       if (!isDisabled) return null;
-      const selected = RAGConfig.Retriever.selected;
-      const component = RAGConfig.Retriever.components[selected];
-      const twoPhase = component?.config["Two-Phase Search Mode"];
-      const aggregation = component?.config["Enable Aggregation"];
+      const selected = RAGConfig?.Retriever?.selected;
+      if (!selected) return null;
+      const component = RAGConfig?.Retriever?.components?.[selected];
+      if (!component?.config) return null;
+      const twoPhase = component.config["Two-Phase Search Mode"];
+      const aggregation = component.config["Enable Aggregation"];
 
       if (configTitle === "Enable Entity Filter" || configTitle === "Entity Filter Mode") {
         if (twoPhase?.value && twoPhase.value !== "disabled") {
@@ -544,8 +549,9 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   };
 
   const renderBlock = (block: ConfigBlock) => {
-    const selected = RAGConfig.Retriever.selected;
-    const component = RAGConfig.Retriever.components[selected];
+    const selected = RAGConfig?.Retriever?.selected;
+    if (!selected) return null;
+    const component = RAGConfig?.Retriever?.components?.[selected];
     if (!component?.config) return null;
 
     // Verificar condiÃ§Ã£o do bloco
