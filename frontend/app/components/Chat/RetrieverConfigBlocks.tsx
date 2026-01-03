@@ -392,9 +392,9 @@ const RetrieverConfigBlocks: React.FC<RetrieverConfigBlocksProps> = ({
   const renderConfigOptions = (configKey: string) => {
     const selected = RAGConfig.Retriever.selected;
     const component = RAGConfig.Retriever.components[selected];
-    if (!component?.config[configKey]) return null;
+    if (!component?.config?.[configKey]) return null;
 
-    return component.config[configKey].values.map((configValue) => (
+    return component.config[configKey].values?.map((configValue) => (
       <li
         key={"ConfigValue" + configValue}
         className="text-sm"

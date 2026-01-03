@@ -95,7 +95,7 @@ export const MultiInput: React.FC<{
               <FaTrash size={12} />
             </button>
           </div>
-        ))}
+        })}
       </div>
     </div>
   );
@@ -153,24 +153,26 @@ const ComponentView: React.FC<ComponentViewProps> = ({
         </li>
       ));
   }
-  function renderConfigOptions(rag_config: RAGConfig, configKey: string) {
-    return rag_config[component_name].components[
-      rag_config[component_name].selected
-    ].config[configKey].values.map((configValue) => (
-      <li
-        key={"ConfigValue" + configValue}
-        className="text-sm"
-        onClick={() => {
-          if (!blocked) {
-            updateConfig(component_name, configKey, configValue);
-            closeOnClick();
-          }
-        }}
-      >
-        <a>{configValue}</a>
-      </li>
-    ));
-  }
+  const config = rag_config[component_name].components[
+    rag_config[component_name].selected
+  ]?.config?.[configKey];
+
+  if (!config || !config.values) return null;
+
+  return config.values.map((configValue) => (
+    <li
+      key={"ConfigValue" + configValue}
+      className="text-sm"
+      onClick={() => {
+        if (!blocked) {
+          updateConfig(component_name, configKey, configValue);
+          closeOnClick();
+        }
+      }}
+    >
+      <a>{configValue}</a>
+    </li>
+  ));
 
   if (
     Object.entries(
@@ -259,114 +261,116 @@ const ComponentView: React.FC<ComponentViewProps> = ({
       {Object.entries(
         RAGConfig[component_name].components[RAGConfig[component_name].selected]
           .config
-      ).map(([configTitle, config]) => (
-        <div key={"Configuration" + configTitle + component_name}>
-          <div className="flex gap-3 justify-between items-center text-text-verba lg:text-base text-sm">
-            <p className="flex min-w-[8vw]">{configTitle}</p>
+      ).map(([configTitle, config]) => {
+        if (!config) return null;
+        return (
+          <div key={"Configuration" + configTitle + component_name}>
+            <div className="flex gap-3 justify-between items-center text-text-verba lg:text-base text-sm">
+              <p className="flex min-w-[8vw]">{configTitle}</p>
 
-            {/* Dropdown */}
-            {config.type === "dropdown" && (
-              <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
-                <button
-                  tabIndex={0}
-                  role="button"
-                  disabled={blocked}
-                  className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
-                >
-                  <GoTriangleDown size={15} />
-                  <p>{config.value}</p>
-                </button>
-                <ul
-                  tabIndex={0}
-                  className="dropdown-content menu bg-base-100 max-h-[20vh] overflow-auto rounded-box z-[1] w-full p-2 shadow"
-                >
-                  {renderConfigOptions(RAGConfig, configTitle)}
-                </ul>
-              </div>
-            )}
+              {/* Dropdown */}
+              {config.type === "dropdown" && (
+                <div className="dropdown dropdown-bottom flex justify-start items-center w-full">
+                  <button
+                    tabIndex={0}
+                    role="button"
+                    disabled={blocked}
+                    className="btn bg-button-verba hover:bg-button-hover-verba text-text-verba w-full flex justify-start border-none"
+                  >
+                    <GoTriangleDown size={15} />
+                    <p>{config.value}</p>
+                  </button>
+                  <ul
+                    tabIndex={0}
+                    className="dropdown-content menu bg-base-100 max-h-[20vh] overflow-auto rounded-box z-[1] w-full p-2 shadow"
+                  >
+                    {renderConfigOptions(RAGConfig, configTitle)}
+                  </ul>
+                </div>
+              )}
 
-            {/* Text Input */}
-            {typeof config.value != "boolean" &&
-              ["text", "number", "password"].includes(config.type) && (
-                <label className="input flex text-sm items-center gap-2 w-full bg-bg-verba">
-                  <input
-                    type={config.type}
-                    className="grow w-full"
+              {/* Text Input */}
+              {typeof config.value != "boolean" &&
+                ["text", "number", "password"].includes(config.type) && (
+                  <label className="input flex text-sm items-center gap-2 w-full bg-bg-verba">
+                    <input
+                      type={config.type}
+                      className="grow w-full"
+                      value={config.value}
+                      onChange={(e) => {
+                        if (!blocked) {
+                          updateConfig(
+                            component_name,
+                            configTitle,
+                            e.target.value
+                          );
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+
+              {/* Text Area */}
+              {typeof config.value != "boolean" &&
+                ["textarea"].includes(config.type) && (
+                  <textarea
+                    className="grow w-full text-sm min-h-[152px] bg-bg-verba rounded-lg p-2"
                     value={config.value}
+                    onChange={(e) => {
+                      if (!blocked) {
+                        updateConfig(component_name, configTitle, e.target.value);
+                      }
+                    }}
+                  />
+                )}
+
+              {/* Multi Input */}
+              {typeof config.value != "boolean" && config.type == "multi" && (
+                <MultiInput
+                  component_name={component_name}
+                  values={config.values}
+                  config_title={configTitle}
+                  updateConfig={updateConfig}
+                  blocked={blocked}
+                />
+              )}
+
+              {/* Checkbox Input */}
+              {config.type == "bool" && (
+                <div className="flex gap-5 justify-start items-center w-full my-4">
+                  <p className="lg:text-sm text-xs text-text-alt-verba text-start w-[250px]">
+                    {config.description}
+                  </p>
+                  <input
+                    type="checkbox"
+                    className="checkbox checkbox-md"
                     onChange={(e) => {
                       if (!blocked) {
                         updateConfig(
                           component_name,
                           configTitle,
-                          e.target.value
+                          (e.target as HTMLInputElement).checked
                         );
                       }
                     }}
-                  />
-                </label>
-              )}
-
-            {/* Text Area */}
-            {typeof config.value != "boolean" &&
-              ["textarea"].includes(config.type) && (
-                <textarea
-                  className="grow w-full text-sm min-h-[152px] bg-bg-verba rounded-lg p-2"
-                  value={config.value}
-                  onChange={(e) => {
-                    if (!blocked) {
-                      updateConfig(component_name, configTitle, e.target.value);
+                    checked={
+                      typeof config.value === "boolean" ? config.value : false
                     }
-                  }}
-                />
+                  />
+                </div>
               )}
-
-            {/* Multi Input */}
-            {typeof config.value != "boolean" && config.type == "multi" && (
-              <MultiInput
-                component_name={component_name}
-                values={config.values}
-                config_title={configTitle}
-                updateConfig={updateConfig}
-                blocked={blocked}
-              />
-            )}
-
-            {/* Checkbox Input */}
-            {config.type == "bool" && (
-              <div className="flex gap-5 justify-start items-center w-full my-4">
-                <p className="lg:text-sm text-xs text-text-alt-verba text-start w-[250px]">
+            </div>
+            {/* Description */}
+            {config.type != "bool" && (
+              <div className="flex gap-2 items-center text-text-verba mt-3">
+                <p className="flex min-w-[8vw]"></p>
+                <p className="text-xs text-text-alt-verba text-start">
                   {config.description}
                 </p>
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-md"
-                  onChange={(e) => {
-                    if (!blocked) {
-                      updateConfig(
-                        component_name,
-                        configTitle,
-                        (e.target as HTMLInputElement).checked
-                      );
-                    }
-                  }}
-                  checked={
-                    typeof config.value === "boolean" ? config.value : false
-                  }
-                />
               </div>
             )}
           </div>
-          {/* Description */}
-          {config.type != "bool" && (
-            <div className="flex gap-2 items-center text-text-verba mt-3">
-              <p className="flex min-w-[8vw]"></p>
-              <p className="text-xs text-text-alt-verba text-start">
-                {config.description}
-              </p>
-            </div>
-          )}
-        </div>
-      ))}
+        })}
     </div>
   );
 };
