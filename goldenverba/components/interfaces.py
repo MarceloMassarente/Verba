@@ -230,6 +230,60 @@ When users' queries could benefit from advanced search, suggest more specific qu
             "generate_stream method must be implemented by a subclass."
         )
 
+    async def generate(
+        self,
+        messages: list[dict],
+        config: dict = None,
+    ) -> str:
+        """Non-streaming generation interface for plugins (QueryExpander, QueryBuilder).
+        
+        This default implementation collects tokens from generate_stream.
+        Subclasses may override this for more efficient non-streaming calls.
+        
+        @parameter messages: List of message dicts with 'role' and 'content' keys.
+        @parameter config: Optional configuration dict for the generator.
+        @returns str - Complete generated response text.
+        """
+        if config is None:
+            config = {}
+        
+        # Extract query from the last user message
+        query = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                query = msg.get("content", "")
+                break
+        
+        # Build conversation from messages (excluding the last user message)
+        conversation = []
+        for msg in messages[:-1] if messages else []:
+            conversation.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+        
+        # Call generate_stream and collect tokens
+        result_tokens = []
+        try:
+            async for chunk in self.generate_stream(
+                config=config,
+                query=query,
+                context="",
+                conversation=conversation
+            ):
+                if isinstance(chunk, dict):
+                    token = chunk.get("message", "") or chunk.get("system", "") or chunk.get("content", "")
+                    result_tokens.append(token)
+                elif isinstance(chunk, str):
+                    result_tokens.append(chunk)
+        except NotImplementedError:
+            # Subclass didn't implement generate_stream properly
+            return ""
+        except Exception:
+            return ""
+        
+        return "".join(result_tokens)
+
     def prepare_messages(
         self, queries: list[str], context: list[str], conversation: dict[str, str]
     ) -> any:

@@ -114,3 +114,4 @@ Voyage 3.5 Lite (API)
 
 **Documento completo:** `docs/analyses/EMBEDDINGS_CPU_ONLY_LOCAL_VS_API.md`
 
+

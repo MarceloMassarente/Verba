@@ -684,3 +684,4 @@ Voyage 3.5 Lite
 **Última atualização:** Janeiro 2025  
 **Baseado em:** Guia Comparativo Embeddings PT-BR + Análise CPU-only
 
+

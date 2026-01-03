@@ -148,3 +148,4 @@ values=[
 
 **Documento completo:** `docs/analyses/IMPLICACOES_GUIA_EMBEDDINGS_PT.md`
 
+

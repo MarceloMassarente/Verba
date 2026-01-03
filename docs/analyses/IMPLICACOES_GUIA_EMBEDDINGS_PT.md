@@ -715,3 +715,4 @@ class ColQwen2Embedder(Embedding):
 **Última atualização:** Janeiro 2025  
 **Autor:** Análise baseada em Guia Comparativo de Embeddings PT-BR (2025)
 
+

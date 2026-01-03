@@ -3458,7 +3458,8 @@ class EntityAwareRetriever(Retriever):
                     continue
             
             # Adicionar chunk ao documento
-            chunk_score = chunk.metadata.score if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "score") else 0
+            chunk_score_raw = chunk.metadata.score if hasattr(chunk, "metadata") and hasattr(chunk.metadata, "score") else 0
+            chunk_score = chunk_score_raw if chunk_score_raw is not None else 0.0
             
             # Converter chunk_id para int (pode vir como float ou string do Weaviate)
             chunk_id_raw = chunk_props.get("chunk_id", 0)

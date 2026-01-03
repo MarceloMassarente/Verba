@@ -1,0 +1,32 @@
+[
+  {
+    "profile": "speed",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 1 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  },
+  {
+    "profile": "balanced",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 1 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  },
+  {
+    "profile": "max_quality",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 2 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  },
+  {
+    "profile": "consulting_frameworks",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 1 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  },
+  {
+    "profile": "company_research",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 1 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  },
+  {
+    "profile": "sector_analysis",
+    "success": true,
+    "output_snippet": "    \u00e2\u0153\u2026 Encontrados 1 documentos\n    [0.392] ...\n\n[4] Busca com preset 'balanced'...\n    \u00e2\u0153\u2026 Encontrados 1 documentos\n    Preset aplicado: balanced\n\n[5] Testando diferentes presets...\n    - speed: 1 docs\n    - max_quality: 1 docs\n    - consulting_frameworks: 1 docs\n\n============================================================\nACESSO EXTERNO COMPLETO FUNCIONANDO!\nEndpoint: https://verba-production-c347.up.railway.app/api/external/query\n============================================================\n"
+  }
+]

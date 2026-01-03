@@ -1191,7 +1191,17 @@ async def query(payload: QueryPayload):
         
         # Verificar se há chunks disponíveis antes de processar query
         try:
-            embedder = rag_config.get("Embedder", {}).get("selected", "")
+            # Safe access that handles both dict and Pydantic RAGComponentClass objects
+            embedder_component = rag_config.get("Embedder") if isinstance(rag_config, dict) else getattr(rag_config, "Embedder", None)
+            if embedder_component:
+                if isinstance(embedder_component, dict):
+                    embedder = embedder_component.get("selected", "")
+                elif hasattr(embedder_component, "selected"):
+                    embedder = embedder_component.selected
+                else:
+                    embedder = ""
+            else:
+                embedder = ""
             if embedder:
                 from goldenverba.components.managers import WeaviateManager
                 weaviate_manager = WeaviateManager()
