@@ -1,0 +1,48 @@
+
+============================================================
+Testando API preset em: https://verba-production-c347.up.railway.app
+============================================================
+
+[1] Buscando RAG Config...
+    Status: 200
+    ✅ RAG Config carregado com 6 componentes
+    🔍 Keys in RAG: ['Reader', 'Chunker', 'Embedder', 'Retriever', 'Generator', 'Advanced']
+    🔍 Advanced present. Selected: MISSING
+    ⚠️ Forçando injeção de 'Advanced' dummy
+
+[DEBUG] Embedder selected: SentenceTransformers
+[DEBUG] Available Embedders: ['Ollama', 'SentenceTransformers', 'Weaviate', 'Upstage', 'VoyageAI', 'Cohere', 'OpenAI']
+[DEBUG] Could not find MiniLM, keeping original.
+
+[1.5] Listando presets disponíveis...
+    ✅ Presets disponíveis (list): [
+  "consulting_frameworks",
+  "company_research",
+  "sector_analysis",
+  "speed",
+  "max_quality",
+  "balanced",
+  "offline"
+]
+
+[2] Testando query SEM preset...
+    Status: 200
+    ✅ Documentos: 0
+    preset_applied: N/A
+
+[3] Testando query COM preset='speed'...
+    Status: 200
+    ✅ Documentos: 0
+    🎯 preset_applied: N/A
+
+    ⚠️ preset_applied não corresponde ao esperado: None != speed
+    🔍 Debug Info (Full Response): {
+  "error": "No documents or chunks available in the database. Please import documents first.",
+  "documents": [],
+  "context": ""
+}
+
+============================================================
+Resultado: ❌ FALHA
+============================================================
+

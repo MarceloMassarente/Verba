@@ -207,7 +207,8 @@ class GraphQLBuilder:
         # Campos padrão para collections de embedding do Verba
         if "VERBA_Embedding" in class_name or "Embedding" in class_name:
             return [
-                "text",
+                "content",  # Schema real usa 'content', não 'text'
+                "title",    # Schema real usa 'title', não 'doc_name'
                 "doc_uuid",
                 "chunk_id",
                 "chunk_date",
