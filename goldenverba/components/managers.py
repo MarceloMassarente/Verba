@@ -1815,38 +1815,166 @@ class EmbeddingManager:
 
             for doc_idx, document in enumerate(documents):
                 msg.info(f"[EMBEDDER] Processing document {doc_idx+1}/{len(documents)}: {document.title[:50]}...")
-                content = [
-                    document.metadata + "\n" + chunk.content
-                    for chunk in document.chunks
-                ]
-                msg.info(f"[EMBEDDER] Document has {len(content)} chunks to vectorize")
                 
-                try:
-                    # Pass logger and file_id to enable progress updates (keep-alive)
-                    embeddings = await self.batch_vectorize(
-                        embedder, config, content, logger, fileConfig.fileID
-                    )
-                    msg.info(f"[EMBEDDER] Generated {len(embeddings)} embeddings for document {doc_idx+1}")
-                except Exception as e:
-                    msg.fail(f"[EMBEDDER] Batch vectorize failed for document {doc_idx+1}: {type(e).__name__}: {str(e)}")
-                    import traceback
-                    msg.fail(f"[EMBEDDER] Traceback: {traceback.format_exc()}")
-                    raise
+                # Check for existing vectors (processed by smart chunkers)
+                chunks_to_process = []
+                content_to_process = []
+                chunk_indices = []
+                
+                # Check if embedder supports named vectors
+                has_named_vectors_capability = hasattr(self.embedders[embedder], 'vectorize_with_named_vectors')
+                
+                for i, chunk in enumerate(document.chunks):
+                    # Se chunk já tem vetor E o embedder é o mesmo (ou compatível), pulamos
+                    # Mas se mudamos de embedder, precisamos re-vetorizar
+                    # Como não rastreamos qual embedder gerou o vetor, assumimos:
+                    # Se tem vetor e é um dict (named vectors), mantemos se tiver as chaves
+                    # Se tem vetor e é lista, mantemos
+                    
+                    # SIMPLIFICAÇÃO: Se chunk já tem vetor, respeitamos (Smart Chunker wins)
+                    if chunk.vector is not None:
+                        continue
+                        
+                    chunks_to_process.append(chunk)
+                    content_to_process.append(document.metadata + "\n" + chunk.content)
+                    chunk_indices.append(i)
 
-                if len(embeddings) >= 3:
-                    pca = PCA(n_components=3)
-                    generated_pca_embeddings = pca.fit_transform(embeddings)
-                    pca_embeddings = [
-                        pca_.tolist() for pca_ in generated_pca_embeddings
-                    ]
+                if not chunks_to_process:
+                    msg.info(f"[EMBEDDER] All chunks in document {doc_idx+1} already have vectors. Skipping.")
+                    embeddings = [chunk.vector for chunk in document.chunks]
+                    # Adjust embeddings for PCA calculation (handle dicts)
+                    pca_input = []
+                    for vec in embeddings:
+                        if isinstance(vec, dict):
+                            pca_input.append(vec.get("default", []))
+                        elif isinstance(vec, list):
+                            pca_input.append(vec)
+                        else:
+                            pca_input.append([]) # Should not happen
+                    
+                    # Skip PCA and re-assignment loop logic below, just calculate PCA for display if needed
+                    # But we need to populate 'embeddings' variable for the shared PCA block if we want consistent behavior
+                    # Simplest is: if skipped, we assume vectors are good.
+                
                 else:
-                    pca_embeddings = [embedding[0:3] for embedding in embeddings]
+                    msg.info(f"[EMBEDDER] Document has {len(chunks_to_process)} chunks to vectorize")
+                    
+                    generated_embeddings = []
+                    
+                    # BRANCH: Named Vectors Support
+                    if has_named_vectors_capability:
+                        try:
+                            msg.info(f"[EMBEDDER] Using specialized 'vectorize_with_named_vectors' for {embedder}")
+                            # Call the specialized method
+                            # Returns Dict[str, List[List[float]]]
+                            vectors_dict = await self.embedders[embedder].vectorize_with_named_vectors(
+                                chunks_to_process, [document]
+                            )
+                            
+                            # Parse result into per-chunk vectors
+                            default_vectors = vectors_dict.get("default", [])
+                            concept_vectors = vectors_dict.get("concept_vec", [])
+                            company_vectors = vectors_dict.get("company_vec", [])
+                            sector_vectors = vectors_dict.get("sector_vec", [])
+                            
+                            for i, chunk in enumerate(chunks_to_process):
+                                chunk_vectors = {}
+                                if i < len(default_vectors):
+                                    chunk_vectors["default"] = default_vectors[i]
+                                if i < len(concept_vectors):
+                                    chunk_vectors["concept_vec"] = concept_vectors[i]
+                                if i < len(company_vectors):
+                                    chunk_vectors["company_vec"] = company_vectors[i]
+                                if i < len(sector_vectors):
+                                    chunk_vectors["sector_vec"] = sector_vectors[i]
+                                
+                                # Fallback if empty dict (should not happen if default exists)
+                                if chunk_vectors:
+                                    chunk.vector = chunk_vectors
+                                    # For PCA, use default
+                                    generated_embeddings.append(chunk_vectors.get("default", []))
+                                elif i < len(default_vectors):
+                                    chunk.vector = default_vectors[i]
+                                    generated_embeddings.append(default_vectors[i])
+                                else:
+                                    # Critical failure for this chunk
+                                    generated_embeddings.append([])
 
-                for vector, chunk, pca_ in zip(
-                    embeddings, document.chunks, pca_embeddings
-                ):
-                    chunk.vector = vector
-                    chunk.pca = pca_
+                            msg.good(f"[EMBEDDER] Generated named vectors for {len(chunks_to_process)} chunks")
+                            
+                        except Exception as e:
+                            msg.fail(f"[EMBEDDER] Specialized vectorization failed: {str(e)}. Falling back to standard.")
+                            # Fallback logic could go here, but usually better to raise
+                            raise e
+                            
+                    else:
+                        # STANDARD BRANCH
+                        try:
+                            # Pass logger and file_id to enable progress updates (keep-alive)
+                            new_embeddings = await self.batch_vectorize(
+                                embedder, config, content_to_process, logger, fileConfig.fileID
+                            )
+                            generated_embeddings = new_embeddings
+                            
+                            # Assign to chunks
+                            for chunk, vector in zip(chunks_to_process, new_embeddings):
+                                chunk.vector = vector
+                                
+                            msg.info(f"[EMBEDDER] Generated {len(new_embeddings)} embeddings for document {doc_idx+1}")
+                        except Exception as e:
+                            msg.fail(f"[EMBEDDER] Batch vectorize failed for document {doc_idx+1}: {type(e).__name__}: {str(e)}")
+                            import traceback
+                            msg.fail(f"[EMBEDDER] Traceback: {traceback.format_exc()}")
+                            raise
+
+                    # Reconstruct full list of embeddings for PCA (including skipped ones)
+                    embeddings = []
+                    for chunk in document.chunks:
+                        vec = chunk.vector
+                        if isinstance(vec, dict):
+                            embeddings.append(vec.get("default", []))
+                        elif isinstance(vec, list):
+                            embeddings.append(vec)
+                        else:
+                            embeddings.append([])
+
+                # PCA Calculation (Common for all branches)
+                if len(embeddings) >= 3:
+                    try:
+                        # Filter out empty vectors
+                        valid_embeddings = [e for e in embeddings if e and len(e) > 0]
+                        if len(valid_embeddings) >= 3:
+                            pca = PCA(n_components=3)
+                            generated_pca_embeddings = pca.fit_transform(valid_embeddings)
+                            pca_embeddings_map = {
+                                idx: pca_.tolist() 
+                                for idx, pca_ in enumerate(generated_pca_embeddings)
+                            }
+                        else:
+                             pca_embeddings_map = {}
+                    except Exception as e:
+                         msg.warn(f"[EMBEDDER] PCA failed: {str(e)}")
+                         pca_embeddings_map = {}
+                else:
+                    # Simple slice fallback
+                    pca_embeddings_map = {}
+                    for idx, e in enumerate(embeddings):
+                        if e and len(e) >= 3:
+                            pca_embeddings_map[idx] = e[0:3]
+                        else:
+                            pca_embeddings_map[idx] = [0.0, 0.0, 0.0]
+
+                # Assign PCA to chunks
+                # Note: embeddings list matches document.chunks order
+                valid_idx = 0
+                for idx, chunk in enumerate(document.chunks):
+                    vec = embeddings[idx]
+                    if vec and len(vec) > 0:
+                        if valid_idx in pca_embeddings_map:
+                             chunk.pca = pca_embeddings_map[valid_idx]
+                        valid_idx += 1
+                    else:
+                        chunk.pca = [0.0, 0.0, 0.0]
 
                 document.meta["Embedder"] = (
                     fileConfig.rag_config["Embedder"]

@@ -857,6 +857,81 @@ class EntitySemanticChunker(Chunker):
             # Pós-processamento: mesclar chunks minúsculos
             document.chunks = _merge_small_chunks(document.chunks, min_chunk_chars)
 
+        # ============================================
+        # VECTORIZATION STEP (Final)
+        # ============================================
+        # Garante que os chunks sejam vetorizados, independente do Embedder escolhido
+        # Isso é necessário porque o loop acima usa embedder.vectorize() apenas para
+        # calcular breakpoints semânticos, mas não vetoriza os chunks finais.
+        if embedder:
+            try:
+                for document in documents:
+                    chunks_to_vectorize = []
+                    texts_to_vectorize = []
+                    
+                    # Identifica chunks que precisam de vetor (ainda sem vetor)
+                    for chunk in document.chunks:
+                        if chunk.vector is None:
+                            chunks_to_vectorize.append(chunk)
+                            texts_to_vectorize.append(chunk.content)
+                    
+                    if not chunks_to_vectorize:
+                        continue
+                        
+                    msg.info(f"[Entity-Semantic] Vetorizando {len(chunks_to_vectorize)} chunks finais...")
+                    
+                    # Verifica se é HybridConsultingEmbedder (tem named vectors)
+                    if hasattr(embedder, 'vectorize_with_named_vectors'):
+                        msg.info(f"[Entity-Semantic] Usando HybridConsultingEmbedder (Named Vectors)")
+                        
+                        # A assinatura correta é vectorize_with_named_vectors(chunks, documents)
+                        # Retorna Dict com named vectors: {"default": [[...], ...], "concept_vec": [...], ...}
+                        vectors_dict = await embedder.vectorize_with_named_vectors(
+                            chunks_to_vectorize,
+                            [document]  # Passa o documento atual como lista
+                        )
+                        
+                        # Atribui vetores - o formato é Dict[str, List[List[float]]]
+                        default_vectors = vectors_dict.get("default", [])
+                        concept_vectors = vectors_dict.get("concept_vec", [])
+                        company_vectors = vectors_dict.get("company_vec", [])
+                        sector_vectors = vectors_dict.get("sector_vec", [])
+                        
+                        for i, chunk in enumerate(chunks_to_vectorize):
+                            chunk_vectors = {}
+                            
+                            if i < len(default_vectors):
+                                chunk_vectors["default"] = default_vectors[i]
+                            if i < len(concept_vectors):
+                                chunk_vectors["concept_vec"] = concept_vectors[i]
+                            if i < len(company_vectors):
+                                chunk_vectors["company_vec"] = company_vectors[i]
+                            if i < len(sector_vectors):
+                                chunk_vectors["sector_vec"] = sector_vectors[i]
+                            
+                            # Se não houver named vectors, usa default
+                            if chunk_vectors:
+                                chunk.vector = chunk_vectors
+                            elif i < len(default_vectors):
+                                chunk.vector = default_vectors[i]
+                             
+                    else:
+                        # Embedder Padrão (OpenAI, Weaviate, etc)
+                        msg.info(f"[Entity-Semantic] Usando Embedder Padrão (Vetor único)")
+                        vectors = await embedder.vectorize(embedder_config, texts_to_vectorize)
+                        
+                        # Atribui vetores
+                        for chunk, vector in zip(chunks_to_vectorize, vectors):
+                            chunk.vector = vector
+                             
+                    msg.good(f"[Entity-Semantic] ✅ {len(chunks_to_vectorize)} chunks vetorizados")
+                     
+            except Exception as e:
+                msg.warn(f"[Entity-Semantic] Erro na vetorização final: {str(e)}")
+                import traceback
+                msg.debug(traceback.format_exc())
+                # Não falha o chunking, mas deixa sem vetor
+
         return documents
 
 
