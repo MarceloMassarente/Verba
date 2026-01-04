@@ -752,7 +752,7 @@ class UnifiedConsultingIngestor(Reader):
                 for comp in slide.get("companies", [])
             ]))
         }
-        document.meta = json.dumps(meta_dict)
+        document.meta = meta_dict  # Dict nativo para compatibilidade com Chunker
         
         return document
     
@@ -829,14 +829,119 @@ class UnifiedConsultingIngestor(Reader):
             slide["visual_archetype"] = archetype_match.group(1).strip()
     
     def _get_framework_patterns(self) -> Dict[str, List[str]]:
-        return {
-            "BCG Matrix": [r"bcg", r"matriz bcg", r"boston consulting group"],
-            "SWOT": [r"swot", r"forças? e fraquezas?"],
-            "Porter": [r"porter", r"5 forças?", r"cinco forças?"],
-            "McKinsey": [r"mckinsey", r"7s"],
-            "Ansoff": [r"ansoff"],
-            "PESTEL": [r"pestel", r"pest"]
+        """
+        Carrega patterns de frameworks.json para detecção robusta.
+        Retorna dict: canonical_name -> [aliases como regex patterns]
+        
+        Melhorias:
+        - Filtra aliases genéricos (blacklist)
+        - Aplica \b (word bounderies)
+        """
+        # Termos muito genéricos para serem usados sozinhos como identificadores
+        GENERIC_BLACKLIST = {
+            "strategy", "growth", "profit", "value", "business", "system", "model", 
+            "core", "net", "map", "three", "great", "zero", "answer", "first", 
+            "full", "design", "micro", "factory", "rules", "rule", "curve", 
+            "elements", "talent", "decision", "making", "organization", 
+            "organizational", "clean", "team", "results", "delivery", "engine",
+            "matrix", "matriz", "analysis", "analise", "structure", "conduct",
+            "performance", "future", "options", "change", "pyramid", "principle",
+            "innovation", "digital", "transformation", "customer", "cliente",
+            "voice", "excellence", "mindsets", "economics", "tree", "trees",
+            "impact", "social", "emotional", "functional", "life", "changing",
+            "b2c", "b2b", "start-up", "scale-up", "scale", "win", "amplify",
+            "founders", "founder", "mentality", "staircases", "granularity",
+            "adjacencies", "adjacency", "expansion", "repeatable", "control",
+            "portfolio", "initiatives", "promoter", "score", "prism", "earned",
+            "rate", "consumer", "journey", "jornada", "accelerator", "corridor",
+            "episodes", "health", "index", "effective", "effectiveness",
+            "spikiness", "abatement", "drivers", "driver", "loyalty"
         }
+
+        try:
+            import os
+            frameworks_path = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "resources",
+                "frameworks.json"
+            )
+            frameworks_path = os.path.normpath(frameworks_path)
+            
+            if os.path.exists(frameworks_path):
+                with open(frameworks_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                patterns = {}
+                for fw in data.get("frameworks", []):
+                    name = fw.get("name", "")
+                    if not name:
+                         continue
+                         
+                    valid_aliases = []
+                    raw_aliases = fw.get("aliases", [])
+                    # Always include the full name itself
+                    raw_aliases.append(name)
+                    
+                    seen_aliases = set()
+                    
+                    for alias in raw_aliases:
+                        alias_clean = alias.strip().lower()
+                        
+                        if not alias_clean or alias_clean in seen_aliases:
+                            continue
+                        
+                        # Filter 1: Length
+                        if len(alias_clean) < 3 and alias_clean not in ["ep", "7s", "dq", "4ps"]:
+                            continue
+                            
+                        # Filter 2: Blacklist (single words only)
+                        # Se o alias for composto (ex: "Blue Ocean"), aceitamos mesmo se tiver palavras da blacklist.
+                        # Se for uma unica palavra E estiver na blacklist, ignoramos.
+                        if " " not in alias_clean and alias_clean in GENERIC_BLACKLIST:
+                             continue
+                        
+                        seen_aliases.add(alias_clean)
+                        
+                        # Apply word boundaries regex
+                        # Exceto se contiver simbolos que quebram \b (ex: +, &)
+                        escaped = re.escape(alias_clean)
+                        valid_aliases.append(r"\b" + escaped + r"\b")
+                    
+                    if valid_aliases:
+                        patterns[name] = valid_aliases
+                
+                msg.info(f"[Unified-Ingestor] Carregados {len(patterns)} frameworks com filtragem de falsos positivos")
+                return patterns
+        except Exception as e:
+            msg.warn(f"[Unified-Ingestor] Erro ao carregar frameworks.json: {e}")
+        
+        # Fallback para patterns básicos
+        return {
+            "BCG Matrix": [r"\bbcg\b", r"\bmatriz bcg\b", r"\bboston consulting group\b"],
+            "SWOT Analysis": [r"\bswot\b", r"\bforças? e fraquezas?\b"],
+            "Porter's Five Forces": [r"\bporter\b", r"\b5 forças?\b", r"\bcinco forças?\b"],
+            "McKinsey 7-S": [r"\bmckinsey\b", r"\b7s\b"],
+            "Ansoff Matrix": [r"\bansoff\b"],
+            "PESTEL Analysis": [r"\bpestel\b", r"\bpest\b"]
+        }
+    
+    def _normalize_framework_name(self, detected_name: str) -> str:
+        """
+        Normaliza nome de framework para canonical name.
+        Evita duplicatas como "BCG" vs "BCG Matrix" vs "bcg matrix".
+        """
+        if not hasattr(self, '_frameworks_canonical_map'):
+            # Build lookup map once
+            self._frameworks_canonical_map = {}
+            for canonical, patterns in self.framework_patterns.items():
+                for pattern in patterns:
+                    clean_pattern = pattern.replace("\\", "").lower()
+                    self._frameworks_canonical_map[clean_pattern] = canonical
+        
+        # Lookup
+        key = detected_name.lower().strip()
+        return self._frameworks_canonical_map.get(key, detected_name)
     
     def _get_config_value(self, config: dict, key: str, default):
         config_item = config.get(key, {})
@@ -846,3 +951,4 @@ class UnifiedConsultingIngestor(Reader):
             return config_item.value
         else:
             return default
+

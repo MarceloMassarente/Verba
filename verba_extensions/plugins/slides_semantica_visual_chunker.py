@@ -118,6 +118,18 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                     # Fallback para chunking normal
                     chunked_doc = await super().chunk([document])
                     chunked_doc = chunked_doc[0] if chunked_doc else document
+                    
+                    # GAP FIX: Preservar metadata de frameworks/companies mesmo no fallback
+                    # Isso garante que named vectors (concept_vec, company_vec) funcionem
+                    doc_meta = document.meta if isinstance(document.meta, dict) else {}
+                    if doc_meta.get("all_frameworks") or doc_meta.get("all_companies"):
+                        msg.info(f"[SlidesSemanticaVisual] Preservando metadata no fallback: {len(doc_meta.get('all_frameworks', []))} frameworks, {len(doc_meta.get('all_companies', []))} companies")
+                        for chunk in getattr(chunked_doc, 'chunks', []):
+                            if not hasattr(chunk, 'meta') or chunk.meta is None:
+                                chunk.meta = {}
+                            chunk.meta["frameworks"] = doc_meta.get("all_frameworks", [])
+                            chunk.meta["companies"] = doc_meta.get("all_companies", [])
+                            chunk.meta["sectors"] = doc_meta.get("all_sectors", [])
                 
                 chunked_documents.append(chunked_doc)
                 
