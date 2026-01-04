@@ -140,7 +140,61 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 # Fallback: retorna documento original
                 chunked_documents.append(document)
         
+        # VECTORIZATION STEP
+        # Garante que os chunks sejam vetorizados, independente do Embedder escolhido
+        if embedder:
+             try:
+                 for doc in chunked_documents:
+                     chunks_to_vectorize = []
+                     texts_to_vectorize = []
+                     
+                     # Identifica chunks que precisam de vetor (ainda sem vetor)
+                     for i, chunk in enumerate(doc.chunks):
+                         if chunk.vector is None:
+                             chunks_to_vectorize.append(chunk)
+                             texts_to_vectorize.append(chunk.content)
+                     
+                     if not chunks_to_vectorize:
+                         continue
+                         
+                     msg.info(f"[SlidesSemanticaVisual] Vetorizando {len(chunks_to_vectorize)} chunks...")
+                     
+                     # Verifica se é HybridConsultingEmbedder (tem named vectors)
+                     if hasattr(embedder, 'vectorize_with_named_vectors'):
+                         msg.info(f"[SlidesSemanticaVisual] Usando HybridConsultingEmbedder (Named Vectors)")
+                         # Precisamos passar os chunks OBJETOS, pois o named vector precisa do meta
+                         # O método signature do Hybrid é: vectorize_with_named_vectors(config, chunks: List[Chunk]) -> List[Dict]
+                         # Mas pera, a interface padrão espera apenas vectorize(config, content: List[str]).
+                         # O HybridEmbedder precisa ser chamado especificamente ou ele sobrescreve vectorize?
+                         # Se ele sobrescreve vectorize, ele retorna list[float] (um vetor por chunk).
+                         # O HybridEmbedder DEVE fornecer metodos compatíveis.
+                         
+                         # Se o Embedder é esperto, vectorize() detecta named vectors?
+                         # Vamos assumir que se o método especial existe, devemos usá-lo para extrair potencial máximo.
+                         
+                         vectors = await embedder.vectorize_with_named_vectors(config, chunks_to_vectorize)
+                         
+                         # Atribui vetores (podem ser dicts ou lists)
+                         for chunk, vector in zip(chunks_to_vectorize, vectors):
+                             chunk.vector = vector
+                             
+                     else:
+                         # Embedder Padrão (OpenAI, Weaviate, etc)
+                         msg.info(f"[SlidesSemanticaVisual] Usando Embedder Padrão (Vetor único)")
+                         vectors = await embedder.vectorize(config, texts_to_vectorize)
+                         
+                         # Atribui vetores
+                         for chunk, vector in zip(chunks_to_vectorize, vectors):
+                             chunk.vector = vector
+                             
+                     msg.good(f"[SlidesSemanticaVisual] ✅ {len(chunks_to_vectorize)} chunks vetorizados")
+                     
+             except Exception as e:
+                 msg.warn(f"[SlidesSemanticaVisual] Erro na vetorização: {str(e)}")
+                 # Não falha o chunking, mas deixa sem vetor (Manager pode reclamar ou usar Weaviate auto-vectorizer)
+
         return chunked_documents
+
     
     def _is_slides_semantic_visual_document(self, document: Document) -> bool:
         """Verifica se documento tem estrutura V019 (slides_metadata)"""
