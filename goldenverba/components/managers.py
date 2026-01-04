@@ -1451,15 +1451,40 @@ class WeaviateManager:
             }
             
             # Adicionar target_vector se especificado (para named vectors)
+            # IMPORTANTE: Só passar target_vector se a collection REALMENTE tiver named vectors
+            # Caso contrário, o Weaviate retorna erro "Named vectors are not enabled"
             final_target_vector = target_vector if target_vector else "default"
             
-            if final_target_vector:
+            # Detectar se collection tem named vectors
+            collection_has_named_vectors = False
+            try:
+                collection_config = await embedder_collection.config.get()
+                vec_cfg = getattr(collection_config, 'vector_config', None)
+                
+                if vec_cfg:
+                    if isinstance(vec_cfg, dict):
+                        # Dict format: {"default": {...}, "concept_vec": {...}}
+                        collection_has_named_vectors = "default" in vec_cfg
+                    elif isinstance(vec_cfg, (list, tuple)):
+                        # List format: [VectorConfig(name="default"), ...]
+                        collection_has_named_vectors = any(
+                            getattr(v, 'name', '') == 'default' for v in vec_cfg
+                        )
+                    else:
+                        # Se vec_cfg existe mas não é dict/list, assume named vectors
+                        collection_has_named_vectors = True
+            except Exception as e:
+                msg.debug(f"[HybridWithFilter] Erro ao verificar named vectors: {str(e)[:50]}")
+            
+            if collection_has_named_vectors and final_target_vector:
                 try:
                     hybrid_kwargs["target_vector"] = final_target_vector
-                    # msg.info(f"🔍 [HybridWithFilter] Using target_vector='{final_target_vector}'")
+                    msg.debug(f"🔍 [HybridWithFilter] Using named vector: '{final_target_vector}'")
                 except TypeError:
                     # Se target_vector não suportado, ignora
                     pass
+            else:
+                msg.debug(f"🔍 [HybridWithFilter] Collection sem named vectors - usando busca padrão")
             
             # Adicionar limit ou auto_limit baseado no modo
             if limit_mode == "Autocut":

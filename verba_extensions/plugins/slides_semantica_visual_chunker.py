@@ -162,21 +162,40 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                      # Verifica se é HybridConsultingEmbedder (tem named vectors)
                      if hasattr(embedder, 'vectorize_with_named_vectors'):
                          msg.info(f"[SlidesSemanticaVisual] Usando HybridConsultingEmbedder (Named Vectors)")
-                         # Precisamos passar os chunks OBJETOS, pois o named vector precisa do meta
-                         # O método signature do Hybrid é: vectorize_with_named_vectors(config, chunks: List[Chunk]) -> List[Dict]
-                         # Mas pera, a interface padrão espera apenas vectorize(config, content: List[str]).
-                         # O HybridEmbedder precisa ser chamado especificamente ou ele sobrescreve vectorize?
-                         # Se ele sobrescreve vectorize, ele retorna list[float] (um vetor por chunk).
-                         # O HybridEmbedder DEVE fornecer metodos compatíveis.
                          
-                         # Se o Embedder é esperto, vectorize() detecta named vectors?
-                         # Vamos assumir que se o método especial existe, devemos usá-lo para extrair potencial máximo.
+                         # CORREÇÃO: A assinatura correta é vectorize_with_named_vectors(chunks, documents)
+                         # Retorna Dict com named vectors: {"default": [[...], ...], "concept_vec": [...], ...}
+                         vectors_dict = await embedder.vectorize_with_named_vectors(
+                             chunks_to_vectorize,
+                             [doc]  # Passa o documento atual como lista
+                         )
                          
-                         vectors = await embedder.vectorize_with_named_vectors(config, chunks_to_vectorize)
+                         # Atribui vetores - o formato é Dict[str, List[List[float]]]
+                         # Para cada chunk, precisamos construir um dict com os named vectors
+                         default_vectors = vectors_dict.get("default", [])
+                         concept_vectors = vectors_dict.get("concept_vec", [])
+                         company_vectors = vectors_dict.get("company_vec", [])
+                         sector_vectors = vectors_dict.get("sector_vec", [])
                          
-                         # Atribui vetores (podem ser dicts ou lists)
-                         for chunk, vector in zip(chunks_to_vectorize, vectors):
-                             chunk.vector = vector
+                         for i, chunk in enumerate(chunks_to_vectorize):
+                             # O chunk.vector pode ser um dict (para named vectors) ou list (para único vetor)
+                             # O Manager.import_document espera dict se collection tem named vectors
+                             chunk_vectors = {}
+                             
+                             if i < len(default_vectors):
+                                 chunk_vectors["default"] = default_vectors[i]
+                             if i < len(concept_vectors):
+                                 chunk_vectors["concept_vec"] = concept_vectors[i]
+                             if i < len(company_vectors):
+                                 chunk_vectors["company_vec"] = company_vectors[i]
+                             if i < len(sector_vectors):
+                                 chunk_vectors["sector_vec"] = sector_vectors[i]
+                             
+                             # Se não houver named vectors, usa default
+                             if chunk_vectors:
+                                 chunk.vector = chunk_vectors
+                             elif i < len(default_vectors):
+                                 chunk.vector = default_vectors[i]
                              
                      else:
                          # Embedder Padrão (OpenAI, Weaviate, etc)
@@ -191,6 +210,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                      
              except Exception as e:
                  msg.warn(f"[SlidesSemanticaVisual] Erro na vetorização: {str(e)}")
+                 import traceback
+                 msg.debug(traceback.format_exc())
                  # Não falha o chunking, mas deixa sem vetor (Manager pode reclamar ou usar Weaviate auto-vectorizer)
 
         return chunked_documents
