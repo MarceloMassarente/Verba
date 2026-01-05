@@ -228,6 +228,27 @@ class EntityAwareRetriever(Retriever):
             values=[],
             block="fundamental",
         )
+        self.config["Retrieval Threshold"] = InputConfig(
+            type="text",
+            value="0.15",
+            description="Minimum similarity score (0.0-1.0). Default 0.15 acts as 'garbage filter' to reject clearly irrelevant results without affecting legitimate queries.",
+            values=[],
+            block="fundamental",
+        )
+        self.config["Retrieval Margin"] = InputConfig(
+            type="text",
+            value="0.0",
+            description="Minimum margin between top-1 and top-2 scores (0.0-1.0). DISABLED by default (0.0) - use only if queries return ambiguous results. Typical: 0.15-0.3 for disambiguation.",
+            values=[],
+            block="fundamental",
+        )
+        self.config["Gate Failure Message"] = InputConfig(
+            type="text",
+            value="NAO ENCONTREI NO DOCUMENTO",
+            description="Message to return as context when retrieval fails the relevance gate.",
+            values=[],
+            block="fundamental",
+        )
         # BLOCO 2: Filtros
         self.config["Enable Entity Filter"] = InputConfig(
             type="bool",
@@ -1587,7 +1608,7 @@ class EntityAwareRetriever(Retriever):
         labels: List[str],
         document_uuids: List[str],
         rag_config: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[Any], str]:
+    ) -> Tuple[List[Any], str, Dict[str, Any]]:
         """Executa busca entity-aware."""
         
         # Inicializar variáveis para evitar NameError/UnboundLocalError
@@ -1946,7 +1967,7 @@ class EntityAwareRetriever(Retriever):
                         msg.good(f"  Agregação executada com sucesso: {aggregation_info.get('aggregation_type', 'unknown')}")
                         
                         # Retornar chunks vazios e contexto com resultados
-                        return ([], context)
+                        return ([], context, debug_info)
                         
                     except Exception as e:
                         msg.warn(f"  Erro ao executar agregação: {str(e)}")
@@ -3371,7 +3392,7 @@ class EntityAwareRetriever(Retriever):
         
         if len(chunks) == 0:
             msg.warn("Nenhum chunk encontrado")
-            return ([], "We couldn't find any chunks to the query")
+            return ([], "We couldn't find any chunks to the query", debug_info)
         
         msg.good(f"Encontrados {len(chunks)} chunks")
         
@@ -3453,7 +3474,7 @@ class EntityAwareRetriever(Retriever):
                     msg.good(f"  Filtro de frequência: {len(filtered_chunks)} chunks de {filtered_docs} documentos")
                 else:
                     msg.warn(f"  Filtro de frequência: nenhum documento passou nos critérios")
-                    return ([], "Nenhum documento atende aos critérios de frequência de entidade")
+                    return ([], "Nenhum documento atende aos critérios de frequência de entidade", debug_info)
                     
             except ImportError:
                 msg.warn("  entity_frequency não disponível, ignorando filtro de frequência")
@@ -3673,6 +3694,49 @@ class EntityAwareRetriever(Retriever):
         except Exception as e:
             msg.warn(f"Erro inesperado no Cascade Phase 2: {str(e)}")
             
+        # 6.9. RELEVANCE GATE (Threshold & Margin Guardrails)
+        # Protege contra queries fora de domínio ("bolo de cenoura")
+        all_chunk_scores = []
+        for c in chunks:
+            s_raw = c.metadata.score if hasattr(c, "metadata") and hasattr(c.metadata, "score") else 0.0
+            all_chunk_scores.append(s_raw if s_raw is not None else 0.0)
+            
+        all_chunk_scores.sort(reverse=True)
+        top_1_score = all_chunk_scores[0] if all_chunk_scores else 0.0
+        top_2_score = all_chunk_scores[1] if len(all_chunk_scores) > 1 else 0.0
+        current_margin = top_1_score - top_2_score
+        
+        # Obter configurações de gate
+        gate_threshold = float(get_config_value(config, "Retrieval Threshold", "0.0"))
+        gate_margin = float(get_config_value(config, "Retrieval Margin", "0.0"))
+        gate_failure_msg = get_config_value(config, "Gate Failure Message", "NÃO ENCONTREI NO DOCUMENTO")
+        
+        debug_info["relevance_gate"] = {
+            "top_1_score": round(top_1_score, 4),
+            "top_2_score": round(top_2_score, 4),
+            "margin": round(current_margin, 4),
+            "threshold_t": gate_threshold,
+            "threshold_m": gate_margin,
+            "status": "passed"
+        }
+        
+        # Validar gate
+        is_gate_failed = False
+        if gate_threshold > 0 and top_1_score < gate_threshold:
+            is_gate_failed = True
+            debug_info["relevance_gate"]["status"] = "failed"
+            debug_info["relevance_gate"]["reason"] = f"Top score {top_1_score:.4f} < Threshold {gate_threshold}"
+        elif gate_margin > 0 and current_margin < gate_margin:
+            is_gate_failed = True
+            debug_info["relevance_gate"]["status"] = "failed"
+            debug_info["relevance_gate"]["reason"] = f"Margin {current_margin:.4f} < Margin Threshold {gate_margin}"
+            
+        if is_gate_failed:
+            msg.warn(f"  [GATE] Relevance Gate REJECTED results: {debug_info['relevance_gate']['reason']}")
+            # Retorna lista vazia de documentos e mensagem de erro como contexto
+            # O sistema espera Tuple[List[Any], str] ou Tuple[List[Any], str, Dict]
+            return ([], gate_failure_msg, debug_info)
+
         # 7. CONVERTE CHUNKS PARA FORMATO ESPERADO (dicionários serializáveis)
         # Similar ao WindowRetriever, precisa converter objetos Weaviate para dicionários
         documents = []
@@ -3881,6 +3945,11 @@ class EntityAwareRetriever(Retriever):
             debug_summary += f"Filtros aplicados: {debug_info['filters_applied'].get('description', 'N/A')}\n"
         debug_summary += f"Alpha usado: {debug_info['alpha_used']}\n"
         debug_summary += f"Modo de busca: {debug_info['search_mode']}\n"
+        if debug_info.get("relevance_gate"):
+            rg = debug_info["relevance_gate"]
+            debug_summary += f"Relevance Gate: {rg['status']} (Best: {rg['top_1_score']}, Margin: {rg['margin']})\n"
+            if rg['status'] == 'failed':
+                debug_summary += f"Motivo Falha: {rg['reason']}\n"
         if debug_info.get('chunks_filtered'):
             debug_summary += f"Chunks filtrados: {debug_info['chunks_filtered']['message']}\n"
         if debug_info.get('explanation'):

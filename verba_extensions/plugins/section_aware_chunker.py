@@ -103,13 +103,13 @@ class SectionAwareChunker(Chunker):
         self.config = {
             "Chunk Size": InputConfig(
                 type="number",
-                value=300,
-                description="Tamanho alvo de palavras por chunk",
+                value=250,
+                description="Tamanho alvo de palavras por chunk (recomendado: 250-400)",
                 values=[],
             ),
             "Overlap": InputConfig(
                 type="number",
-                value=50,
+                value=40,
                 description="Overlap em palavras entre chunks",
                 values=[],
             ),
@@ -120,7 +120,7 @@ class SectionAwareChunker(Chunker):
                 values=[],
             ),
         }
-    
+
     async def chunk(
         self,
         config: dict,
@@ -131,8 +131,8 @@ class SectionAwareChunker(Chunker):
         """
         Chunking que respeita seções
         """
-        chunk_size = int(config.get("Chunk Size", {}).value if hasattr(config.get("Chunk Size", {}), 'value') else 300)
-        overlap = int(config.get("Overlap", {}).value if hasattr(config.get("Overlap", {}), 'value') else 50)
+        chunk_size = int(config.get("Chunk Size", {}).value if hasattr(config.get("Chunk Size", {}), 'value') else 250)
+        overlap = int(config.get("Overlap", {}).value if hasattr(config.get("Overlap", {}), 'value') else 40)
         min_section_size = int(config.get("Min Section Size", {}).value if hasattr(config.get("Min Section Size", {}), 'value') else 100)
         
         for document in documents:
@@ -199,7 +199,9 @@ class SectionAwareChunker(Chunker):
                     
                 else:
                     # Seção grande: divide respeitando parágrafos E entidades
-                    paragraphs = section_text.split('\n\n')
+                    # Melhora splitting para considerar bullets e listas como candidatos a quebra
+                    paragraphs = re.split(r'\n\n+|(?=\n\s*(?:[\*\-\•]|\d+[\.\)]))', section_text)
+                    paragraphs = [p.strip() for p in paragraphs if p.strip()]
                     
                     # Filtra entidades que estão nesta seção usando binary search (O(log n))
                     if entity_spans:
