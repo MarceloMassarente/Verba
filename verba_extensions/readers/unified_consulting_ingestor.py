@@ -26,6 +26,10 @@ from typing import List, Dict, Any, Optional
 from wasabi import msg
 import aiohttp
 import json
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
 from goldenverba.components.document import Document
 from goldenverba.components.interfaces import Reader
@@ -314,7 +318,7 @@ class UnifiedConsultingIngestor(Reader):
         except Exception as e:
             msg.fail(f"[Unified-Ingestor] Erro na extração local: {str(e)}")
             import traceback
-            msg.debug(traceback.format_exc())
+            msg.info(traceback.format_exc())
             return []
     
     async def _extract_text_locally(
@@ -325,6 +329,10 @@ class UnifiedConsultingIngestor(Reader):
         """
         Extrai texto localmente usando python-pptx (PPTX), pypdf (PDF), ou Docling se instalado.
         """
+        extension = fileConfig.extension.lower().strip().lstrip('.')
+        if extension == "pdf":
+            return self._extract_pdf_locally(fileConfig)
+
         try:
             # TODO: Integrar Docling real imports dentro do metodo para evitar erro de load se nao instalado
             try:
@@ -454,6 +462,49 @@ class UnifiedConsultingIngestor(Reader):
             msg.warn(f"[Unified-Ingestor] Erro no Docling Extraction: {str(e)}")
             return None
     
+    def _extract_pdf_locally(self, fileConfig: FileConfig) -> Optional[Dict[str, Any]]:
+        """
+        Extrai texto de PDF usando pypdf.
+        Retorna estrutura simulada de slides (páginas).
+        """
+        if not PdfReader:
+             msg.warn("[Unified-Ingestor] pypdf não instalado. Não foi possível processar o PDF localmente.")
+             return None
+             
+        try:
+             import io
+             pdf_bytes = io.BytesIO(base64.b64decode(fileConfig.content) if isinstance(fileConfig.content, str) else fileConfig.content)
+             reader = PdfReader(pdf_bytes)
+             
+             slides = []
+             for i, page in enumerate(reader.pages, 1):
+                 text = page.extract_text()
+                 if not text.strip():
+                     continue
+                     
+                 lines = text.split('\n')
+                 title = lines[0] if lines else f"Page {i}"
+                 content = "\n".join(lines[1:]) if len(lines) > 1 else text
+                 
+                 slides.append({
+                     "number": i,
+                     "title": title[:200],
+                     "content": content,
+                     "frameworks": [],
+                     "companies": [],
+                     "position": self._infer_position(i, len(reader.pages))
+                 })
+                 
+             if not slides:
+                 return None
+                 
+             msg.good(f"[Unified-Ingestor] ✅ pypdf extracted {len(slides)} pages")
+             return {"slides": slides}
+             
+        except Exception as e:
+             msg.warn(f"[Unified-Ingestor] Erro ao processar PDF com pypdf: {str(e)}")
+             return None
+
     def _detect_frameworks_text_based(
         self,
         docling_result: Dict,
@@ -736,12 +787,15 @@ class UnifiedConsultingIngestor(Reader):
         slides_metadata = self._extract_slides_metadata_v019(markdown_content)
         
         document = Document(
-            text=markdown_content,
-            type="Unified Consulting Document",
-            name=fileConfig.filename, # Adjusted from fileConfig.name to fileConfig.filename
-            link=fileConfig.filename,
-            timestamp="",
-            reader=self.name
+            title=fileConfig.filename,
+            content=markdown_content,
+            extension=fileConfig.extension,
+            fileSize=fileConfig.file_size,
+            source=fileConfig.filename,
+            meta={
+                "type": "Unified Consulting Document",
+                "reader": self.name
+            }
         )
         
         enable_etl = self._get_config_value(config, "Enable ETL", True)
