@@ -25,6 +25,7 @@ class SentenceTransformersEmbedder(Embedding):
                 description="Select an HuggingFace Embedding Model",
                 values=[
                     "all-MiniLM-L6-v2",
+                    "intfloat/multilingual-e5-small",  # Superior multilingual (MTEB 63.8%)
                     "mixedbread-ai/mxbai-embed-large-v1",
                     "all-mpnet-base-v2",
                     "BAAI/bge-m3",

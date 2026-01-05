@@ -81,8 +81,17 @@ class HybridConsultingEmbedder(Embedding):
             "Use GPU": InputConfig(
                 type="bool",
                 value=False,
-                description="Usar GPU para MiniLM (se disponível)",
+                description="Usar GPU para embeddings locais (se disponível)",
                 values=[]
+            ),
+            "Named Vector Model": InputConfig(
+                type="dropdown",
+                value="intfloat/multilingual-e5-small",
+                description="Modelo para named vectors (concept/company/sector). e5-small: +129% em business jargon vs paraphrase-multilingual",
+                values=[
+                    "intfloat/multilingual-e5-small",  # Recomendado (MTEB 63.8%, melhor multilíngue)
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # Legacy
+                ]
             )
         }
         
@@ -174,21 +183,30 @@ class HybridConsultingEmbedder(Embedding):
         except ImportError:
             msg.warn("⚠️ voyageai não instalado - pip install voyageai")
         
-        # MiniLM-L12 (local, universal para concept/company/sector)
+        # Named Vectors Model (local, para concept/company/sector)
         try:
             from sentence_transformers import SentenceTransformer
             use_gpu = self._get_config_value(self.config, "Use GPU", False)
             device = 'cuda' if use_gpu else 'cpu'
-            self.minilm = SentenceTransformer(
-                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-                device=device
+            
+            # Usar modelo configurável (default: e5-small para melhor performance multilíngue)
+            model_name = self._get_config_value(
+                self.config, 
+                "Named Vector Model", 
+                "intfloat/multilingual-e5-small"
             )
-            msg.good(f"✅ MiniLM-L12 inicializado em {device} (named vectors)")
+            
+            self.minilm = SentenceTransformer(model_name, device=device)
+            
+            # Display info baseado no modelo
+            model_display = "E5-Small" if "e5-small" in model_name else "Paraphrase-Multilingual"
+            msg.good(f"✅ {model_display} inicializado em {device} (named vectors)")
+            msg.info(f"   Modelo: {model_name}")
             msg.info("   RAM: ~300 MB | Dimensões: 384 | Uso: concept/company/sector vectors")
         except ImportError:
             msg.warn("⚠️ sentence-transformers não instalado - pip install sentence-transformers")
         except Exception as e:
-            msg.warn(f"⚠️ Erro ao carregar MiniLM: {str(e)}")
+            msg.warn(f"⚠️ Erro ao carregar named vector model: {str(e)}")
     
     async def vectorize(self, config: dict, content: List[str]) -> List[List[float]]:
         """
