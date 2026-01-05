@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.5] - 2026-01-04
 > Commits: (Current Release)
 
+## [2.1.6] - 2026-01-04
+
+### Added
+- **E5 Robustness**: Implemented automatic prefix enforcement for E5 models (`query:`/`passage:`).
+    - **Configuration**: New boolean flag `Enforce E5 Prefixes` in `HybridConsultingEmbedder` (default: True).
+    - **Automation**: Automatically prepends `query:` to queries and `passage:` to document chunks when using E5 models.
+    - **Rationale**: Aligns with model training objectives to prevent performance degradation in "messy" scenarios.
+    - **Audit**: Verified via ranking classification audit (improved hard-negative separation by +0.0011).
+- **Safety**: Added explicit compatibility tests to ensure legacy models (e.g., `paraphrase-multilingual`) are unaffected by these changes.
+
 ### Fixed
 - **PDF Ingestion**: Fixed crash when ingesting PDF files locally (without Docling/Visual API)
   - Added `pypdf` support in `UnifiedConsultingIngestor` for local PDF extraction

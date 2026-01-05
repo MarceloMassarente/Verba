@@ -92,6 +92,12 @@ class HybridConsultingEmbedder(Embedding):
                     "intfloat/multilingual-e5-small",  # Recomendado (MTEB 63.8%, melhor multilíngue)
                     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # Legacy
                 ]
+            ),
+            "Enforce E5 Prefixes": InputConfig(
+                type="bool",
+                value=True,
+                description="Forçar prefixos 'query:'/'passage:' para modelos E5 (Recomendado para robustez)",
+                values=[]
             )
         }
         
@@ -110,8 +116,18 @@ class HybridConsultingEmbedder(Embedding):
             return []
         
         try:
+            # Check prefix enforcement
+            enforce_prefixes = self._get_config_value(self.config, "Enforce E5 Prefixes", True)
+            model_name = self._get_config_value(self.config, "Named Vector Model", "")
+            
+            final_query = query
+            if enforce_prefixes and "e5" in model_name.lower():
+                if not query.startswith("query:"):
+                    final_query = f"query: {query}"
+                    # msg.info(f"[Hybrid] Added prefix: {final_query}")
+
             # Normalização é importante para cosine similarity
-            embedding = self.minilm.encode(query, normalize_embeddings=True)
+            embedding = self.minilm.encode(final_query, normalize_embeddings=True)
             return embedding.tolist()
         except Exception as e:
             msg.warn(f"Erro ao gerar named query vector: {e}")
@@ -653,13 +669,32 @@ class HybridConsultingEmbedder(Embedding):
                  for idx in indices:
                      results_map[idx] = [0.0] * output_dim
     
-    def _embed_minilm(self, texts: List[str]) -> List[List[float]]:
-        """Embedding com MiniLM (local, 384 dims)."""
+    def _embed_minilm(self, texts: List[str], is_passage: bool = True) -> List[List[float]]:
+        """
+        Embedding com MiniLM (local, 384 dims).
+        Args:
+            texts: Lista de textos
+            is_passage: Se True, trata como passagens (adiciona 'passage:' se E5). 
+                        Se False, trata como query (adiciona 'query:' se E5).
+        """
         if not self.minilm:
             return [[0.0] * 384 for _ in texts]
         
+        # Check prefix enforcement
+        enforce_prefixes = self._get_config_value(self.config, "Enforce E5 Prefixes", True)
+        model_name = self._get_config_value(self.config, "Named Vector Model", "")
+        
+        final_texts = texts
+        if enforce_prefixes and "e5" in model_name.lower():
+            prefix = "passage: " if is_passage else "query: "
+            # Só adiciona se não tiver (evita duplo prefixo)
+            final_texts = [
+                f"{prefix}{t}" if not t.startswith(prefix) and not t.startswith("query:") and not t.startswith("passage:") else t 
+                for t in texts
+            ]
+        
         embeddings = self.minilm.encode(
-            texts,
+            final_texts,
             batch_size=64,
             show_progress_bar=False,
             normalize_embeddings=True
