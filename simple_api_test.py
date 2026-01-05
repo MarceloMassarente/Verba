@@ -5,13 +5,23 @@ import json
 VERBA_URL = "https://verba-v2-production.up.railway.app"
 API_KEY = "sk-verba-GGZ0wqvOVcdNHx9MHN6K3VH0vk58n4Tj"
 
+CREDENTIALS = {
+    "deployment": "Weaviate",
+    "url": "http://weaviate.railway.internal:8080",
+    "key": ""
+}
+
 def test_query(query: str, preset: str = None):
     """Test external API query."""
     headers = {
         "Content-Type": "application/json",
         "X-API-Key": API_KEY,
+        "Origin": VERBA_URL,  # Required for CORS
     }
-    payload = {"query": query}
+    payload = {
+        "query": query,
+        "credentials": CREDENTIALS
+    }
     if preset:
         payload["preset"] = preset
     

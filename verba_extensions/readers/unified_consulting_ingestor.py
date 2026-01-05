@@ -359,31 +359,41 @@ class UnifiedConsultingIngestor(Reader):
                 # Try python-pptx for PPTX files
                 try:
                     from pptx import Presentation
+                    from pptx.enum.shapes import MSO_SHAPE_TYPE
                     import io
                     
                     pptx_bytes = io.BytesIO(base64.b64decode(fileConfig.content) if isinstance(fileConfig.content, str) else fileConfig.content)
                     prs = Presentation(pptx_bytes)
                     
                     slides = []
+                    
+                    def _get_shape_text(shape) -> List[str]:
+                        texts = []
+                        if shape.has_text_frame:
+                            if shape.text and shape.text.strip():
+                                texts.append(shape.text.strip())
+                        
+                        if shape.has_table:
+                            for row in shape.table.rows:
+                                row_text = []
+                                for cell in row.cells:
+                                    if cell.text_frame and cell.text.strip():
+                                        row_text.append(cell.text.strip())
+                                if row_text:
+                                    texts.append(" | ".join(row_text))
+                        
+                        # Recursive extraction for groups
+                        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                            for subshape in shape.shapes:
+                                texts.extend(_get_shape_text(subshape))
+                                
+                        return texts
+
                     for slide_num, slide in enumerate(prs.slides, 1):
                         slide_texts = []
                         
                         for shape in slide.shapes:
-                            if hasattr(shape, "text") and shape.text.strip():
-                                slide_texts.append(shape.text.strip())
-                            # Extract table text if present
-                            try:
-                                if shape.has_table:
-                                    table = shape.table
-                                    for row in table.rows:
-                                        row_text = []
-                                        for cell in row.cells:
-                                            if cell.text.strip():
-                                                row_text.append(cell.text.strip())
-                                        if row_text:
-                                            slide_texts.append(" | ".join(row_text))
-                            except Exception:
-                                pass
+                            slide_texts.extend(_get_shape_text(shape))
                         
                         if slide_texts:
                             title = slide_texts[0] if slide_texts else f"Slide {slide_num}"

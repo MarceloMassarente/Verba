@@ -2980,6 +2980,41 @@ class EntityAwareRetriever(Retriever):
                         except Exception as e:
                             msg.debug(f"  Query Expansion não disponível: {str(e)}")
                     
+                # -----------------------------------------------------------
+                # COMPATIBILIDADE: Verificar Named Vectors (mesmo com multi-vector off)
+                # -----------------------------------------------------------
+                target_vector_single = None
+                
+                # Se já temos um vetor identificado na lógica anterior
+                if len(vectors_to_search) == 1:
+                    target_vector_single = vectors_to_search[0]
+                
+                # Se não temos (multi-vector off ou nenhum específico detectado), verificar schema
+                if not target_vector_single:
+                    try:
+                        # Recuperar config da collection
+                        normalized = weaviate_manager._normalize_embedder_name(embedder)
+                        collection_name = weaviate_manager.embedding_table.get(embedder, f"VERBA_Embedding_{normalized}")
+                        collection = client.collections.get(collection_name)
+                        col_config = await collection.config.get()
+                        
+                        # Se tem vector_config (Named Vectors)
+                        if hasattr(col_config, 'vector_config') and col_config.vector_config:
+                            named_vectors = list(col_config.vector_config.keys())
+                            if named_vectors:
+                                # Priorizar 'consulting' ou 'default'
+                                if "consulting" in named_vectors:
+                                    target_vector_single = "consulting"
+                                elif "default" in named_vectors:
+                                    target_vector_single = "default"
+                                else:
+                                    # Fallback: usar o primeiro disponível
+                                    target_vector_single = named_vectors[0]
+                                
+                                msg.info(f"  🔍 Compatibilidade: Detectado Named Vector '{target_vector_single}' no schema (Auto-fix)")
+                    except Exception as e:
+                        msg.debug(f"  Erro ao verificar named vectors (fallback): {str(e)}")
+
                 # Decidir estratégia baseado no modo
                 use_strict_filter = False
                 use_boost_only = False
@@ -3063,8 +3098,8 @@ class EntityAwareRetriever(Retriever):
                             
                             # Gerar embedding da query expandida
                             query_embeddings = await embedder_obj.vectorize(embedder_config, [search_query_mv])
-                        if query_embeddings and len(query_embeddings) > 0:
-                            query_vector = query_embeddings[0]
+                            if query_embeddings and len(query_embeddings) > 0:
+                                query_vector = query_embeddings[0]
                         
                         if query_vector:
                             
@@ -3155,6 +3190,7 @@ class EntityAwareRetriever(Retriever):
                         alpha=rewritten_alpha,
                         fusion_type=fusion_type,  # Relative Score Fusion
                         query_properties=query_properties,  # BM25 boosting
+                        target_vector=target_vector_single, # <--- ENHANCED: Pass explicitly resolved target_vector
                     )
                 
                 elif use_strict_filter:
@@ -3171,10 +3207,7 @@ class EntityAwareRetriever(Retriever):
                     # Configurar query_properties para BM25 boosting
                     query_properties = ["content", "title^2"]  # Boost de título
                     
-                    # Se tem apenas 1 named vector relevante (não multi-vector), usar target_vector
-                    target_vector_single = None
-                    if not use_multi_vector and len(vectors_to_search) == 1:
-                        target_vector_single = vectors_to_search[0]
+                    if target_vector_single:
                         msg.info(f"  🎯 Usando target_vector: {target_vector_single}")
                     
                     if combined_filter:
