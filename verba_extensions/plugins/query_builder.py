@@ -622,6 +622,24 @@ class QueryBuilderPlugin:
             strategy["is_aggregation"] = False
             strategy["aggregation_info"] = None
             
+            # Garantir que novos campos tenham valores default (backward compatibility)
+            if "target_vectors" not in strategy:
+                strategy["target_vectors"] = ["default"]
+            if "vector_strategy" not in strategy:
+                strategy["vector_strategy"] = "single" if len(strategy.get("target_vectors", [])) <= 1 else "multi"
+            if "two_phase_mode" not in strategy:
+                strategy["two_phase_mode"] = "auto"
+            if "two_phase_filter_level" not in strategy:
+                strategy["two_phase_filter_level"] = "document"
+            if "reranker_preset" not in strategy:
+                strategy["reranker_preset"] = "consulting_frameworks"
+            
+            # Validar target_vectors (deve conter apenas vetores válidos)
+            valid_vectors = ["default", "concept_vec", "company_vec", "sector_vec"]
+            strategy["target_vectors"] = [v for v in strategy.get("target_vectors", []) if v in valid_vectors]
+            if not strategy["target_vectors"]:
+                strategy["target_vectors"] = ["default"]
+            
             # Cache
             if use_cache:
                 cache_key = f"{user_query.lower().strip()}|{collection_name}"
@@ -630,6 +648,15 @@ class QueryBuilderPlugin:
             msg.good(f"  Query builder: query estruturada gerada")
             if semantic_query != user_query:
                 msg.info(f"  Query expandida: '{user_query[:50]}...' → '{semantic_query[:100]}...'")
+            
+            # Log novos campos
+            if strategy.get("target_vectors") != ["default"]:
+                msg.info(f"  Target vectors: {strategy.get('target_vectors')}")
+            if strategy.get("two_phase_mode") != "auto":
+                msg.info(f"  Two-phase mode: {strategy.get('two_phase_mode')}")
+            if strategy.get("alpha", 0.6) != 0.6:
+                msg.info(f"  Alpha: {strategy.get('alpha')}")
+            
             return strategy
             
         except Exception as e:
@@ -791,8 +818,9 @@ Sua tarefa:
 3. Identificar filtros necessários (entidades, datas, idioma, etc.)
 4. **EXPANDIR a query semântica** com sinônimos, termos relacionados e conceitos semânticos **NO MESMO IDIOMA DA QUERY ORIGINAL**
 5. Gerar query keyword otimizada para BM25 (termos-chave importantes) **NO MESMO IDIOMA**
-6. Determinar intenção (search, comparison, description)
-7. Sugerir alpha para hybrid search
+6. Determinar intenção (search, comparison, description, aggregation)
+7. **SELECIONAR VETORES** mais adequados para a busca
+8. **CONFIGURAR MODO DE BUSCA** (two-phase, alpha, reranker)
 
 REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
 - A query semântica DEVE ser EXPANDIDA, não apenas repetir a query original
@@ -805,6 +833,69 @@ REGRA CRÍTICA - EXPANSÃO SEMÂNTICA:
 - Exemplo (inglês): "adding capacity" → "adding capacity expanding production increasing output building new facilities"
 - NUNCA retorne a query original sem expansão
 - NUNCA traduza a query para outro idioma (exceto manter termos técnicos em inglês em queries PT+EN)
+
+=== SELEÇÃO DE VETORES (NAMED VECTORS) ===
+O sistema tem 4 vetores especializados. Selecione os mais relevantes:
+
+| Vetor | Dimensões | Uso | Quando Usar |
+|-------|-----------|-----|-------------|
+| default | 1024 (Voyage) | Contexto geral, busca ampla | Queries genéricas, "O que diz o documento?" |
+| concept_vec | 384 (MiniLM) | Frameworks, metodologias, conceitos teóricos | "Explique SWOT", "O que é Porter's Forces?" |
+| company_vec | 384 (MiniLM) | Empresas, resultados financeiros, stakeholders | "Compare Apple e Microsoft", "Resultados da Petrobras" |
+| sector_vec | 384 (MiniLM) | Mercado, indústrias, tendências setoriais | "Tendências em energia", "Mercado de tecnologia" |
+
+REGRAS DE SELEÇÃO:
+- Use "concept_vec" para queries sobre COMO (métodos, frameworks, metodologias)
+- Use "company_vec" para queries sobre QUEM (empresas específicas, pessoas, stakeholders)
+- Use "sector_vec" para queries sobre ONDE (mercados, setores, indústrias)
+- Use "default" para contexto geral ou quando não houver foco claro
+- COMBINE vetores se a query misturar aspectos:
+  - "Apple no setor de tecnologia" → ["company_vec", "sector_vec"]
+  - "Porter's Forces aplicado à Apple" → ["concept_vec", "company_vec"]
+  - "Tendências de inovação no setor de energia" → ["concept_vec", "sector_vec"]
+
+=== MODO TWO-PHASE SEARCH ===
+Controla se a busca deve filtrar por entidades ANTES de buscar semanticamente:
+
+| Modo | Uso |
+|------|-----|
+| auto | Sistema decide automaticamente (padrão) |
+| enabled | Força filtro por entidades primeiro → busca semântica depois |
+| disabled | Busca semântica direta (sem pré-filtro) |
+
+| Filter Level | Uso |
+|--------------|-----|
+| document | Filtra documentos inteiros que mencionam entidade (mais contexto) |
+| chunk | Filtra chunks individuais (mais preciso, menos contexto) |
+
+QUANDO USAR:
+- "enabled" + "document": Query combina ENTIDADE + TEMA ("Inovação da Apple")
+- "enabled" + "chunk": Query sobre aspecto específico de entidade ("Receita Q4 da Apple")
+- "disabled": Query puramente conceitual ("O que é SWOT?")
+- "auto": Deixar sistema decidir (maioria dos casos)
+
+=== ALPHA (Hybrid Search Balance) ===
+Controla equilíbrio entre busca keyword (BM25) e vetorial:
+
+| Alpha | Perfil | Exemplo |
+|-------|--------|---------|
+| 0.3-0.4 | Termos técnicos exatos, códigos, siglas | "EBITDA 2024", "ISO 9001", "artigo 5º" |
+| 0.5-0.6 | Balanceado (padrão) | "estratégia de crescimento", "análise de mercado" |
+| 0.7-0.8 | Conceitual/abstrato | "insights sobre inovação", "lições aprendidas" |
+| 0.85-0.95 | Puramente semântico | "ideias disruptivas", "visão de futuro" |
+
+=== RERANKER PRESET ===
+Seleciona estratégia de reranking (pós-processamento):
+
+| Preset | Uso |
+|--------|-----|
+| consulting_frameworks | Docs de consultoria, frameworks (padrão) |
+| company_research | Pesquisa de empresas, due diligence |
+| sector_analysis | Análise setorial, trends de mercado |
+| speed | Velocidade máxima (menos precisão) |
+| max_quality | Qualidade máxima (mais lento) |
+| balanced | Equilíbrio velocidade/qualidade |
+| offline | Sem API externa (fallback local) |
 
 IMPORTANTE:
 - Use propriedades do schema para filtros (entities_local_ids, section_entity_ids, chunk_lang, chunk_date, etc.)
@@ -830,18 +921,11 @@ IMPORTANTE:
     - Exemplo: "setor de tecnologia" → filters: {{"sectors": ["technology", "tecnologia"]}}
 - **PROPRIEDADES V019 (Consulting/Slides):**
   - slide_position: Filtrar por posição no deck (opening, diagnostic, analysis, closing, etc.)
-    - Exemplo: "slides de diagnóstico" → filters: {{"slide_position": "diagnostic"}}
-    - Exemplo: "abertura da apresentação" → filters: {{"slide_position": "opening"}}
   - slide_type: Filtrar por tipo de slide (complex, simple, metadata)
-    - Exemplo: "slides complexos" → filters: {{"slide_type": "complex"}}
   - pattern_genetics: Filtrar por componentes atômicos identificados (array)
-    - Exemplo: "slides com radial hub" → filters: {{"pattern_genetics": ["radial_hub"]}}
   - reusability_score: Filtrar por score de reusabilidade (0-100)
-    - Exemplo: "slides reutilizáveis acima de 80" → filters: {{"reusability_score": {{"min": 80}}}}
   - visual_archetype: Filtrar por arquétipo visual (pyramid, matrix, flow, etc.)
-    - Exemplo: "slides tipo pirâmide" → filters: {{"visual_archetype": "pyramid"}}
   - semantic_bridge_quality: Filtrar por qualidade da ponte semântica (0.0-1.0)
-    - Exemplo: "slides com alta qualidade semântica acima de 0.9" → filters: {{"semantic_bridge_quality": {{"min": 0.9}}}}
 - **SEMPRE expanda a query semântica** - adicione termos relacionados, sinônimos, conceitos
 - Gere query keyword otimizada para BM25 (termos-chave principais)
 
@@ -862,7 +946,13 @@ Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
 {{
     "semantic_query": "query expandida para busca semântica",
     "keyword_query": "query otimizada para BM25",
-    "intent": "search|comparison|description",
+    "intent": "search|comparison|description|aggregation",
+    "target_vectors": ["default", "concept_vec"],
+    "vector_strategy": "multi",
+    "two_phase_mode": "auto",
+    "two_phase_filter_level": "document",
+    "alpha": 0.6,
+    "reranker_preset": "consulting_frameworks",
     "filters": {{
         "entities": ["Apple", "Microsoft"],
         "entity_property": "section_entity_ids",
@@ -888,13 +978,13 @@ Retorne JSON válido (SEM COMENTÁRIOS, SEM //, SEM /* */):
         "visual_archetype": null,
         "semantic_bridge_quality": null
     }},
-    "alpha": 0.6,
-    "explanation": "Explicação da query: filtros aplicados, entidades detectadas, etc.",
+    "explanation": "Explicação da query: vetores selecionados, filtros aplicados, entidades detectadas, etc.",
     "requires_validation": {str(validate).lower()}
 }}
 
 IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem markdown, sem explicações fora do JSON.
 """
+
         
         try:
             import asyncio
@@ -974,7 +1064,7 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
             return False
         if not isinstance(strategy["keyword_query"], str):
             return False
-        if strategy["intent"] not in ["comparison", "description", "search"]:
+        if strategy["intent"] not in ["comparison", "description", "search", "aggregation"]:
             return False
         if not isinstance(strategy["filters"], dict):
             return False
@@ -1002,6 +1092,12 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
             "semantic_query": query,  # Fallback não expande - apenas retorna original
             "keyword_query": query,
             "intent": "search",
+            "target_vectors": ["default"],  # Fallback usa apenas vetor default
+            "vector_strategy": "single",
+            "two_phase_mode": "auto",
+            "two_phase_filter_level": "document",
+            "alpha": 0.6,
+            "reranker_preset": "balanced",
             "filters": {
                 "entities": entity_ids,  # Entidades extraídas via spaCy + Gazetteer
                 "entity_property": "section_entity_ids",  # Padrão: usa contexto de seção para evitar contaminação
@@ -1015,7 +1111,6 @@ IMPORTANTE: Retorne APENAS JSON válido, sem comentários (// ou /* */), sem mar
                 "labels": [],
                 "section_title": ""
             },
-            "alpha": 0.6,
             "explanation": f"Query simples (fallback - LLM não disponível)" + (f", entidades detectadas: {len(entity_ids)}" if entity_ids else ""),
             "requires_validation": False
         }

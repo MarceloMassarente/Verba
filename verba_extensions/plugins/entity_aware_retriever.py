@@ -1921,6 +1921,10 @@ class EntityAwareRetriever(Retriever):
         rewritten_query = query
         rewritten_alpha = alpha
         query_filters_from_builder = {}
+        builder_target_vectors = None
+        builder_two_phase_mode = None
+        builder_filter_level = None
+        builder_reranker_preset = None
         
         # Tentar QueryBuilder primeiro (mais inteligente, conhece schema)
         try:
@@ -2003,6 +2007,13 @@ class EntityAwareRetriever(Retriever):
                 enable_dynamic_alpha = dyn_alpha_config.value
             else:
                 enable_dynamic_alpha = True
+            
+            # NOVO: Se QueryBuilder retornou um alpha específico (diferente do default 0.6/0.5),
+            # confiamos nele e pulamos o otimizador dinâmico para economizar tempo/custo.
+            if suggested_alpha is not None and abs(float(suggested_alpha) - 0.6) > 0.05:
+                # Se alpha difere significativamente do centro (0.6), confiamos no QueryBuilder
+                enable_dynamic_alpha = False
+                msg.info(f"  Alpha Dinâmico: pulando otimizador (Query Builder já forneceu alpha específico: {suggested_alpha})")
             if enable_dynamic_alpha:
                 try:
                     from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
@@ -2027,6 +2038,11 @@ class EntityAwareRetriever(Retriever):
             
             # Extrair filtros do builder (se houver)
             query_filters_from_builder = strategy.get("filters", {})
+            builder_target_vectors = strategy.get("target_vectors")
+            builder_two_phase_mode = strategy.get("two_phase_mode")
+            builder_filter_level = strategy.get("two_phase_filter_level")
+            builder_reranker_preset = strategy.get("reranker_preset")
+            
             builder_entities = query_filters_from_builder.get("entities", [])
             if builder_entities:
                 debug_info["entities_detected"] = builder_entities
@@ -2841,17 +2857,32 @@ class EntityAwareRetriever(Retriever):
                 
                 if has_named_vectors:
                     # Decidir quais vetores usar baseado na query
-                    has_concept = bool(semantic_terms) or bool(detected_frameworks)
-                    has_sector = bool(detected_sectors)
-                    has_company = bool(detected_companies)
+                    vector_override = False
                     
-                    # Se tem 2+ aspectos, usar multi-vector
-                    if has_concept:
-                        vectors_to_search.append("concept_vec")
-                    if has_sector:
-                        vectors_to_search.append("sector_vec")
-                    if has_company:
-                        vectors_to_search.append("company_vec")
+                    # 1. Prioiridade: Query Builder
+                    if builder_target_vectors and builder_target_vectors != ["default"]:
+                        vectors_to_search = [v for v in builder_target_vectors if v != "default"]
+                        if vectors_to_search:
+                            vector_override = True
+                            msg.good(f"  🎯 Query Builder selecionou vetores: {vectors_to_search}")
+
+                    # 2. Fallback: Detecção por heurística (apenas se não houver override)
+                    if not vector_override:
+                        has_concept = bool(semantic_terms) or bool(detected_frameworks)
+                        has_sector = bool(detected_sectors)
+                        has_company = bool(detected_companies)
+                        
+                        if has_concept:
+                            vectors_to_search.append("concept_vec")
+                        if has_sector:
+                            vectors_to_search.append("sector_vec")
+                        if has_company:
+                            vectors_to_search.append("company_vec")
+                    
+                    if len(vectors_to_search) >= 1:
+                        # Se temos pelo menos 1 named vector, considerar uso (config irá decidir se usa multi ou single)
+                        # Nota: lógica abaixo decide se ativa flag multi_vector
+                        pass
                     
                     if len(vectors_to_search) >= 2:
                         use_multi_vector = True
@@ -2875,6 +2906,11 @@ class EntityAwareRetriever(Retriever):
             two_phase_mode = two_phase_config.value
         else:
             two_phase_mode = "auto"
+            
+        # Override do Query Builder
+        if builder_two_phase_mode and builder_two_phase_mode in ["auto", "enabled", "disabled"]:
+            two_phase_mode = builder_two_phase_mode
+            msg.info(f"  Query Builder definiu Two-Phase Mode: {two_phase_mode}")
         should_use_two_phase = False
         
         if two_phase_mode == "enabled":
@@ -2910,6 +2946,11 @@ class EntityAwareRetriever(Retriever):
                         filter_level = filter_level_config.value
                     else:
                         filter_level = "chunk"
+                        
+                    # Override do Query Builder
+                    if builder_filter_level and builder_filter_level in ["chunk", "document"]:
+                        filter_level = builder_filter_level
+                        msg.info(f"  Query Builder definiu Filter Level: {filter_level}")
                     
                     if filter_level == "document":
                         msg.info(f"  📄 Two-Phase Search: Modo Document-Level (filtra por documentos, melhor contexto)")
