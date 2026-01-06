@@ -325,8 +325,7 @@ async def run_etl_patch_for_passage_uuids(
             "section_title",
             "section_first_para",
             "parent_entities",
-            "text",
-            "chunk_text",
+            "doc_name",
         ]
         schema_props = set()
         try:
@@ -496,16 +495,16 @@ async def run_etl_patch_for_passage_uuids(
                 props = {
                     key: value for key, value in full_props.items() if key in schema_props
                 }
-                skipped = [
+                missing_keys_list = [
                     key
                     for key in full_props.keys()
                     if key not in schema_props and key not in missing_update_notified
                 ]
-                if skipped:
-                    missing_update_notified.update(skipped)
+                if missing_keys_list:
+                    missing_update_notified.update(missing_keys_list)
                     print(
                         f"⚠️ Collection {collection_name} não possui campos "
-                        + ", ".join(skipped)
+                        + ", ".join(missing_keys_list)
                         + " - ignorando nos updates ETL."
                     )
             else:
