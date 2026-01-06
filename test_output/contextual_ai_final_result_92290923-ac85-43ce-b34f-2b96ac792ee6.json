@@ -1,9 +1,0 @@
-{
-  "job_id": "92290923-ac85-43ce-b34f-2b96ac792ee6",
-  "file_name": "Weaviate-Advanced-RAG-Techniques-ebook.pdf",
-  "status": "completed",
-  "total_pages": 13,
-  "total_markdown_chars": 39789,
-  "has_document_metadata": true,
-  "markdown_preview": "\n--- Page 0 ---\n\n[FIGURE_CAPTION START]\n**High level description**\nThe image contains the logo of the company \"weaviate\". The logo consists of a stylized \"W\" symbol in yellow and green, followed by the company name spelled out in white letters. The background is a dark blue color.\n[FIGURE_CAPTION END]\n\n# Advanced RAG Techniques\n\nA guide on different techniques to improve the performance of your Retrieval-Augmented Generation applications.\n\n\n--- Page 1 ---\n\nRetrieval-augmented generation (RAG) provides generative large language models (LLMs) with information from an external knowledge source to help reduce hallucinations and increase the factual accuracy of the generated responses.\n\nA naive RAG pipeline consists of four components: an embedding model, a vector database, a prompt template, and a generative LLM. At inference time, it embeds the user query to retrieve relevant document chunks of information from the vector database, which it stuffs into the LLM’s prompt to generate an answ..."
-}

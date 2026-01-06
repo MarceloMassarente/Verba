@@ -284,7 +284,7 @@ def process_csv_to_json(csv_path: str, output_path: str):
     print(f"Media de aliases por framework: {total_aliases / len(frameworks):.1f}")
 
 if __name__ == "__main__":
-    csv_path = "frameworks.csv"
+    csv_path = "data/frameworks.csv"
     output_path = "verba_extensions/resources/frameworks.json"
     
     if not os.path.exists(csv_path):
