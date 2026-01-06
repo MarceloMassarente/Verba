@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PPTX Grouped Shapes**: Fixed text extraction from grouped shapes and tables in PPTX files
   - Implemented recursive `_get_shape_text` function to handle nested shapes
   - Added table text extraction logic
+- **PPTX Chunking**: Fixed critical issue where slide content was being ignored due to strict regex
+  - Relaxed regex anchors (replaced `$` with `\Z`) to support multiline content correctly
+  - Added robust fallback mechanism using `---` separator
+  - Fixed `TypeError` in Chunk instantiation
 
 ### Added
 - **New Embedding Model**: `intfloat/multilingual-e5-small` now available as embedding option

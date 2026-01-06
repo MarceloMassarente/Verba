@@ -336,21 +336,53 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         Returns:
             Conteúdo do slide
         """
-        # Tenta padrão "# Slide X - Título"
-        pattern1 = rf'^#\s+Slide\s+{slide_number}\s*-\s*{re.escape(slide_title)}\s*$(.+?)(?=^#\s+|$)'
+        # Tenta padrão "# Slide X - Título" (V019 padrão)
+        # CORREÇÃO: captura APÓS \n, permitindo que título tenha qualquer caractere e newline
+        # O anterior falhava porque exigia $ logo após o título na mesma linha do match
+        pattern1 = rf'^#\s+Slide\s+{slide_number}\s*-\s*.*?\n(.+?)(?=^#\s+Slide\s+\d+|\Z)'
         match = re.search(pattern1, document_content, re.MULTILINE | re.DOTALL)
         
         if match:
-            return match.group(1).strip()
+            content = match.group(1).strip()
+            # msg.debug(f"[SlidesSemanticaVisual] ✅ Slide {slide_number} extraído via pattern V019 ({len(content)} chars)")
+            return content
         
-        # Tenta padrão "# Título" (alternativo)
-        pattern2 = rf'^#\s+{re.escape(slide_title)}\s*$(.+?)(?=^#\s+|$)'
+        # Fallback: Tenta padrão "# Título" (alternativo)
+        pattern2 = rf'^#\s+{re.escape(slide_title)}\s*$(.+?)(?=^#\s+|\Z)'
         match = re.search(pattern2, document_content, re.MULTILINE | re.DOTALL)
         
         if match:
             return match.group(1).strip()
         
-        msg.warn(f"[SlidesSemanticaVisual] Não conseguiu extrair slide {slide_number}")
+        msg.warn(f"[SlidesSemanticaVisual] ⚠ Regex falhou para slide {slide_number}, tentando fallback de separador...")
+        
+        # FALLBACK ROBUSTO: split por separador "---"
+        # O Reader Unified gera "\n\n---\n\n" entre slides
+        try:
+            slide_blocks = document_content.split('\n\n---\n\n')
+            # Ajuste de índice: slide_number é 1-based
+            if 0 <= slide_number - 1 < len(slide_blocks):
+                fallback_content = slide_blocks[slide_number - 1]
+                
+                # Remove o header "# Slide X - Título" se existir na primeira linha
+                lines = fallback_content.strip().split('\n', 1)
+                if len(lines) > 0 and lines[0].strip().startswith('#'):
+                    if len(lines) > 1:
+                        content = lines[1].strip()
+                    else:
+                        content = "" # Só tem título
+                else:
+                    content = fallback_content.strip()
+                    
+                msg.info(f"[SlidesSemanticaVisual] ✅ Slide {slide_number} extraído via fallback '---' ({len(content)} chars)")
+                return content
+        except Exception as e:
+             msg.warn(f"[SlidesSemanticaVisual] Erro no fallback: {str(e)}")
+    
+        msg.warn(f"[SlidesSemanticaVisual] ❌ Não conseguiu extrair slide {slide_number} (Tentou Regex e Fallback)")
+        # Log dos primeiros 100 chars para debug
+        debug_snippet = document_content[:200].replace('\n', '\\n')
+        msg.debug(f"[SlidesSemanticaVisual] Debug Doc Start: {debug_snippet}")
         return ""
     
     def _chunk_slide_content(
@@ -455,11 +487,11 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         """
         chunk = Chunk(
             content=content,
-            title=slide_meta.get("slide_title", ""),
             chunk_id=chunk_id,
             start_i=start_i,
             end_i=end_i,
         )
+        chunk.title = slide_meta.get("slide_title", "")
         
         # Adiciona metadata de slide ao chunk
         chunk.meta = {
@@ -544,11 +576,11 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         # Cria chunk
         summary_chunk = Chunk(
             content=summary_content,
-            title="SÍNTESE GERAL - Todos os Slides",
             chunk_id=chunk_id,
             start_i=0,
             end_i=len(summary_content),
         )
+        summary_chunk.title = "SÍNTESE GERAL - Todos os Slides"
         
         # Metadata de síntese
         summary_chunk.meta = {
