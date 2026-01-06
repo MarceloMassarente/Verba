@@ -398,23 +398,105 @@ class UnifiedConsultingIngestor(Reader):
                         return texts
 
                     for slide_num, slide in enumerate(prs.slides, 1):
-                        slide_texts = []
+                        # 1. Tenta obter o título oficial do slide
+                        title = ""
+                        title_shape = None
+                        try:
+                            if hasattr(slide, "shapes") and hasattr(slide.shapes, "title") and slide.shapes.title:
+                                title_shape = slide.shapes.title
+                                if title_shape.has_text_frame and title_shape.text.strip():
+                                    title = title_shape.text.strip()
+                        except:
+                            pass
                         
+                        # 2. Coleta todos os textos com suas posições verticais (top)
+                        # Isso ajuda a decidir o título se o oficial falhar e a manter a ordem de leitura
+                        all_shapes_text = []
                         for shape in slide.shapes:
-                            slide_texts.extend(_get_shape_text(shape))
+                            # Ignora o title_shape se já extraímos o texto dele
+                            if title_shape and shape == title_shape and title:
+                                continue
+                                
+                            shape_texts = _get_shape_text(shape)
+                            if shape_texts:
+                                top_pos = getattr(shape, "top", 999999)
+                                # Se top_pos for um objeto Emu, converte para int
+                                if hasattr(top_pos, "real"):
+                                    top_pos = int(top_pos)
+                                
+                                all_shapes_text.append({
+                                    "top": top_pos,
+                                    "texts": shape_texts,
+                                    "shape": shape
+                                })
                         
-                        if slide_texts:
-                            title = slide_texts[0] if slide_texts else f"Slide {slide_num}"
-                            content = "\n".join(slide_texts[1:]) if len(slide_texts) > 1 else "\n".join(slide_texts)
+                        # Ordena por posição vertical (de cima para baixo)
+                        all_shapes_text.sort(key=lambda x: x["top"])
+                        
+                        # 3. Heurística de fallback para título se o oficial não existir ou for "Fonte"
+                        # Muitas vezes o "Fonte: Mirow" é a primeira caixa de texto mas está no rodapé (top alto)
+                        # Ou é detectado erroneamente como título.
+                        
+                        # Se o título oficial contém "Fonte:" ou "Source:", tratamos como suspeito
+                        suspect_title = any(p in title.lower() for p in ["fonte:", "source:"])
+                        
+                        if not title or suspect_title:
+                            # Busca o melhor candidato: a caixa de texto mais alta que NÃO seja suspeita
+                            best_candidate = ""
+                            candidate_idx = -1
                             
-                            slides.append({
-                                "number": slide_num,
-                                "title": title[:200] + "..." if len(title) > 200 else title,
-                                "content": content,
-                                "frameworks": [],
-                                "companies": [],
-                                "position": self._infer_position(slide_num, len(prs.slides))
-                            })
+                            for i, data in enumerate(all_shapes_text):
+                                candidate_text = " ".join(data["texts"]).strip()
+                                if not candidate_text:
+                                    continue
+                                    
+                                # Critérios para ser um título:
+                                # - Não começar com "Fonte:" ou "Source:"
+                                # - Ter mais que 3 caracteres
+                                # - Não ser apenas um número (provavelmente número de slide)
+                                is_footer = any(p in candidate_text.lower() for p in ["fonte:", "source:", "página", "page"])
+                                is_number = candidate_text.isdigit()
+                                
+                                if not is_footer and not is_number and len(candidate_text) > 3:
+                                    best_candidate = candidate_text
+                                    candidate_idx = i
+                                    break
+                            
+                            if best_candidate:
+                                # Se tínhamos um título suspeito, movemos ele para o conteúdo
+                                if suspect_title and title:
+                                    # Adiciona o título antigo de volta (como texto de conteúdo)
+                                    top_val = getattr(title_shape, "top", 0) if title_shape else 0
+                                    all_shapes_text.append({"top": top_val, "texts": [title], "shape": title_shape})
+                                    all_shapes_text.sort(key=lambda x: x["top"])
+                                
+                                title = best_candidate
+                                # Remove o novo título da lista de conteúdos para não duplicar
+                                if candidate_idx != -1:
+                                    # Precisamos re-localizar pois o append/sort mudou a lista ou os índices
+                                    for j, d in enumerate(all_shapes_text):
+                                        if " ".join(d["texts"]).strip() == best_candidate:
+                                            all_shapes_text.pop(j)
+                                            break
+                        
+                        if not title:
+                            title = f"Slide {slide_num}"
+                            
+                        # 4. Constrói o conteúdo na ordem vertical
+                        content_parts = []
+                        for data in all_shapes_text:
+                            content_parts.extend(data["texts"])
+                        
+                        content = "\n".join(content_parts)
+                        
+                        slides.append({
+                            "number": slide_num,
+                            "title": title[:200] + "..." if len(title) > 200 else title,
+                            "content": content,
+                            "frameworks": [],
+                            "companies": [],
+                            "position": self._infer_position(slide_num, len(prs.slides))
+                        })
                     
                     if slides:
                         msg.good(f"[Unified-Ingestor] python-pptx extracted {len(slides)} slides")
