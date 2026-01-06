@@ -325,7 +325,6 @@ async def run_etl_patch_for_passage_uuids(
             "section_title",
             "section_first_para",
             "parent_entities",
-            "doc_name",
         ]
         schema_props = set()
         try:

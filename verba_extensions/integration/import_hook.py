@@ -406,7 +406,7 @@ def patch_weaviate_manager():
                             framework_confidence = meta.get("framework_confidence", 0.0)
                             
                             # Adiciona diretamente às properties (collection já foi verificada)
-                            if frameworks or companies or sectors or framework_confidence > 0:
+                            if frameworks or companies or sectors or (framework_confidence is not None and framework_confidence > 0):
                                 self.properties["frameworks"] = frameworks
                                 self.properties["companies"] = companies
                                 self.properties["sectors"] = sectors
