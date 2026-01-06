@@ -442,7 +442,7 @@ def _adjust_boundary_with_entities(
             return boundary_idx_exclusive + 1
 
     # 2) Tentar recuar 1 sentença
-    if safe_idx - 1 > 0:
+    if safe_idx >= 2:  # Garante que safe_idx - 2 >= 0
         boundary_char_back = sentences[safe_idx - 2]["end"]
         if not _entity_crosses_boundary(entity_spans, boundary_char_back):
             return max(1, boundary_idx_exclusive - 1)
@@ -718,11 +718,17 @@ class EntitySemanticChunker(Chunker):
                     refined_breakpoints = []
                     for bp in breakpoints:
                         # Verifica entidades antes e depois do breakpoint
-                        if bp > 0 and bp < len(sentences):
-                            before_start = sentences[max(0, bp-3)]["start"]
-                            before_end = sentences[bp-1]["end"]
-                            after_start = sentences[bp]["start"]
-                            after_end = sentences[min(len(sentences)-1, bp+2)]["end"]
+                        # BOUNDS CHECK: bp deve estar dentro do range válido
+                        if bp > 0 and bp < len(sentences) and len(sentences) > 1:
+                            before_idx = max(0, bp-3)
+                            before_end_idx = max(0, bp-1)
+                            after_idx = min(len(sentences)-1, bp)
+                            after_end_idx = min(len(sentences)-1, bp+2)
+                            
+                            before_start = sentences[before_idx]["start"]
+                            before_end = sentences[before_end_idx]["end"]
+                            after_start = sentences[after_idx]["start"]
+                            after_end = sentences[after_end_idx]["end"]
                             
                             ents_before = _get_anchor_entities_in_range(
                                 before_start, before_end, entity_spans, anchor_entities
@@ -769,12 +775,24 @@ class EntitySemanticChunker(Chunker):
                     )
 
                     end_idx_exclusive = max(start_idx + 1, adjusted_end_exclusive)
+                    
+                    # BOUNDS CHECK: Garante que índices estão dentro dos limites
+                    end_idx_exclusive = min(end_idx_exclusive, len(sentences))
 
                     # Aplica overlap em sentenças (se configurado e se não for o primeiro chunk)
                     chunk_start_idx = start_idx
                     chunk_end_idx_exclusive = end_idx_exclusive
                     if overlap_sentences > 0 and start_idx > 0:
                         chunk_start_idx = max(0, start_idx - overlap_sentences)
+                    
+                    # BOUNDS CHECK: Garante que índices estão dentro dos limites
+                    chunk_start_idx = min(chunk_start_idx, len(sentences) - 1)
+                    chunk_end_idx_exclusive = min(chunk_end_idx_exclusive, len(sentences))
+                    
+                    # Verifica se temos range válido
+                    if chunk_start_idx >= len(sentences) or chunk_end_idx_exclusive <= 0:
+                        start_idx = end_idx_exclusive
+                        continue
 
                     # Monta conteúdo pelo range de caracteres
                     chunk_start_char = sentences[chunk_start_idx]["start"]

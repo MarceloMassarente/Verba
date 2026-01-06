@@ -95,12 +95,21 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             ),
         }
     
-    async def chunk(self, documents: list[Document]) -> list[Document]:
+    async def chunk(
+        self,
+        config: dict,
+        documents: list[Document],
+        embedder=None,
+        embedder_config: dict = None,
+    ) -> list[Document]:
         """
         Faz chunking otimizado para slides semântica visual.
         
         Args:
+            config: Configuração do chunker (passada pelo Manager)
             documents: Lista de Document com metadata V019
+            embedder: Embedder opcional para vetorização
+            embedder_config: Configuração do embedder
             
         Returns:
             Lista de Document com chunks otimizados
@@ -116,7 +125,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 else:
                     msg.info(f"[SlidesSemanticaVisual] Não é documento de slides - usando fallback")
                     # Fallback para chunking normal
-                    chunked_doc = await super().chunk([document])
+                    chunked_doc = await super().chunk(config, [document], embedder, embedder_config)
                     chunked_doc = chunked_doc[0] if chunked_doc else document
                     
                     # GAP FIX: Preservar metadata de frameworks/companies mesmo no fallback
@@ -200,7 +209,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                      else:
                          # Embedder Padrão (OpenAI, Weaviate, etc)
                          msg.info(f"[SlidesSemanticaVisual] Usando Embedder Padrão (Vetor único)")
-                         vectors = await embedder.vectorize(config, texts_to_vectorize)
+                         vectors = await embedder.vectorize(embedder_config or {}, texts_to_vectorize)
                          
                          # Atribui vetores
                          for chunk, vector in zip(chunks_to_vectorize, vectors):
