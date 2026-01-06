@@ -823,16 +823,31 @@ class UnifiedConsultingIngestor(Reader):
     def _extract_slides_metadata_v019(self, markdown_content: str) -> List[Dict[str, Any]]:
         """
         Extrai metadata de slides do markdown V019.
+        
+        Formatos aceitos:
+        - "# Slide 1 - Título" (formato V019 padrão)
+        - Fallback: split por separador "---"
         """
         slides_metadata = []
-        slide_pattern = r"^#\s+Slide\s+(\d+)\s+-\s+(.+?)$"
+        
+        # DEBUG: Log content preview
+        content_preview = markdown_content[:500] if markdown_content else "(empty)"
+        # msg object might not have debug method, avoiding AttributeError
+        # msg.info(f"[Unified-Ingestor] _extract_slides_metadata_v019 preview: {content_preview}")
+        
+        # Normaliza line endings (Windows \r\n -> \n)
+        markdown_content = markdown_content.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Padrão V019: "# Slide X - Título"
+        # Mais tolerante: aceita múltiplos espaços e variação no traço (-, –, —)
+        slide_pattern = r"^#\s+Slide\s+(\d+)\s*[-–—]\s*(.+?)$"
         
         current_slide = None
         current_content = []
         
         for line in markdown_content.split("\n"):
-            line = line.strip()
-            match = re.match(slide_pattern, line, re.IGNORECASE)
+            line_stripped = line.strip()
+            match = re.match(slide_pattern, line_stripped, re.IGNORECASE)
             
             if match:
                 if current_slide:
@@ -851,14 +866,57 @@ class UnifiedConsultingIngestor(Reader):
                 current_content = []
             else:
                 if current_slide is not None:
-                    current_content.append(line)
+                    current_content.append(line_stripped)
         
         if current_slide:
             current_slide["content"] = "\n".join(current_content).strip()
             self._extract_metadata_from_content(current_slide)
             slides_metadata.append(current_slide)
         
+        # FALLBACK: Se nenhum slide foi encontrado pelo regex, tenta split por "---"
+        if not slides_metadata:
+            msg.warn(f"[Unified-Ingestor] Regex V019 não encontrou slides, tentando fallback por '---'...")
+            slides_metadata = self._extract_slides_by_separator(markdown_content)
+        
+        msg.info(f"[Unified-Ingestor] Extraído {len(slides_metadata)} slides via V019 parser")
         return slides_metadata
+    
+    def _extract_slides_by_separator(self, markdown_content: str) -> List[Dict[str, Any]]:
+        """
+        Fallback: extrai slides dividindo por separador "---".
+        """
+        slides_metadata = []
+        slide_blocks = markdown_content.split('\n---')
+        
+        for idx, block in enumerate(slide_blocks):
+            block = block.strip()
+            if not block:
+                continue
+            
+            lines = block.split('\n')
+            title = lines[0] if lines else f"Slide {idx + 1}"
+            
+            # Remove marcadores de header (#) do título
+            if title.startswith('#'):
+                title = title.lstrip('#').strip()
+            
+            content = '\n'.join(lines[1:]).strip() if len(lines) > 1 else ""
+            
+            slide = {
+                "slide_number": idx + 1,
+                "slide_title": title[:200],
+                "content": content,
+                "frameworks": [],
+                "companies": [],
+            }
+            self._extract_metadata_from_content(slide)
+            slides_metadata.append(slide)
+        
+        if slides_metadata:
+            msg.info(f"[Unified-Ingestor] Fallback extraiu {len(slides_metadata)} blocos")
+        
+        return slides_metadata
+
     
     def _extract_metadata_from_content(self, slide: Dict):
         """

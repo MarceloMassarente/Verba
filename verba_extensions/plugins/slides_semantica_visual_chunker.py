@@ -121,7 +121,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 # Verifica se é documento V019 com estrutura de slides
                 if self._is_slides_semantic_visual_document(document):
                     msg.info(f"[SlidesSemanticaVisual] Processando documento estruturado de slides")
-                    chunked_doc = self._chunk_slides_aware(document)
+                    # Passar config recebido na request
+                    chunked_doc = self._chunk_slides_aware(document, config)
                 else:
                     msg.info(f"[SlidesSemanticaVisual] Não é documento de slides - usando fallback")
                     # Fallback para chunking normal
@@ -145,7 +146,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             except Exception as e:
                 msg.fail(f"[SlidesSemanticaVisual] Erro ao processar documento: {str(e)}")
                 import traceback
-                msg.debug(traceback.format_exc())
+                # msg.debug(traceback.format_exc()) # printer has no debug
+                print(traceback.format_exc())       # Usar print padrao para traceback
                 # Fallback: retorna documento original
                 chunked_documents.append(document)
         
@@ -222,9 +224,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                  import traceback
                  msg.debug(traceback.format_exc())
                  # Não falha o chunking, mas deixa sem vetor (Manager pode reclamar ou usar Weaviate auto-vectorizer)
-
+ 
         return chunked_documents
-
     
     def _is_slides_semantic_visual_document(self, document: Document) -> bool:
         """Verifica se documento tem estrutura V019 (slides_metadata)"""
@@ -237,7 +238,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             len(document.meta.get("slides_metadata", [])) > 0
         )
     
-    def _chunk_slides_aware(self, document: Document) -> Document:
+    def _chunk_slides_aware(self, document: Document, config: dict) -> Document:
         """
         Faz chunking respeitando limites de slides.
         
@@ -260,7 +261,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         chunk_id = 0
         
         # 1. Cria chunk de síntese geral (se habilitado)
-        if self.config.get("Create Summary Chunk", {}).get("value", True):
+        if config.get("Create Summary Chunk", {}).get("value", True):
             summary_chunk = self._create_summary_chunk(
                 slides_metadata, 
                 document.metadata,
@@ -295,7 +296,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                     slide_content,
                     slide_meta,
                     document.metadata,
-                    chunk_id
+                    chunk_id,
+                    config
                 )
                 
                 # Adiciona chunks do slide
@@ -310,7 +312,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 continue
         
         # 3. Merge de chunks pequenos (se habilitado)
-        if self.config.get("Merge Small Chunks", {}).get("value", True) and ENTITY_GUARDS_AVAILABLE:
+        if config.get("Merge Small Chunks", {}).get("value", True) and ENTITY_GUARDS_AVAILABLE:
             original_count = len(chunked_doc.chunks)
             chunked_doc.chunks = _merge_small_chunks(chunked_doc.chunks, min_chars=100)
             merged_count = original_count - len(chunked_doc.chunks)
@@ -390,7 +392,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         slide_content: str,
         slide_meta: Dict[str, Any],
         document_metadata: str,
-        start_chunk_id: int
+        start_chunk_id: int,
+        config: dict
     ) -> List[Chunk]:
         """
         Faz chunking semântico do conteúdo de um slide.
@@ -402,6 +405,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             slide_meta: Metadata do slide (frameworks, stakeholders, etc.)
             document_metadata: Metadata do documento
             start_chunk_id: ID inicial para chunks
+            config: Configuração do chunker
             
         Returns:
             Lista de Chunk com metadata de slide preservado
@@ -415,8 +419,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             return chunks
         
         # Agrupa sentenças em chunks respeitando tamanho
-        chunk_size = self.config.get("Chunk Size", {}).get("value", 512)
-        chunk_overlap = self.config.get("Chunk Overlap", {}).get("value", 50)
+        chunk_size = config.get("Chunk Size", {}).get("value", 512)
+        chunk_overlap = config.get("Chunk Overlap", {}).get("value", 50)
         
         current_chunk_text = ""
         current_start_i = 0
