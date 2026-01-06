@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added table text extraction logic
 - **PPTX Chunking**: Fixed critical issue where files resulted in 0 chunks
   - **Fixed Regex**: Relaxed anchors in `UnifiedConsultingIngestor` to handle Windows EOL (`\r\n`) and dash variations (`-`, `–`, `—`)
-  - **Fixed Config Bug**: Corrected `SlidesSemanticaVisualChunker` causing `AttributeError` by properly propagating user config instead of static defaults
+  - **Fixed Config Bug**: Corrected `SlidesSemanticaVisualChunker` to support both `ConfigSetting` objects (Runtime) and dicts, resolving `AttributeError` in production.
   - **Robustness**: Added fallback parser strategy using `---` separator to guarantee chunk generation if regex fails
 
 ### Added

@@ -95,6 +95,31 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             ),
         }
     
+    def _get_config_value(self, config: dict, key: str, default: Any) -> Any:
+        """
+        Helper seguro para extrair valores de configuração.
+        Lida com dict simples e objetos ConfigSetting (Pydantic).
+        """
+        if not config:
+            return default
+            
+        item = config.get(key)
+        
+        # Se item é None (chave inexistente)
+        if item is None:
+            return default
+            
+        # Se é objeto (InputConfig/ConfigSetting), tenta acessar .value
+        if hasattr(item, "value"):
+            return item.value
+
+        # Se é dict (comportamento padrão de dict)
+        if isinstance(item, dict):
+            return item.get("value", default)
+            
+        # Fallback: retorna o próprio item (se for valor direto)
+        return item
+
     async def chunk(
         self,
         config: dict,
@@ -261,7 +286,7 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
         chunk_id = 0
         
         # 1. Cria chunk de síntese geral (se habilitado)
-        if config.get("Create Summary Chunk", {}).get("value", True):
+        if self._get_config_value(config, "Create Summary Chunk", True):
             summary_chunk = self._create_summary_chunk(
                 slides_metadata, 
                 document.metadata,
@@ -312,7 +337,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
                 continue
         
         # 3. Merge de chunks pequenos (se habilitado)
-        if config.get("Merge Small Chunks", {}).get("value", True) and ENTITY_GUARDS_AVAILABLE:
+        # 3. Merge de chunks pequenos (se habilitado)
+        if self._get_config_value(config, "Merge Small Chunks", True) and ENTITY_GUARDS_AVAILABLE:
             original_count = len(chunked_doc.chunks)
             chunked_doc.chunks = _merge_small_chunks(chunked_doc.chunks, min_chars=100)
             merged_count = original_count - len(chunked_doc.chunks)
@@ -419,8 +445,8 @@ class SlidesSemanticaVisualChunker(SentenceChunker):
             return chunks
         
         # Agrupa sentenças em chunks respeitando tamanho
-        chunk_size = config.get("Chunk Size", {}).get("value", 512)
-        chunk_overlap = config.get("Chunk Overlap", {}).get("value", 50)
+        chunk_size = self._get_config_value(config, "Chunk Size", 512)
+        chunk_overlap = self._get_config_value(config, "Chunk Overlap", 50)
         
         current_chunk_text = ""
         current_start_i = 0
