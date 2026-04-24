@@ -2,6 +2,7 @@
 
 ## 📋 Índice
 - [Named Vectors (Multi-Vector)](#named-vectors-multi-vector)
+- [Agentes: busca agrupada e leitura documental](#agentes-busca-agrupada-e-leitura-documental)
 - [Como Usar a API](#como-usar-a-api)
 - [Estrutura do Payload](#estrutura-do-payload)
 - [Exemplos Práticos](#exemplos-práticos)
@@ -51,6 +52,22 @@ async def hybrid_chunks(
 - `entities_local_ids`, `parent_entities`: Referências de entidades
 - `section_*`: Campos de contexto de seção
 - E mais 30+ campos especializados
+
+---
+
+## Agentes: busca agrupada e leitura documental
+
+Endpoints para fluxos em duas etapas: (1) descobrir documentos candidatos com hits por `doc_uuid`; (2) ler páginas, janelas de chunks, seções ou documento completo se couber em `max_chars`.
+
+| Método | Caminho | Descrição |
+|--------|---------|-----------|
+| POST | `/api/agent/search_documents` | Mesmo contrato base de `/api/query` (`query`, `RAG`, `labels`, `documentFilter`, `credentials`, `preset` opcional) + `limit_docs`, `top_hits_per_doc`. |
+| POST | `/api/agent/read_document` | `doc_uuid`, `mode` (`page`, `window`, `section`, `outline`, `full_if_small`), `page`, `page_size`, `section`, `chunk_id`, `radius`, `max_chars`. |
+| POST | `/api/agent/read_context_around` | Atalho: `doc_uuid`, `chunk_id`, `radius`. |
+
+Tipos Pydantic: `SearchDocumentsForAgentsPayload`, `ReadDocumentForAgentsPayload`, `ReadContextAroundPayload` em [`goldenverba/server/types.py`](../goldenverba/server/types.py). Guia de piloto: [`docs/guides/PILOTO_AGENTE_BUSCA_LEITURA.md`](docs/guides/PILOTO_AGENTE_BUSCA_LEITURA.md).
+
+Propriedades opcionais de metadado em chunks para conselho/comitê: `gov_document_type`, `gov_meeting_date`, `gov_committee`, `gov_agenda_item`, `gov_topic` (schema em `verba_extensions/integration/schema_updater.py`, função `get_governance_properties`).
 
 ---
 

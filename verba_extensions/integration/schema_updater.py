@@ -288,6 +288,48 @@ def get_v019_properties():
     ]
 
 
+def get_governance_properties():
+    """
+    Propriedades opcionais para documentos de conselho, comitês e reuniões
+    (atas, pautas, pre-reads). Vazias para corpus genérico.
+    """
+    from weaviate.classes.config import Property, DataType
+
+    return [
+        Property(
+            name="gov_document_type",
+            data_type=DataType.TEXT,
+            description="Tipo de documento: ata, pauta, pre_read, anexo, apresentacao - opcional",
+            index_filterable=True,
+        ),
+        Property(
+            name="gov_meeting_date",
+            data_type=DataType.DATE,
+            description="Data da reunião (ISO) - opcional",
+            index_filterable=True,
+            index_range_filterable=True,
+        ),
+        Property(
+            name="gov_committee",
+            data_type=DataType.TEXT,
+            description="Comitê ou instância (ex.: auditoria, estratégia) - opcional",
+            index_filterable=True,
+        ),
+        Property(
+            name="gov_agenda_item",
+            data_type=DataType.TEXT,
+            description="Item de pauta legível (texto) - opcional",
+            index_searchable=True,
+        ),
+        Property(
+            name="gov_topic",
+            data_type=DataType.TEXT,
+            description="Tema de negócio (linha de raciocínio do analista) - opcional",
+            index_searchable=True,
+        ),
+    ]
+
+
 def get_named_vector_text_properties():
     """
     Retorna propriedades de texto que alimentam named vectors.
@@ -350,7 +392,8 @@ def get_all_embedding_properties(include_named_vectors: bool = True):
         get_verba_standard_properties() + 
         get_etl_properties() + 
         get_framework_properties() +
-        get_v019_properties()  # Adiciona propriedades V019
+        get_v019_properties() +  # Propriedades V019
+        get_governance_properties()  # conselho/comitê (opcional)
     )
     
     if include_named_vectors:

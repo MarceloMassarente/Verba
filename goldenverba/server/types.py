@@ -340,3 +340,39 @@ class GetPresetConfigPayload(BaseModel):
     """Payload for getting RAGConfig with preset applied."""
     preset_name: str
     credentials: Credentials
+
+
+class SearchDocumentsForAgentsPayload(BaseModel):
+    """
+    Grouped search for analytical agents: same inputs as /api/query, plus
+    document-level grouping limits.
+    """
+    query: str
+    RAG: dict[str, Any]
+    labels: list[str] = []
+    documentFilter: list[DocumentFilter] = []
+    credentials: Credentials
+    preset: Optional[str] = None
+    limit_docs: int = 20
+    top_hits_per_doc: int = 5
+
+
+class ReadDocumentForAgentsPayload(BaseModel):
+    """Controlled read: page, window, section, outline, full_if_small."""
+    doc_uuid: str
+    credentials: Credentials
+    mode: Literal["page", "window", "section", "outline", "full_if_small"] = "page"
+    page: int = 1
+    page_size: int = 10
+    section: Optional[str] = None
+    chunk_id: Optional[int] = None
+    radius: int = 5
+    max_chars: int = 50_000
+
+
+class ReadContextAroundPayload(BaseModel):
+    """Shorthand window read around a chunk_id."""
+    doc_uuid: str
+    chunk_id: int
+    credentials: Credentials
+    radius: int = 5

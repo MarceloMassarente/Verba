@@ -65,6 +65,9 @@ from goldenverba.server.types import (
     ApplyRerankerPresetPayload,
     GetPresetConfigPayload,
     ExternalQueryPayload,
+    SearchDocumentsForAgentsPayload,
+    ReadDocumentForAgentsPayload,
+    ReadContextAroundPayload,
 )
 
 load_dotenv()
@@ -1323,6 +1326,110 @@ async def query(payload: QueryPayload):
         msg.fail(f"Traceback: {traceback.format_exc()}")
         return JSONResponse(
             content={"error": str(e), "documents": [], "context": ""}
+        )
+
+
+# =============================================================================
+# AGENT TOOLS: grouped search and controlled document read
+# =============================================================================
+
+
+@app.post("/api/agent/search_documents")
+async def agent_search_documents(payload: SearchDocumentsForAgentsPayload):
+    try:
+        if not payload.query or not str(payload.query).strip():
+            return JSONResponse(
+                status_code=422,
+                content={"error": "Query cannot be empty", "documents": []},
+            )
+        if isinstance(payload.RAG, dict):
+            rag_config = payload.RAG
+        elif hasattr(payload.RAG, "model_dump"):
+            rag_config = payload.RAG.model_dump()
+        else:
+            rag_config = payload.RAG.dict()
+
+        if payload.preset:
+            from verba_extensions.tools.rag_preset import apply_reranker_preset_to_rag
+            apply_reranker_preset_to_rag(rag_config, payload.preset)
+
+        client = await client_manager.connect(payload.credentials)
+        documents_uuid = [d.uuid for d in payload.documentFilter] if payload.documentFilter else []
+        from verba_extensions.tools.document_reader import search_documents_grouped
+        out = await search_documents_grouped(
+            manager,
+            client,
+            payload.query,
+            rag_config,
+            payload.labels,
+            documents_uuid,
+            limit_docs=max(1, min(100, int(payload.limit_docs or 20))),
+            top_hits_per_doc=max(1, min(20, int(payload.top_hits_per_doc or 5))),
+        )
+        if out.get("error"):
+            return JSONResponse(status_code=422, content=out)
+        return JSONResponse(content={"error": "", **out})
+    except Exception as e:
+        msg.fail(f"agent_search_documents failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "documents": []},
+        )
+
+
+@app.post("/api/agent/read_document")
+async def agent_read_document(payload: ReadDocumentForAgentsPayload):
+    try:
+        client = await client_manager.connect(payload.credentials)
+        from verba_extensions.tools.document_reader import read_document_controlled
+        out = await read_document_controlled(
+            manager.weaviate_manager,
+            client,
+            payload.doc_uuid,
+            payload.mode,
+            page=payload.page,
+            page_size=payload.page_size,
+            section=payload.section,
+            chunk_id_center=payload.chunk_id,
+            radius=payload.radius,
+            max_chars=max(1000, int(payload.max_chars or 50_000)),
+        )
+        if out.get("error") and "document not found" in str(out.get("error", "")):
+            return JSONResponse(status_code=404, content=out)
+        if out.get("error") and "unknown mode" in str(out.get("error", "")).lower():
+            return JSONResponse(status_code=400, content=out)
+        if out.get("error"):
+            return JSONResponse(status_code=422, content=out)
+        return JSONResponse(content={"error": "", **out})
+    except Exception as e:
+        msg.fail(f"agent_read_document failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)},
+        )
+
+
+@app.post("/api/agent/read_context_around")
+async def agent_read_context_around(payload: ReadContextAroundPayload):
+    try:
+        client = await client_manager.connect(payload.credentials)
+        from verba_extensions.tools.document_reader import read_context_around_chunk
+        out = await read_context_around_chunk(
+            manager.weaviate_manager,
+            client,
+            payload.doc_uuid,
+            payload.chunk_id,
+            radius=payload.radius,
+        )
+        if out.get("error"):
+            st = 404 if "not found" in str(out.get("error", "")) else 422
+            return JSONResponse(status_code=st, content=out)
+        return JSONResponse(content={"error": "", **out})
+    except Exception as e:
+        msg.fail(f"agent_read_context_around failed: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)},
         )
 
 
