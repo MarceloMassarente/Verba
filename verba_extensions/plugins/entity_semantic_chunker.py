@@ -27,6 +27,32 @@ from goldenverba.components.document import Document
 from goldenverba.components.interfaces import Chunker, Embedding
 from goldenverba.components.types import InputConfig
 
+MARKDOWN_HEADING_RE = re.compile(r'^(#{1,6})\s+(.+)$')
+NUMBERING_HEADING_RE = re.compile(r'^(\d+(?:\.\d+)*)[\.)]\s+(.+)$')
+GOVERNANCE_HEADING_RE = re.compile(
+    r'^(?:pauta|item|delibera(?:ç|c)ão|vota(?:ç|c)ão|resultado)\b[:\s\-]*(.*)$',
+    re.IGNORECASE
+)
+FALLBACK_COLON_HEADING_RE = re.compile(r'^[A-ZÀ-Ý][^\.]*:')
+DECISION_MARKER_RE = re.compile(
+    r'\b(aprovad[oa]s?|rejeitad[oa]s?|absten(?:ç|c)(?:ão|ões)|unanimidade|'
+    r'voto(?:s)?\s+(?:favor(?:á|a)vel|contr(?:á|a)rio))\b',
+    re.IGNORECASE
+)
+COMMITTEE_RE = re.compile(r'\b(comit[eê]|comitê)\b', re.IGNORECASE)
+BOARD_RE = re.compile(r'\bconselho(?:\s+de\s+administra(?:ç|c)ão)?\b', re.IGNORECASE)
+DOC_TYPE_PATTERNS = {
+    "ata": re.compile(r'\bata\b', re.IGNORECASE),
+    "pauta": re.compile(r'\bpauta\b', re.IGNORECASE),
+    "preparatory_documents": re.compile(
+        r'\b(material(?:\s+de)?\s+apoio|apresenta(?:ç|c)(?:ão|ões)|anexo(?:s)?|'
+        r'documento(?:s)?\s+de\s+prepara(?:ç|c)(?:ão|ões)|briefing)\b',
+        re.IGNORECASE
+    ),
+    "bylaws": re.compile(r'\b(estatuto(?:s)?|estatuto\s+social)\b', re.IGNORECASE),
+    "internal_rules": re.compile(r'\b(regimento(?:s)?(?:\s+interno)?)\b', re.IGNORECASE),
+}
+
 
 def _sentences_with_offsets(document: Document) -> List[Dict[str, Any]]:
     """Extrai sentenças com offsets de caractere do spaCy doc do documento."""
@@ -98,16 +124,17 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
         """
         line_stripped = line.strip()
 
-        # Fast check: se não começa com # ou dígito, não é heading
+        # Fast check: se não começa com #, dígito ou letra, não é heading
         if not line_stripped or not (
             line_stripped.startswith('#') or
-            line_stripped[0].isdigit()
+            line_stripped[0].isdigit() or
+            line_stripped[0].isalpha()
         ):
             return (0, "")
 
         # Markdown headings: # H1, ## H2, ### H3
         if line_stripped.startswith('#'):
-            markdown_match = re.match(r'^(#{1,6})\s+(.+)$', line_stripped)
+            markdown_match = MARKDOWN_HEADING_RE.match(line_stripped)
             if markdown_match:
                 level = len(markdown_match.group(1))
                 title = markdown_match.group(2).strip()
@@ -115,7 +142,7 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
 
         # Numeração: 1., 1.1, 1.1.1, etc.
         if line_stripped[0].isdigit():
-            numbering_match = re.match(r'^(\d+(?:\.\d+)*)[\.)]\s+(.+)$', line_stripped)
+            numbering_match = NUMBERING_HEADING_RE.match(line_stripped)
             if numbering_match:
                 numbering = numbering_match.group(1)
                 title = numbering_match.group(2).strip()
@@ -123,12 +150,17 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
                 level = numbering.count('.') + 1
                 return (level, title)
 
+        # Atas/Documentos jurídicos: "Pauta 2:", "Deliberação:", "Votação:", etc.
+        governance_match = GOVERNANCE_HEADING_RE.match(line_stripped)
+        if governance_match:
+            return (2, line_stripped)
+
         # Heurísticas para títulos (fallback) - apenas se parece com título
         if (len(line_stripped) < 100 and
             not line_stripped.endswith('.') and
             len(line_stripped.split()) <= 15 and
             (line_stripped.isupper() or
-             re.match(r'^[A-Z][^\.]*:', line_stripped))):
+             FALLBACK_COLON_HEADING_RE.match(line_stripped))):
             # Assume nível 1 para heurísticas
             return (1, line_stripped)
 
@@ -245,8 +277,6 @@ def detect_hierarchical_sections(text: str) -> List[Dict[str, Any]]:
     sections.sort(key=lambda s: s.get("start", 0))
 
     return sections
-    
-    return sections
 
 
 def _has_library(lib_name: str) -> bool:
@@ -255,6 +285,77 @@ def _has_library(lib_name: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _contains_decision_marker(sentence_text: str) -> bool:
+    """True quando a sentença contém marcador típico de deliberação/votação."""
+    return bool(DECISION_MARKER_RE.search(sentence_text or ""))
+
+
+def _section_governance_metadata(section: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extrai metadados de governança a partir do título da seção.
+    Exemplos: "Pauta 2: Aprovação Orçamentária", "Votação", "Deliberação".
+    """
+    title = str(section.get("title", "") or "").strip()
+    if not title:
+        return {}
+
+    metadata: Dict[str, Any] = {}
+    pauta_match = re.search(r'\bpauta\s+(\d+)\b', title, flags=re.IGNORECASE)
+    if pauta_match:
+        metadata["agenda_item"] = f"Pauta {pauta_match.group(1)}"
+        metadata["agenda_item_number"] = int(pauta_match.group(1))
+
+    heading_type_match = GOVERNANCE_HEADING_RE.match(title)
+    if heading_type_match:
+        section_type = title.split(":", 1)[0].strip().lower()
+        metadata["governance_section_type"] = section_type
+
+    return metadata
+
+
+def _classify_governance_document(document: Document, text: str) -> Dict[str, Any]:
+    """
+    Classifica o documento para contexto de governança:
+    - governance_body: conselho | comite | unknown
+    - governance_document_type: ata | pauta | preparatory_documents | bylaws | internal_rules | other
+    """
+    signals: List[str] = []
+    if hasattr(document, "name") and getattr(document, "name", None):
+        signals.append(str(getattr(document, "name")))
+
+    if hasattr(document, "meta") and isinstance(document.meta, dict):
+        for key in ("title", "file_name", "filename", "source", "path", "origin"):
+            value = document.meta.get(key)
+            if value:
+                signals.append(str(value))
+
+    # Janela de texto para reduzir custo
+    signals.append((text or "")[:4000])
+    joined = " \n ".join(signals)
+
+    governance_body = "unknown"
+    committee_match = COMMITTEE_RE.search(joined)
+    board_match = BOARD_RE.search(joined)
+    if committee_match and not board_match:
+        governance_body = "comite"
+    elif board_match and not committee_match:
+        governance_body = "conselho"
+    elif board_match and committee_match:
+        # prioriza primeira ocorrência no texto como heurística estável
+        governance_body = "comite" if committee_match.start() < board_match.start() else "conselho"
+
+    governance_document_type = "other"
+    for doc_type, pattern in DOC_TYPE_PATTERNS.items():
+        if pattern.search(joined):
+            governance_document_type = doc_type
+            break
+
+    return {
+        "governance_body": governance_body,
+        "governance_document_type": governance_document_type,
+    }
 
 
 def _entity_crosses_boundary(entity_spans: List[Dict[str, Any]], boundary_char: int) -> bool:
@@ -573,6 +674,7 @@ class EntitySemanticChunker(Chunker):
             text = document.content or ""
             if not text:
                 continue
+            governance_doc_meta = _classify_governance_document(document, text)
 
             # Entidades do ETL-PRE (guard-rails)
             entity_spans: List[Dict[str, Any]] = []
@@ -758,6 +860,26 @@ class EntitySemanticChunker(Chunker):
 
                 # Ordena e remove duplicados
                 breakpoints = sorted(set(breakpoints))
+
+                # Guard-rail jurídico: evita split na fronteira de sentenças com marcador de decisão
+                if breakpoints:
+                    legal_safe_breakpoints: List[int] = []
+                    for bp in breakpoints:
+                        if bp <= 0 or bp >= len(sentences):
+                            legal_safe_breakpoints.append(bp)
+                            continue
+
+                        previous_has_decision = _contains_decision_marker(
+                            sentences[bp - 1].get("text", "")
+                        )
+                        next_has_decision = _contains_decision_marker(
+                            sentences[bp].get("text", "")
+                        )
+
+                        if previous_has_decision or next_has_decision:
+                            continue
+                        legal_safe_breakpoints.append(bp)
+                    breakpoints = legal_safe_breakpoints
                 
                 # Log para debug
                 section_title = section.get("title", "(sem título)")[:50]
@@ -819,6 +941,8 @@ class EntitySemanticChunker(Chunker):
                         "document_context": section.get("document_context", ""),
                         "section_path": section.get("path", [])
                     })
+                    chunk.meta.update(_section_governance_metadata(section))
+                    chunk.meta.update(governance_doc_meta)
                     
                     # NOTA: Detecção de frameworks removida deste chunker genérico
                     # Para slides de consultoria, usar SlidesSemanticaVisualReader + SlidesSemanticaVisualChunker
@@ -860,6 +984,8 @@ class EntitySemanticChunker(Chunker):
                         "document_context": first_section.get("document_context", ""),
                         "section_path": first_section.get("path", [])
                     })
+                    chunk.meta.update(_section_governance_metadata(first_section))
+                    chunk.meta.update(governance_doc_meta)
                 else:
                     chunk.meta.update({
                         "section_level": 0,
@@ -867,6 +993,7 @@ class EntitySemanticChunker(Chunker):
                         "document_context": "",
                         "section_path": []
                     })
+                    chunk.meta.update(governance_doc_meta)
                 
                 if companies_doc:
                     chunk.meta["companies"] = sorted(set(companies_doc))
@@ -964,5 +1091,3 @@ def register():
         "chunkers": [EntitySemanticChunker()],
         "compatible_verba_version": ">=2.1.0",
     }
-
-
