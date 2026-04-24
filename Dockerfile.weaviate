@@ -51,6 +51,8 @@ ENV LOG_FORMAT="text"
 # Gerenciamento automático de recursos (Recomendação para 1.37+)
 # Evita OOM definindo GOMEMLIMIT para 80% da RAM e GOMAXPROCS para cores-1
 ENV LIMIT_RESOURCES="true"
+ENV GOMEMLIMIT="12000MiB"
+ENV GOMAXPROCS="16"
 
 # Telemetria (desativada para privacidade e segurança em produção)
 ENV DISABLE_TELEMETRY="true"

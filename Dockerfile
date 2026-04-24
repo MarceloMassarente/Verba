@@ -63,4 +63,4 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)" || true
 EXPOSE 8000
 
 # Comando de inicialização
-CMD ["verba", "start", "--port", "8000", "--host", "0.0.0.0", "--prod", "--workers", "1"]
+CMD ["verba", "start", "--port", "8000", "--host", "0.0.0.0", "--prod", "--workers", "6"]

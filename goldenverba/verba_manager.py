@@ -182,8 +182,16 @@ class VerbaManager:
                 msg.fail(f"[IMPORT] Traceback: {traceback.format_exc()}")
                 raise
 
+            # Define a bounded semaphore for processing documents to prevent OOM
+            # Limit parallel document processing to 4 documents at a time
+            semaphore = asyncio.Semaphore(4)
+
+            async def bounded_process(doc):
+                async with semaphore:
+                    return await self.process_single_document(client, doc, fileConfig, logger)
+
             tasks = [
-                self.process_single_document(client, doc, fileConfig, logger)
+                bounded_process(doc)
                 for doc in documents
             ]
 
@@ -309,8 +317,8 @@ class VerbaManager:
                 msg.info(f"[ETL-PRE] ETL habilitado detectado - iniciando extração de entidades pré-chunking")
                 try:
                     from verba_extensions.integration.chunking_hook import apply_etl_pre_chunking
-                    msg.info(f"[ETL-PRE] Hook importado com sucesso - aplicando ETL pré-chunking")
-                    document = apply_etl_pre_chunking(document, enable_etl=True)
+                    msg.info(f"[ETL-PRE] Hook importado com sucesso - aplicando ETL pré-chunking em background (offloading)")
+                    document = await asyncio.to_thread(apply_etl_pre_chunking, document, True)
                     msg.good(f"[ETL-PRE] ✅ Entidades extraídas antes do chunking - chunking será entity-aware")
                 except ImportError as import_err:
                     msg.warn(f"[ETL-PRE] Hook de ETL pré-chunking não disponível (continuando sem): {str(import_err)}")
