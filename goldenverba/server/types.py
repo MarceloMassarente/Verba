@@ -278,6 +278,11 @@ class GeneratePayload(BaseModel):
     context: str
     conversation: list[ConversationItem]
     rag_config: dict[str, RAGComponentClass]
+    # Optional fields for iterative retrieval support in websocket generation.
+    # Backward compatible: existing clients can omit these fields.
+    credentials: Optional[Credentials] = None
+    labels: Optional[list[str]] = None
+    documentFilter: Optional[list[DocumentFilter]] = None
 
 
 class ConfigPayload(BaseModel):
