@@ -602,18 +602,23 @@ class VerbaManager:
                 document.meta['_temp_logger'] = logger
                 document.meta['file_id'] = currentFileConfig.fileID
                 
-                embedder_model = (
-                    currentFileConfig.rag_config["Embedder"]
-                    .components[fileConfig.rag_config["Embedder"].selected]
-                    .config["Model"]
-                    .value
-                )
+                embedder_obj = currentFileConfig.rag_config.get("Embedder")
+                if isinstance(embedder_obj, dict):
+                    embedder_name = embedder_obj.get("selected", "SentenceTransformers")
+                    components = embedder_obj.get("components", {})
+                    selected_comp = components.get(embedder_name, {})
+                    embedder_config = selected_comp.get("config", {}) if isinstance(selected_comp, dict) else getattr(selected_comp, "config", {})
+                else:
+                    embedder_name = embedder_obj.selected if hasattr(embedder_obj, "selected") else "SentenceTransformers"
+                    embedder_config = embedder_obj.components[embedder_name].config if hasattr(embedder_obj, "components") and embedder_name in embedder_obj.components else {}
+                
+                document.meta['_temp_embedder_config'] = embedder_config
                 
                 ingesting_task = asyncio.create_task(
                     self.weaviate_manager.import_document(
                         client,
                         document,
-                        embedder_model,
+                        embedder_name,
                     )
                 )
                 await ingesting_task
@@ -1279,13 +1284,9 @@ class VerbaManager:
             document_uuids,
         )
         
-        # Lidar com retorno de 2 ou 3 elementos (compatibilidade)
-        if len(result) == 3:
-            documents, context, debug_info = result
-            return (documents, context, debug_info)
-        else:
-            documents, context = result
-            return (documents, context)
+        # Sempre lidar com 3 elementos (documents, context, debug_info)
+        documents, context, debug_info = result
+        return (documents, context, debug_info)
 
     async def generate_stream_answer(
         self,

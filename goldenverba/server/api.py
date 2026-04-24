@@ -393,38 +393,34 @@ async def websocket_generate_stream(websocket: WebSocket):
             
             if enable_iterative:
                 msg.info(f"  🔄 Iterative Search enabled (max={max_iterations})")
-                # Full iterative mode requires credentials to create a Weaviate client.
-                # Backward compatible fallback to standard generation when absent.
+                # We need a client connection for iterative search
                 if payload.credentials:
-                    client = await client_manager.connect(payload.credentials)
-                    labels = payload.labels or []
-                    document_uuids = [doc.uuid for doc in (payload.documentFilter or [])]
-                    async for chunk in manager.generate_stream_answer_iterative(
-                        client=client,
-                        rag_config=payload.rag_config,
-                        query=payload.query,
-                        context=payload.context,
-                        conversation=payload.conversation,
-                        labels=labels,
-                        document_uuids=document_uuids,
-                        max_iterations=max_iterations,
-                    ):
-                        full_text += chunk["message"]
-                        if chunk["finish_reason"] == "stop":
-                            chunk["full_text"] = full_text
-                        await websocket.send_json(chunk)
+                    creds = payload.credentials
                 else:
-                    msg.warn("  ⚠️ Iterative Search habilitado, mas payload sem credentials; usando geração padrão")
-                    async for chunk in manager.generate_stream_answer(
-                        payload.rag_config,
-                        payload.query,
-                        payload.context,
-                        payload.conversation,
-                    ):
-                        full_text += chunk["message"]
-                        if chunk["finish_reason"] == "stop":
-                            chunk["full_text"] = full_text
-                        await websocket.send_json(chunk)
+                    creds = Credentials(
+                        deployment=os.getenv("DEFAULT_DEPLOYMENT", "Local"),
+                        url=os.getenv("WEAVIATE_URL_VERBA", ""),
+                        key=os.getenv("WEAVIATE_API_KEY_VERBA", "")
+                    )
+                
+                client = await client_manager.connect(creds)
+                labels = payload.labels or []
+                document_uuids = [doc.uuid for doc in (payload.documentFilter or [])]
+                
+                async for chunk in manager.generate_stream_answer_iterative(
+                    client=client,
+                    rag_config=payload.rag_config,
+                    query=payload.query,
+                    context=payload.context,
+                    conversation=payload.conversation,
+                    labels=labels,
+                    document_uuids=document_uuids,
+                    max_iterations=max_iterations,
+                ):
+                    full_text += chunk.get("message", "")
+                    if chunk.get("finish_reason") == "stop":
+                        chunk["full_text"] = full_text
+                    await websocket.send_json(chunk)
             else:
                 async for chunk in manager.generate_stream_answer(
                     payload.rag_config,

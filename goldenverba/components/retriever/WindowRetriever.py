@@ -226,7 +226,7 @@ class WindowRetriever(Retriever):
         sorted_documents = sorted(documents, key=lambda x: x["score"], reverse=True)
 
         context = self.combine_context(sorted_context_documents)
-        return (sorted_documents, context)
+        return (sorted_documents, context, {})
 
     def combine_context(self, documents: list[dict]) -> str:
 

@@ -65,7 +65,10 @@ class LoggerManager:
                 "need to call",
                 "websocket is not connected",
                 "connection closed",
-                "connection lost"
+                "connection lost",
+                "unexpected asgi message",
+                "response already completed",
+                "cannot send"
             ]):
                 # Não logar como erro - é comportamento esperado em imports longos
                 # Apenas logar para status importantes para evitar spam
@@ -113,7 +116,10 @@ class LoggerManager:
                     "need to call",
                     "websocket is not connected",
                     "connection closed",
-                    "connection lost"
+                    "connection lost",
+                    "unexpected asgi message",
+                    "response already completed",
+                    "cannot send"
                 ]):
                     msg.info(f"[WEBSOCKET] Client disconnected before receiving document creation: {new_file_id}")
                 else:

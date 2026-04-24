@@ -17,6 +17,7 @@ from wasabi import msg
 
 # Track ETL executions to prevent duplicates
 _etl_executions_in_progress: Set[str] = set()
+_etl_processed_docs: Set[str] = set()
 
 # Store logger per doc_uuid for ETL completion notifications
 _logger_registry: Dict[str, any] = {}  # doc_uuid -> LoggerManager
@@ -199,12 +200,14 @@ async def _map_v019_properties_to_weaviate(
         msg.debug(f"[V019-Mapping] Erro ao mapear propriedades V019 (não crítico): {str(e)}")
         return chunk_properties
 
-def cleanup_etl_state(doc_uuid: str):
+def cleanup_etl_state(doc_uuid: str, success: bool = False):
     """
     Limpa estado global de ETL para garantir que próximos imports não sejam afetados.
     Chamado no finally block para garantir execução mesmo com exceção.
     """
     try:
+        if success:
+            _etl_processed_docs.add(doc_uuid)
         _etl_executions_in_progress.discard(doc_uuid)
         _logger_registry.pop(doc_uuid, None)
     except Exception:
@@ -500,6 +503,7 @@ def patch_weaviate_manager():
                             msg.warn(f"[Named-Vectors] Embedder '{embedder}' não encontrado - named vectors não serão gerados")
                         else:
                             embedder_instance = embedding_manager.embedders[embedder]
+                            embedder_config = document.meta.get('_temp_embedder_config', {}) if hasattr(document, 'meta') and document.meta else {}
                             msg.info(f"[Named-Vectors] 🎯 Gerando embeddings para named vectors usando {embedder} (BYOV)")
                             
                             # Extrai textos especializados e gera embeddings para cada chunk
@@ -530,14 +534,14 @@ def patch_weaviate_manager():
                                             # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
                                             if has_vectorize_named:
                                                 concept_embeddings = await embedder_instance.vectorize_named(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["concept_text"]],
                                                     vector_name="concept_vec"
                                                 )
                                             else:
                                                 # Usa vectorize padrão
                                                 concept_embeddings = await embedder_instance.vectorize(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["concept_text"]]
                                                 )
                                             named_vectors["concept_vec"] = concept_embeddings[0]
@@ -556,14 +560,14 @@ def patch_weaviate_manager():
                                             # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
                                             if has_vectorize_named:
                                                 sector_embeddings = await embedder_instance.vectorize_named(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["sector_text"]],
                                                     vector_name="sector_vec"
                                                 )
                                             else:
                                                 # Usa vectorize padrão
                                                 sector_embeddings = await embedder_instance.vectorize(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["sector_text"]]
                                                 )
                                             named_vectors["sector_vec"] = sector_embeddings[0]
@@ -582,14 +586,14 @@ def patch_weaviate_manager():
                                             # Se tiver vectorize_named, usa ele para permitir roteamento (Hybrid)
                                             if has_vectorize_named:
                                                 company_embeddings = await embedder_instance.vectorize_named(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["company_text"]],
                                                     vector_name="company_vec"
                                                 )
                                             else:
                                                 # Usa vectorize padrão
                                                 company_embeddings = await embedder_instance.vectorize(
-                                                    config,
+                                                    embedder_config,
                                                     [texts["company_text"]]
                                                 )
                                             named_vectors["company_vec"] = company_embeddings[0]
@@ -753,9 +757,9 @@ def patch_weaviate_manager():
                                 passage_uuids = [str(p.uuid) for p in passages.objects]
                                 
                                 if passage_uuids:
-                                    # Verifica se ETL já está em execução para este doc_uuid
+                                    # Verifica se ETL já está em execução ou já foi concluído para este doc_uuid
                                     # Usa lock thread-safe para evitar race conditions
-                                    if doc_uuid not in _etl_executions_in_progress:
+                                    if doc_uuid not in _etl_executions_in_progress and doc_uuid not in _etl_processed_docs:
                                         # Marca como em execução ANTES de iniciar task
                                         _etl_executions_in_progress.add(doc_uuid)
                                         
@@ -782,10 +786,11 @@ def patch_weaviate_manager():
                                                 msg.warn("[ETL] ⚠️ Não foi possível reconectar após múltiplas tentativas - ETL será pulado")
                                                 msg.warn("[ETL] Chunks já foram importados com sucesso, mas ETL pós-chunking não será executado")
                                                 # Limpa estado do ETL
-                                                cleanup_etl_state(doc_uuid)
+                                                cleanup_etl_state(doc_uuid, success=False)
                                                 return
                                             
                                             msg.info(f"[ETL] 🚀 Iniciando ETL A2 em background para {len(passage_uuids)} chunks")
+                                            etl_success = False
                                             try:
                                                 # Passa logger via kwargs para o hook poder notificar conclusão
                                                 etl_logger = _logger_registry.get(doc_uuid)
@@ -801,6 +806,7 @@ def patch_weaviate_manager():
                                                     file_id=file_id  # Para notificação
                                                 )
                                                 msg.good(f"[ETL] ✅ ETL A2 concluído para {len(passage_uuids)} chunks")
+                                                etl_success = True
                                             except Exception as etl_error:
                                                 error_str = str(etl_error).lower()
                                                 # Categoriza erros para logging apropriado
@@ -822,12 +828,12 @@ def patch_weaviate_manager():
                                             finally:
                                                 # Remove da lista de execuções em progresso
                                                 # Usa cleanup_etl_state para garantir limpeza completa
-                                                cleanup_etl_state(doc_uuid)
+                                                cleanup_etl_state(doc_uuid, success=etl_success)
                                         
                                         asyncio.create_task(run_etl_hook())
                                     else:
                                         # ETL já está em execução para este doc_uuid (evita execução duplicada)
-                                        msg.info(f"[ETL] ℹ️ ETL já está em execução para este doc_uuid")
+                                        msg.debug(f"[ETL] ℹ️ ETL já está em execução ou já foi concluído para este doc_uuid")
                                 else:
                                     msg.warn(f"[ETL] ⚠️ Nenhum chunk encontrado para doc_uuid {doc_uuid[:50]}... - ETL não será executado")
                             except Exception as collection_error:

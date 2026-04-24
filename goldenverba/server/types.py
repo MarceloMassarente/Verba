@@ -1,4 +1,4 @@
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Any
 from pydantic import BaseModel
 from enum import Enum
 
@@ -94,7 +94,7 @@ class FileStatus(str, Enum):
 
 class ConfigSetting(BaseModel):
     type: str
-    value: str | int
+    value: str | int | bool | float
     description: str
     values: list[str]
 
@@ -120,6 +120,7 @@ class RAGConfig(BaseModel):
     Embedder: RAGComponentClass
     Retriever: RAGComponentClass
     Generator: RAGComponentClass
+    Advanced: Optional[dict[str, Any]] = None
 
 
 class StatusReport(BaseModel):
@@ -144,7 +145,7 @@ class FileConfig(BaseModel):
     source: str
     content: str
     labels: list[str]
-    rag_config: dict[str, RAGComponentClass]
+    rag_config: dict[str, Any]
     file_size: int
     status: FileStatus
     metadata: str
@@ -156,7 +157,7 @@ class ImportStreamPayload(BaseModel):
 
 
 class VerbaConfig(BaseModel):
-    RAG: dict[str, RAGComponentClass]
+    RAG: dict[str, Any]
     SETTING: dict
 
 
@@ -198,7 +199,7 @@ class QueryPayload(BaseModel):
                 sector_analysis, speed, max_quality, balanced, offline
     """
     query: str
-    RAG: dict[str, RAGComponentClass]
+    RAG: dict[str, Any]
     labels: list[str]
     documentFilter: list[DocumentFilter]
     credentials: Credentials
@@ -277,7 +278,7 @@ class GeneratePayload(BaseModel):
     query: str
     context: str
     conversation: list[ConversationItem]
-    rag_config: dict[str, RAGComponentClass]
+    rag_config: dict[str, Any]
     # Optional fields for iterative retrieval support in websocket generation.
     # Backward compatible: existing clients can omit these fields.
     credentials: Optional[Credentials] = None
