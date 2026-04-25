@@ -3,6 +3,7 @@
 ## 📋 Índice
 - [Named Vectors (Multi-Vector)](#named-vectors-multi-vector)
 - [Agentes: busca agrupada e leitura documental](#agentes-busca-agrupada-e-leitura-documental)
+- [Busca avançada: advanced_search](#busca-avançada-advanced_search)
 - [Como Usar a API](#como-usar-a-api)
 - [Estrutura do Payload](#estrutura-do-payload)
 - [Exemplos Práticos](#exemplos-práticos)
@@ -61,13 +62,66 @@ Endpoints para fluxos em duas etapas: (1) descobrir documentos candidatos com hi
 
 | Método | Caminho | Descrição |
 |--------|---------|-----------|
-| POST | `/api/agent/search_documents` | Mesmo contrato base de `/api/query` (`query`, `RAG`, `labels`, `documentFilter`, `credentials`, `preset` opcional) + `limit_docs`, `top_hits_per_doc`. |
+| POST | `/api/agent/search_documents` | Mesmo contrato base de `/api/query` (`query`, `RAG`, `labels`, `documentFilter`, `credentials`, `preset` e `advanced_search` opcionais) + `limit_docs`, `top_hits_per_doc`. |
 | POST | `/api/agent/read_document` | `doc_uuid`, `mode` (`page`, `window`, `section`, `outline`, `full_if_small`), `page`, `page_size`, `section`, `chunk_id`, `radius`, `max_chars`. |
 | POST | `/api/agent/read_context_around` | Atalho: `doc_uuid`, `chunk_id`, `radius`. |
 
 Tipos Pydantic: `SearchDocumentsForAgentsPayload`, `ReadDocumentForAgentsPayload`, `ReadContextAroundPayload` em [`goldenverba/server/types.py`](../goldenverba/server/types.py). Guia de piloto: [`docs/guides/PILOTO_AGENTE_BUSCA_LEITURA.md`](docs/guides/PILOTO_AGENTE_BUSCA_LEITURA.md).
 
 Propriedades opcionais de metadado em chunks para conselho/comitê: `gov_document_type`, `gov_meeting_date`, `gov_committee`, `gov_agenda_item`, `gov_topic` (schema em `verba_extensions/integration/schema_updater.py`, função `get_governance_properties`).
+
+---
+
+## Busca avançada: advanced_search
+
+Integradores e agentes devem usar **somente** os endpoints HTTP do Verba para retrieval (query, leitura, agregacao). Nao use o cliente Weaviate ou GraphQL diretamente a partir de sistemas externos: o contrato suportado e o payload Pydantic do backend.
+
+### Onde aplica
+
+Campos opcionais compartilhados (ver `AdvancedSearchOptions` em `goldenverba/server/types.py`):
+
+- `POST /api/query` — `preset` opcional + `advanced_search` opcional.
+- `POST /api/external/query` — o servidor carrega o RAG; `preset` e `advanced_search` opcionais.
+- `POST /api/query/execute` — mesmo `QueryPayload` (inclui `advanced_search`).
+- `POST /api/agent/search_documents` — alem de `limit_docs` / `top_hits_per_doc`, aceita `preset` e `advanced_search`.
+
+### Campos principais (resumo)
+
+| Campo | Efeito |
+|-------|--------|
+| `target_vectors` | Lista de vetores nomeados: `default`, `concept_vec`, `company_vec`, `sector_vec`. |
+| `enable_multi_vector` | Liga/desliga busca multi-vetor no EntityAware. |
+| `two_phase_mode` | `auto`, `enabled`, `disabled` (sobre duas fases de busca com entidades). |
+| `two_phase_filter_level` | `chunk` ou `document`. |
+| `entity_filter_mode` | `strict`, `boost`, `adaptive`, `hybrid`. |
+| `alpha` | Peso hibrido 0.0 a 1.0. |
+| `enable_query_expansion`, `enable_dynamic_alpha`, `enable_relative_score_fusion` | Toggles. |
+| `reranker_top_k` | Inteiro `>= 0`. |
+| `debug` | Metadado de depuracao no fluxo de API (além de `debug_info` de retrieval). |
+
+Regra de precedencia: **preset** e aplicado primeiro; **advanced_search** sobrescreve o que for explicito depois. Validacao Pydantic rejeita valores fora dos intervalos (ex.: `alpha` fora de 0..1).
+
+### Respostas: `search_options` e `debug_info`
+
+Quando houver o que reportar, a resposta pode incluir `search_options` com `preset_applied`, `advanced_applied`, `advanced_ignored`, `warnings`. O corpo de retrieval traz `debug_info` com o modo final (vetores, two-phase, multi-vector, degradacoes, etc.). Named vectors exigem collection com schema compativel; se nao houver, o retriever pode degradar — confira `debug_info`.
+
+Exemplo mínimo com overrides:
+
+```json
+{
+  "query": "crescimento do setor",
+  "RAG": { },
+  "labels": [],
+  "documentFilter": [],
+  "credentials": { "deployment": "Custom", "url": "...", "key": "" },
+  "preset": "balanced",
+  "advanced_search": {
+    "target_vectors": ["company_vec", "sector_vec"],
+    "two_phase_mode": "auto",
+    "alpha": 0.45
+  }
+}
+```
 
 ---
 
@@ -81,9 +135,9 @@ https://verba-production-c347.up.railway.app
 ### Fluxo Básico
 
 ```
-1. GET /api/get_rag_config  → Obter configuração
-2. Fix RAG config           → Adicionar campos obrigatórios
-3. POST /api/query          → Executar busca
+1. POST /api/get_rag_config  → Obter configuração
+2. Fix RAG config            → Adicionar campos obrigatórios
+3. POST /api/query           → Executar busca
 ```
 
 ### 1. Obter RAG Config

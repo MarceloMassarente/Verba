@@ -1164,89 +1164,25 @@ async def query(payload: QueryPayload):
         client = await client_manager.connect(payload.credentials)
         documents_uuid = [document.uuid for document in payload.documentFilter] if payload.documentFilter else []
         
-        # ===================================================================
-        # PRESET HANDLING: Aplicar preset se especificado
-        # ===================================================================
-        # Se o parâmetro 'preset' foi fornecido, carrega e aplica as configurações
-        # do preset ao EntityAware Retriever antes de executar a busca.
-        # Isso permite controle stateless de qual preset usar via API.
-        # ===================================================================
-        # Convert RAGConfig to dict to ensure consistent dictionary access throughout the code
-        # Pydantic v2 uses model_dump(), v1 uses dict(). Supporting both just in case.
-        # Also handling the case where payload.RAG is already a dict (runtime behavior)
+        # Convert RAGConfig to dict; pop reserved server key if client re-sent a payload
         if isinstance(payload.RAG, dict):
             rag_config = payload.RAG
         elif hasattr(payload.RAG, "model_dump"):
             rag_config = payload.RAG.model_dump()
         else:
             rag_config = payload.RAG.dict()
-            
-        preset_applied = None
-        
-        if payload.preset:
-            msg.info(f"🎯 Preset especificado: {payload.preset}")
-            try:
-                from verba_extensions.plugins.reranker import RerankerPresets
-                presets = RerankerPresets.get_all_presets()
-                
-                preset_config = presets.get(payload.preset)
-                if not preset_config:
-                    # Tenta buscar pelo nome sem underscore
-                    preset_config = presets.get(payload.preset.replace("-", "_").lower())
-                
-                if preset_config:
-                    if "Retriever" in rag_config:
-                        # Safe retrieval of Retriever component
-                        retriever = rag_config.get("Retriever") if isinstance(rag_config, dict) else getattr(rag_config, "Retriever", None)
 
-                        if retriever:
-                            # Safe retrieval of components
-                            components = retriever.get("components", {}) if isinstance(retriever, dict) else getattr(retriever, "components", {})
-                            
-                            # Detecta nome correto do componente (com ou sem hífen)
-                            entity_aware_key = None
-                            if "EntityAware" in components:
-                                entity_aware_key = "EntityAware"
-                            elif "Entity-Aware" in components:
-                                entity_aware_key = "Entity-Aware"
-                                
-                            if entity_aware_key:
-                                # Muda retriever selecionado para EntityAware
-                                if isinstance(retriever, dict):
-                                    retriever["selected"] = entity_aware_key
-                                else:
-                                    setattr(retriever, "selected", entity_aware_key)
-                                
-                                entity_aware = components[entity_aware_key]
-                                ea_config = entity_aware.get("config", {}) if isinstance(entity_aware, dict) else getattr(entity_aware, "config", {})
-                                
-                                if ea_config:
-                                    # Aplica cada campo do preset
-                                    for key, value in preset_config.items():
-                                        if key in ["name", "display_name", "description", 
-                                                   "latency_estimate", "quality_estimate", "requirements"]:
-                                            continue
-                                            
-                                        if key in ea_config:
-                                            item = ea_config[key]
-                                            # Handle InputConfig object (Pydantic) or dict with 'value' key
-                                            if hasattr(item, "value"):
-                                                item.value = value
-                                            elif isinstance(item, dict) and "value" in item:
-                                                item["value"] = value
-                                            else:
-                                                ea_config[key] = value
-                                    
-                                    preset_applied = payload.preset
-                                    msg.good(f"✅ Preset '{payload.preset}' aplicado com sucesso")
-                            else:
-                                msg.warn(f"⚠️ EntityAware não disponível no RAG config, preset ignorado")
-                        else:
-                            msg.warn(f"⚠️ Retriever não encontrado no RAG config, preset ignorado")
-                else:
-                    msg.warn(f"⚠️ Preset '{payload.preset}' não encontrado. Presets disponíveis: {list(presets.keys())}")
-            except Exception as preset_error:
-                msg.warn(f"⚠️ Erro ao aplicar preset '{payload.preset}': {str(preset_error)}")
+        from verba_extensions.tools.api_search_rag import (
+            VERBA_API_SEARCH_RAG_KEY,
+            apply_preset_and_advanced_search_to_rag,
+        )
+
+        if isinstance(rag_config, dict):
+            rag_config.pop(VERBA_API_SEARCH_RAG_KEY, None)
+        search_meta = apply_preset_and_advanced_search_to_rag(
+            rag_config, payload.preset, payload.advanced_search
+        )
+        preset_applied = search_meta.get("preset_applied")
         
         # Verificar se há chunks disponíveis antes de processar query
         try:
@@ -1299,26 +1235,45 @@ async def query(payload: QueryPayload):
             if documents is None:
                 documents = []
             response_content = {
-                "error": "", 
-                "documents": documents, 
+                "error": "",
+                "documents": documents,
                 "context": context or "",
-                "debug_info": debug_info
+                "debug_info": debug_info,
             }
-            # Adiciona info de preset se foi aplicado
             if preset_applied:
                 response_content["preset_applied"] = preset_applied
+            if search_meta.get("advanced_applied") or search_meta.get(
+                "advanced_ignored"
+            ):
+                response_content["search_options"] = {
+                    "preset_applied": search_meta.get("preset_applied"),
+                    "advanced_applied": search_meta.get("advanced_applied", {}),
+                    "advanced_ignored": search_meta.get("advanced_ignored", []),
+                    "warnings": search_meta.get("warnings", []),
+                }
             return JSONResponse(content=response_content)
         else:
             documents, context = result
             # Garantir que documents é uma lista
-            response_content = {"error": "", "documents": documents, "context": context or ""}
+            response_content = {
+                "error": "",
+                "documents": documents,
+                "context": context or "",
+            }
             if preset_applied:
                 response_content["preset_applied"] = preset_applied
-            
-            # Temporary Debug for Presets
+            if search_meta.get("advanced_applied") or search_meta.get(
+                "advanced_ignored"
+            ):
+                response_content["search_options"] = {
+                    "preset_applied": search_meta.get("preset_applied"),
+                    "advanced_applied": search_meta.get("advanced_applied", {}),
+                    "advanced_ignored": search_meta.get("advanced_ignored", []),
+                    "warnings": search_meta.get("warnings", []),
+                }
             if "preset_debug" in locals():
                 response_content["preset_debug"] = preset_debug
-                
+
             return JSONResponse(content=response_content)
     except Exception as e:
         msg.fail(f"Query failed: {str(e)}")
@@ -1349,9 +1304,16 @@ async def agent_search_documents(payload: SearchDocumentsForAgentsPayload):
         else:
             rag_config = payload.RAG.dict()
 
-        if payload.preset:
-            from verba_extensions.tools.rag_preset import apply_reranker_preset_to_rag
-            apply_reranker_preset_to_rag(rag_config, payload.preset)
+        from verba_extensions.tools.api_search_rag import (
+            VERBA_API_SEARCH_RAG_KEY,
+            apply_preset_and_advanced_search_to_rag,
+        )
+
+        if isinstance(rag_config, dict):
+            rag_config.pop(VERBA_API_SEARCH_RAG_KEY, None)
+        search_meta = apply_preset_and_advanced_search_to_rag(
+            rag_config, payload.preset, payload.advanced_search
+        )
 
         client = await client_manager.connect(payload.credentials)
         documents_uuid = [d.uuid for d in payload.documentFilter] if payload.documentFilter else []
@@ -1368,7 +1330,15 @@ async def agent_search_documents(payload: SearchDocumentsForAgentsPayload):
         )
         if out.get("error"):
             return JSONResponse(status_code=422, content=out)
-        return JSONResponse(content={"error": "", **out})
+        resp: dict = {"error": "", **out}
+        if search_meta.get("advanced_applied") or search_meta.get("advanced_ignored"):
+            resp["search_options"] = {
+                "preset_applied": search_meta.get("preset_applied"),
+                "advanced_applied": search_meta.get("advanced_applied", {}),
+                "advanced_ignored": search_meta.get("advanced_ignored", []),
+                "warnings": search_meta.get("warnings", []),
+            }
+        return JSONResponse(content=resp)
     except Exception as e:
         msg.fail(f"agent_search_documents failed: {str(e)}")
         return JSONResponse(
@@ -1498,47 +1468,19 @@ async def external_query(payload: ExternalQueryPayload):
         
         labels = payload.labels or []
         
-        # Aplicar preset se especificado
-        preset_applied = None
-        if payload.preset:
-            msg.info(f"[EXTERNAL] Applying preset: {payload.preset}")
-            try:
-                from verba_extensions.plugins.reranker import RerankerPresets
-                presets = RerankerPresets.get_all_presets()
-                
-                preset_config = presets.get(payload.preset)
-                if not preset_config:
-                    # Tenta buscar pelo nome normalizado
-                    preset_config = presets.get(payload.preset.replace("-", "_").lower())
-                
-                if preset_config:
-                    if "Retriever" in rag_config:
-                        retriever = rag_config["Retriever"]
-                        components = retriever.get("components", {})
-                        
-                        # Encontrar EntityAwareRetriever
-                        entity_aware_key = None
-                        for key in components:
-                            if "EntityAware" in key or "entity_aware" in key.lower():
-                                entity_aware_key = key
-                                break
-                        
-                        if entity_aware_key:
-                            entity_config = components[entity_aware_key].get("config", {})
-                            
-                            # Aplicar configurações do preset
-                            preset_settings = preset_config.get("settings", {})
-                            for setting_name, setting_value in preset_settings.items():
-                                if setting_name in entity_config:
-                                    entity_config[setting_name]["value"] = setting_value
-                            
-                            preset_applied = payload.preset
-                            msg.good(f"[EXTERNAL] Preset '{payload.preset}' applied successfully")
-                else:
-                    msg.warn(f"[EXTERNAL] Preset '{payload.preset}' not found")
-                    
-            except Exception as preset_error:
-                msg.warn(f"[EXTERNAL] Failed to apply preset: {str(preset_error)}")
+        from verba_extensions.tools.api_search_rag import (
+            VERBA_API_SEARCH_RAG_KEY,
+            apply_preset_and_advanced_search_to_rag,
+        )
+
+        if isinstance(rag_config, dict):
+            rag_config.pop(VERBA_API_SEARCH_RAG_KEY, None)
+        search_meta = apply_preset_and_advanced_search_to_rag(
+            rag_config, payload.preset, payload.advanced_search
+        )
+        preset_applied = search_meta.get("preset_applied")
+        if payload.preset and not preset_applied:
+            msg.warn(f"[EXTERNAL] Preset not applied: {payload.preset}")
         
         # Executar busca com todas as capacidades avançadas
         result = await manager.retrieve_chunks(
@@ -1564,6 +1506,13 @@ async def external_query(payload: ExternalQueryPayload):
         
         if preset_applied:
             response_content["preset_applied"] = preset_applied
+        if search_meta.get("advanced_applied") or search_meta.get("advanced_ignored"):
+            response_content["search_options"] = {
+                "preset_applied": search_meta.get("preset_applied"),
+                "advanced_applied": search_meta.get("advanced_applied", {}),
+                "advanced_ignored": search_meta.get("advanced_ignored", []),
+                "warnings": search_meta.get("warnings", []),
+            }
         
         msg.good(f"[EXTERNAL] Query completed: {len(response_content.get('documents', []))} documents found")
         return JSONResponse(content=response_content)
@@ -1650,18 +1599,55 @@ async def execute_validated_query(payload: QueryPayload):
     msg.good(f"Executing validated query: {payload.query}")
     try:
         client = await client_manager.connect(payload.credentials)
-        documents_uuid = [document.uuid for document in payload.documentFilter]
-        
-        # Se query_plan fornecido, usar filtros customizados
-        # (Isso pode ser expandido no futuro)
-        
-        documents, context = await manager.retrieve_chunks(
-            client, payload.query, payload.RAG, payload.labels, documents_uuid
+        if isinstance(payload.RAG, dict):
+            rag_config = payload.RAG
+        elif hasattr(payload.RAG, "model_dump"):
+            rag_config = payload.RAG.model_dump()
+        else:
+            rag_config = payload.RAG.dict()
+        from verba_extensions.tools.api_search_rag import (
+            VERBA_API_SEARCH_RAG_KEY,
+            apply_preset_and_advanced_search_to_rag,
         )
 
-        return JSONResponse(
-            content={"error": "", "documents": documents, "context": context}
+        if isinstance(rag_config, dict):
+            rag_config.pop(VERBA_API_SEARCH_RAG_KEY, None)
+        search_meta = apply_preset_and_advanced_search_to_rag(
+            rag_config, payload.preset, payload.advanced_search
         )
+        documents_uuid = (
+            [document.uuid for document in payload.documentFilter]
+            if payload.documentFilter
+            else []
+        )
+
+        result = await manager.retrieve_chunks(
+            client, payload.query, rag_config, payload.labels, documents_uuid
+        )
+        if len(result) == 3:
+            documents, context, debug_info = result
+        else:
+            documents, context = result
+            debug_info = None
+
+        content: dict = {
+            "error": "",
+            "documents": documents or [],
+            "context": context or "",
+        }
+        if debug_info is not None:
+            content["debug_info"] = debug_info
+        pa = search_meta.get("preset_applied")
+        if pa:
+            content["preset_applied"] = pa
+        if search_meta.get("advanced_applied") or search_meta.get("advanced_ignored"):
+            content["search_options"] = {
+                "preset_applied": search_meta.get("preset_applied"),
+                "advanced_applied": search_meta.get("advanced_applied", {}),
+                "advanced_ignored": search_meta.get("advanced_ignored", []),
+                "warnings": search_meta.get("warnings", []),
+            }
+        return JSONResponse(content=content)
     except Exception as e:
         msg.warn(f"Query failed: {str(e)}")
         return JSONResponse(

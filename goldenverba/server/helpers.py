@@ -220,10 +220,16 @@ class BatchManager:
                 if advanced_config:
                     msg.info(f"[BATCH] Advanced config detected (will use global RAG config instead): {list(advanced_config.keys())}")
                 
-                # rag_config is dict[str, RAGComponentClass], so access selected attribute directly
+                # rag_config is dict[str, Any] (nested RAG is plain dicts from JSON)
                 reader_name = "unknown"
-                if "Reader" in fileConfig.rag_config and fileConfig.rag_config["Reader"]:
-                    reader_name = fileConfig.rag_config["Reader"].selected
+                reader = fileConfig.rag_config.get("Reader")
+                if reader:
+                    if isinstance(reader, dict):
+                        reader_name = reader.get("selected", reader_name)
+                    else:
+                        reader_name = getattr(
+                            reader, "selected", reader_name
+                        )
                 msg.good(f"[BATCH] ✅ Parsed FileConfig: {fileConfig.filename[:50]}... (Reader: {reader_name})")
                 return fileConfig
             except Exception as e:

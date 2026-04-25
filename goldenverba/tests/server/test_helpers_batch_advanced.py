@@ -1,9 +1,9 @@
 """
 Test for BatchManager.check_batch() with Advanced section in rag_config.
 
-This test validates that the fix for the Advanced section validation error works correctly.
-The Advanced section is not a proper RAGComponentClass structure, so it needs to be
-removed before FileConfig validation.
+The batch import path removes Advanced from the assembled JSON before building
+FileConfig, because Advanced is not part of the per-file RAGComponentClass tree.
+FileConfig still accepts a loose rag_config dict if validated directly.
 """
 
 import pytest
@@ -181,13 +181,14 @@ def test_batch_manager_without_advanced_section():
             assert "Advanced" not in result.rag_config, "Advanced section should not be present"
 
 
-def test_fileconfig_validation_fails_with_advanced():
-    """Test that FileConfig validation fails when Advanced section is present (before fix)"""
+def test_fileconfig_model_accepts_rag_config_with_advanced_key():
+    """
+    rag_config is dict[str, Any]: an 'Advanced' key does not fail Pydantic.
+    The batch import path still strips Advanced in check_batch before use.
+    """
     fileconfig_json = create_test_fileconfig_json_with_advanced()
-    
-    # Direct validation should fail (this is what we're fixing)
-    with pytest.raises(Exception):  # Should raise ValidationError
-        FileConfig.model_validate(fileconfig_json)
+    file_config = FileConfig.model_validate(fileconfig_json)
+    assert file_config.rag_config.get("Advanced") is not None
 
 
 def test_fileconfig_validation_succeeds_without_advanced():

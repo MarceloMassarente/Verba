@@ -1,6 +1,46 @@
 from typing import Literal, Optional, List, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
+
+# Valid named vectors for search (Weaviate targetVector) -- must match retriever/QueryBuilder
+TargetVectorName = Literal["default", "concept_vec", "company_vec", "sector_vec"]
+EntityFilterMode = Literal["strict", "boost", "adaptive", "hybrid"]
+TwoPhaseMode = Literal["auto", "enabled", "disabled"]
+TwoPhaseFilterLevel = Literal["chunk", "document"]
+
+
+class AdvancedSearchOptions(BaseModel):
+    """
+    Optional API controls for EntityAware search. Passed only to Verba HTTP API;
+    does not expose Weaviate connection details.
+    """
+
+    target_vectors: Optional[List[TargetVectorName]] = None
+    enable_multi_vector: Optional[bool] = None
+    two_phase_mode: Optional[TwoPhaseMode] = None
+    two_phase_filter_level: Optional[TwoPhaseFilterLevel] = None
+    entity_filter_mode: Optional[EntityFilterMode] = None
+    alpha: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    enable_query_expansion: Optional[bool] = None
+    enable_dynamic_alpha: Optional[bool] = None
+    enable_relative_score_fusion: Optional[bool] = None
+    reranker_top_k: Optional[int] = Field(default=None, ge=0)
+    debug: Optional[bool] = None
+
+    @field_validator("target_vectors")
+    @classmethod
+    def _dedupe_target_vectors(
+        cls, v: Optional[List[str]]
+    ) -> Optional[List[str]]:
+        if v is None or not v:
+            return v
+        seen: set[str] = set()
+        out: list[str] = []
+        for x in v:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
 
 
 class Credentials(BaseModel):
@@ -204,6 +244,7 @@ class QueryPayload(BaseModel):
     documentFilter: list[DocumentFilter]
     credentials: Credentials
     preset: Optional[str] = None  # Preset to apply (optional)
+    advanced_search: Optional[AdvancedSearchOptions] = None
 
 
 class DatacountPayload(BaseModel):
@@ -247,6 +288,7 @@ class ExternalQueryPayload(BaseModel):
     labels: Optional[list[str]] = None
     documentFilter: Optional[list[DocumentFilter]] = None
     credentials: Credentials
+    advanced_search: Optional[AdvancedSearchOptions] = None
 
 
 class SetUserConfigPayload(BaseModel):
@@ -353,6 +395,7 @@ class SearchDocumentsForAgentsPayload(BaseModel):
     documentFilter: list[DocumentFilter] = []
     credentials: Credentials
     preset: Optional[str] = None
+    advanced_search: Optional[AdvancedSearchOptions] = None
     limit_docs: int = 20
     top_hits_per_doc: int = 5
 

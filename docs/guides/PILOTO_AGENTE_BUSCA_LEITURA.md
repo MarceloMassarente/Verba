@@ -8,12 +8,14 @@ Validar o fluxo de negocio: centenas de documentos de conselho/comitês, com age
 - Ciclos: 2 a 3 ciclos de reunião (pauta, pre-read, ata) por comitê distinto, quando possível.
 
 ## Endpoints (HTTP)
-- `POST /api/agent/search_documents` - busca com agrupamento por `doc_uuid`, top hits por documento, opcional `preset` (mesma semântica de `/api/query`).
+- `POST /api/agent/search_documents` - busca com agrupamento por `doc_uuid`, top hits por documento, opcionais `preset` e `advanced_search` (mesma semantica de `/api/query` quanto a retrieval; ver `AdvancedSearchOptions` em `goldenverba/server/types.py` e o guia `docs/API_GUIDE.md`).
 - `POST /api/agent/read_document` - leitura controlada: `page`, `window`, `section`, `outline`, `full_if_small`.
 - `POST /api/agent/read_context_around` - atalho para janela em torno de `chunk_id`.
 
+Integracao externa: usar apenas estes endpoints Verba; nao expor o consumidor a queries diretas no Weaviate. A resposta pode incluir `search_options` e `debug_info` para confirmar preset, overrides e modo de busca final.
+
 ## Payloads
-Definidos em `goldenverba/server/types.py` (`SearchDocumentsForAgentsPayload`, `ReadDocumentForAgentsPayload`, `ReadContextAroundPayload`).
+Definidos em `goldenverba/server/types.py` (`SearchDocumentsForAgentsPayload` inclui `advanced_search` opcional, `ReadDocumentForAgentsPayload`, `ReadContextAroundPayload`).
 
 ## Perguntas difíceis (exemplos)
 1. Tema aberto, sem título: evolução de um assunto (ex.: investimento) ao longo de múltiplas reuniões.

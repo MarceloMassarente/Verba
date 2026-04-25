@@ -103,6 +103,43 @@ def get_config_value(config: dict, key: str, default=None):
     return item
 
 
+def _apply_verba_api_builder_overrides(
+    rag_config: Optional[Dict[str, Any]],
+    debug_info: Dict[str, Any],
+    builder_target_vectors,
+    builder_two_phase_mode,
+    builder_filter_level,
+):
+    """
+    HTTP API can set verba_api_search.overrides to win over QueryBuilder for
+    target_vectors and two-phase mode.
+    """
+    if not rag_config:
+        return builder_target_vectors, builder_two_phase_mode, builder_filter_level
+    from verba_extensions.tools.api_search_rag import VERBA_API_SEARCH_RAG_KEY
+
+    block = rag_config.get(VERBA_API_SEARCH_RAG_KEY)
+    if not isinstance(block, dict):
+        return builder_target_vectors, builder_two_phase_mode, builder_filter_level
+    vo = block.get("overrides")
+    if not isinstance(vo, dict):
+        vo = {}
+    if vo.get("target_vectors") is not None:
+        builder_target_vectors = vo["target_vectors"]
+        debug_info["verba_api_override_target_vectors"] = list(
+            builder_target_vectors
+        )
+    if vo.get("two_phase_mode") in ("auto", "enabled", "disabled"):
+        builder_two_phase_mode = vo["two_phase_mode"]
+        debug_info["verba_api_override_two_phase_mode"] = builder_two_phase_mode
+    if vo.get("two_phase_filter_level") in ("chunk", "document"):
+        builder_filter_level = vo["two_phase_filter_level"]
+        debug_info["verba_api_override_filter_level"] = builder_filter_level
+    if block.get("api_debug") is True:
+        debug_info["verba_api_debug"] = True
+    return builder_target_vectors, builder_two_phase_mode, builder_filter_level
+
+
 # Cache de verificação de schema ETL (evita verificar repetidamente)
 _etl_schema_cache: Dict[str, bool] = {}
 
@@ -633,8 +670,7 @@ class EntityAwareRetriever(Retriever):
         # O sistema pode passar config como objeto Pydantic ou dict dependendo
         # do ponto de chamada. Normalizamos aqui para evitar AttributeError.
         config = safe_config_to_dict(config)
-        self.config = config # Atualiza self.config também para garantir consistência
-        
+
         if rag_config:
             rag_config = safe_config_to_dict(rag_config)
             
@@ -652,7 +688,8 @@ class EntityAwareRetriever(Retriever):
         
         # Usar validated_config no resto do método
         config = validated_config
-        
+        self.config = config
+
         # CONFIG - using get_config_value for safe access (supports both InputConfig and dict)
         search_mode = get_config_value(config, "Search Mode", "Hybrid Search")
         limit_mode = get_config_value(config, "Limit Mode", "Fixed")
@@ -999,7 +1036,7 @@ class EntityAwareRetriever(Retriever):
                 msg.info(f"  Query builder: alpha ajustado para {rewritten_alpha}")
             
             # Alpha Dinâmico (sobrescreve se habilitado)
-            dyn_alpha_config_dict = safe_config_to_dict(self.config)
+            dyn_alpha_config_dict = safe_config_to_dict(config)
             dyn_alpha_config = dyn_alpha_config_dict.get("Enable Dynamic Alpha", {})
             if isinstance(dyn_alpha_config, dict):
                 enable_dynamic_alpha = dyn_alpha_config.get("value", True)
@@ -1080,7 +1117,7 @@ class EntityAwareRetriever(Retriever):
                     msg.info(f"  Query rewriting: intent={intent}")
                     
                     # Alpha Dinâmico (sobrescreve se habilitado)
-                    enable_dynamic_alpha = get_config_value(self.config, "Enable Dynamic Alpha", True)
+                    enable_dynamic_alpha = get_config_value(config, "Enable Dynamic Alpha", True)
                     if enable_dynamic_alpha:
                         try:
                             from verba_extensions.plugins.alpha_optimizer import AlphaOptimizerPlugin
@@ -1117,6 +1154,17 @@ class EntityAwareRetriever(Retriever):
                         rewritten_alpha = float(suggested_alpha)
                 except:
                     pass
+
+        # Overrides explícitos da API Verba (vencem QueryBuilder para vectors / two-phase)
+        builder_target_vectors, builder_two_phase_mode, builder_filter_level = (
+            _apply_verba_api_builder_overrides(
+                rag_config,
+                debug_info,
+                builder_target_vectors,
+                builder_two_phase_mode,
+                builder_filter_level,
+            )
+        )
         
         # 1. PARSE QUERY (usar rewritten_query se disponível)
         # Se QueryBuilder forneceu entidades, usar elas primeiro
@@ -1277,13 +1325,9 @@ class EntityAwareRetriever(Retriever):
             msg.info(f"  ℹ️ Entidades detectadas mas sem sintaxe explícita, usando apenas para boost: {entity_texts}")
         
         # Query Expansion (Fase 1: Entidades) - antes de detectar entidades
-        enable_query_expansion_config = self.config.get("Enable Query Expansion", {})
-        if hasattr(enable_query_expansion_config, "value"):
-            enable_query_expansion = enable_query_expansion_config.value
-        elif isinstance(enable_query_expansion_config, dict):
-            enable_query_expansion = enable_query_expansion_config.get("value", True)
-        else:
-            enable_query_expansion = True
+        enable_query_expansion = get_config_value(
+            config, "Enable Query Expansion", True
+        )
         expanded_queries_phase1 = [query]  # Fallback: usar query original
         
         if enable_query_expansion:
@@ -1898,7 +1942,7 @@ class EntityAwareRetriever(Retriever):
                 use_multi_vector = False
         
         # 3.6. VERIFICAR TWO-PHASE SEARCH MODE
-        config_dict = safe_config_to_dict(self.config)
+        config_dict = safe_config_to_dict(config)
         two_phase_config = config_dict.get("Two-Phase Search Mode", {})
         if isinstance(two_phase_config, dict):
             two_phase_mode = two_phase_config.get("value", "auto")
@@ -2166,7 +2210,7 @@ class EntityAwareRetriever(Retriever):
                         if query_vector:
                             
                             # Obter configuração de Relative Score Fusion
-                            enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                            enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                             fusion_type = "RELATIVE_SCORE" if enable_relative_score else "RRF"
                             
                             # Configurar query_properties para BM25 boosting
@@ -2230,7 +2274,7 @@ class EntityAwareRetriever(Retriever):
                 # Se multi-vector não foi usado, usar busca normal
                 if not use_multi_vector:
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                    enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting
@@ -2263,7 +2307,7 @@ class EntityAwareRetriever(Retriever):
                         entity_property = "section_entity_ids"
                     
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                    enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting
@@ -2346,7 +2390,7 @@ class EntityAwareRetriever(Retriever):
                                     combined_fallback_filter = Filter.all_of(fallback_filters_list)
                                 
                                 # Obter configuração de Relative Score Fusion para fallback
-                                enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                                enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                                 fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                                 query_properties = ["content", "title^2"]
                                 
@@ -2378,7 +2422,7 @@ class EntityAwareRetriever(Retriever):
                             msg.info(f"  💡 Tentando modo BOOST (sem filtro, apenas boost semântico)")
                             
                             # Obter configuração de Relative Score Fusion para fallback
-                            enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                            enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                             fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                             query_properties = ["content", "title^2"]
                             
@@ -2406,7 +2450,7 @@ class EntityAwareRetriever(Retriever):
                     msg.info(f"  Executando: Hybrid search sem filtros")
                     
                     # Obter configuração de Relative Score Fusion
-                    enable_relative_score = get_config_value(self.config, "Enable Relative Score Fusion", True)
+                    enable_relative_score = get_config_value(config, "Enable Relative Score Fusion", True)
                     fusion_type = "RELATIVE_SCORE" if enable_relative_score else None
                     
                     # Configurar query_properties para BM25 boosting
